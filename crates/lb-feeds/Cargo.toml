@@ -1,0 +1,29 @@
+[package]
+name = "lb-feeds"
+description = "LibreBooks account feeds: OFX/QFX/QBO/CSV import, SimpleFIN and friends, matching rules."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+lb-core.workspace = true
+lb-store.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+jiff.workspace = true
+uuid.workspace = true
+rust_decimal.workspace = true
+reqwest.workspace = true
+url.workspace = true
+quick-xml.workspace = true
+
+[dev-dependencies]
+pretty_assertions.workspace = true
+
+[lints]
+workspace = true

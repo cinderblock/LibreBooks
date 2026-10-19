@@ -1,0 +1,44 @@
+[package]
+name = "lb-server"
+description = "LibreBooks HTTP server: JSON API, live updates, embedded web UI."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+lb-core.workspace = true
+lb-store.workspace = true
+lb-reports.workspace = true
+lb-auth.workspace = true
+lb-qbd.workspace = true
+lb-feeds.workspace = true
+lb-backup.workspace = true
+lb-update.workspace = true
+lb-tunnel.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+jiff.workspace = true
+uuid.workspace = true
+tokio.workspace = true
+tokio-stream.workspace = true
+futures.workspace = true
+axum.workspace = true
+axum-extra.workspace = true
+tower.workspace = true
+tower-http.workspace = true
+rust-embed.workspace = true
+mime_guess.workspace = true
+url.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+pretty_assertions.workspace = true
+
+[lints]
+workspace = true

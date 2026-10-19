@@ -1,0 +1,138 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/lb-core",
+    "crates/lb-store",
+    "crates/lb-reports",
+    "crates/lb-auth",
+    "crates/lb-qbd",
+    "crates/lb-feeds",
+    "crates/lb-backup",
+    "crates/lb-update",
+    "crates/lb-tunnel",
+    "crates/lb-server",
+    "crates/librebooks",
+]
+# The Tauri app is its own workspace member once desktop/ exists; it is kept out of
+# the default build so a headless server build never compiles a webview.
+default-members = [
+    "crates/lb-core",
+    "crates/lb-store",
+    "crates/lb-reports",
+    "crates/lb-auth",
+    "crates/lb-qbd",
+    "crates/lb-feeds",
+    "crates/lb-backup",
+    "crates/lb-update",
+    "crates/lb-tunnel",
+    "crates/lb-server",
+    "crates/librebooks",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.90"
+license = "MIT"
+repository = "https://github.com/cinderblock/LibreBooks"
+homepage = "https://github.com/cinderblock/LibreBooks"
+authors = ["Cameron Tacklind <cameron@tacklind.com>"]
+
+[workspace.dependencies]
+lb-core = { path = "crates/lb-core" }
+lb-store = { path = "crates/lb-store" }
+lb-reports = { path = "crates/lb-reports" }
+lb-auth = { path = "crates/lb-auth" }
+lb-qbd = { path = "crates/lb-qbd" }
+lb-feeds = { path = "crates/lb-feeds" }
+lb-backup = { path = "crates/lb-backup" }
+lb-update = { path = "crates/lb-update" }
+lb-tunnel = { path = "crates/lb-tunnel" }
+lb-server = { path = "crates/lb-server" }
+
+anyhow = "1.0"
+thiserror = "2.0"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "json"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+# Quantities and rates. Money itself is i64 minor units (lb_core::Money).
+rust_decimal = { version = "1.43", features = ["serde-str"] }
+rust_decimal_macros = "1"
+jiff = { version = "0.2", features = ["serde"] }
+uuid = { version = "1.28", features = ["v4", "v7", "serde"] }
+rusqlite = { version = "0.40", features = ["bundled", "backup", "blob", "functions", "hooks", "serde_json"] }
+tokio = { version = "1.54", features = ["full"] }
+tokio-util = "0.7"
+tokio-stream = { version = "0.1", features = ["sync"] }
+futures = "0.3"
+axum = { version = "0.8", features = ["macros", "ws"] }
+axum-extra = { version = "0.12", features = ["cookie", "typed-header"] }
+tower = "0.5"
+tower-http = { version = "0.7", features = ["compression-full", "trace", "cors", "set-header", "limit", "timeout", "request-id"] }
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "json", "query", "form", "stream", "gzip", "charset", "http2"] }
+url = { version = "2.5", features = ["serde"] }
+clap = { version = "4.6", features = ["derive", "env"] }
+rust-embed = { version = "8.13", features = ["mime-guess"] }
+mime_guess = "2.0"
+utoipa = { version = "6.0", features = ["axum_extras", "uuid", "decimal"] }
+ts-rs = { version = "12.0", features = ["serde-compat", "uuid-impl", "jiff-impl", "serde-json-impl", "no-serde-warnings"] }
+rand = "0.10"
+base64 = "0.23"
+hex = "0.4"
+sha2 = "0.11"
+blake3 = "1.8"
+subtle = "2.6"
+ed25519-dalek = { version = "3.0", features = ["rand_core"] }
+minisign-verify = "0.3"
+webauthn_rp = "0.3"
+zstd = "0.14"
+age = "0.12"
+zip = { version = "9.0", default-features = false, features = ["deflate", "zstd"] }
+quick-xml = { version = "0.42", features = ["serialize"] }
+directories = "6.0"
+qrcode = { version = "0.14", default-features = false, features = ["svg"] }
+self-replace = "1.5"
+
+# Test-only
+tempfile = "3.27"
+pretty_assertions = "1.4"
+proptest = "1.12"
+insta = { version = "1.49", features = ["json", "yaml"] }
+
+[workspace.lints.rust]
+unsafe_code = "deny"
+missing_debug_implementations = "warn"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+module_name_repetitions = "allow"
+must_use_candidate = "allow"
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+cast_possible_truncation = "allow"
+cast_sign_loss = "allow"
+cast_precision_loss = "allow"
+cast_possible_wrap = "allow"
+too_many_lines = "allow"
+struct_excessive_bools = "allow"
+doc_markdown = "allow"
+needless_continue = "allow"
+format_push_string = "allow"
+assigning_clones = "allow"
+similar_names = "allow"
+type_complexity = "allow"
+items_after_statements = "allow"
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+strip = "symbols"
+
+[profile.dev]
+opt-level = 0
+
+[profile.dev.package."*"]
+opt-level = 2

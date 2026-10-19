@@ -1,0 +1,4 @@
+[env]
+# ts-rs writes the web UI's TypeScript types here when `cargo test` runs its
+# export tests (`bun run gen:types` in web/ does that for you).
+TS_RS_EXPORT_DIR = { value = "web/src/api/generated", relative = true }

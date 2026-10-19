@@ -1,0 +1,28 @@
+[package]
+name = "librebooks"
+description = "LibreBooks: open-source double-entry accounting, a drop-in replacement for QuickBooks Desktop."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+lb-core.workspace = true
+lb-store.workspace = true
+lb-server.workspace = true
+lb-auth.workspace = true
+lb-qbd.workspace = true
+lb-backup.workspace = true
+lb-update.workspace = true
+anyhow.workspace = true
+clap.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+directories.workspace = true
+serde_json.workspace = true
+
+[lints]
+workspace = true

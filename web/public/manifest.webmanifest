@@ -1,0 +1,10 @@
+{
+  "name": "LibreBooks",
+  "short_name": "LibreBooks",
+  "description": "Open-source double-entry accounting.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#1c7c54",
+  "icons": [{ "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }]
+}
