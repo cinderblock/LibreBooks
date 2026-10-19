@@ -1,0 +1,23 @@
+[
+  {"TxnID": "0900-1700000900", "TimeCreated": "2025-06-30T10:00:00-08:00", "TimeModified": "2026-03-31T12:00:00-08:00", "EditSequence": "1700000900",
+   "TxnNumber": "3", "TxnDate": "2025-06-30", "RefNumber": "0", "IsAdjustment": "false",
+   "JournalDebitLine": {"TxnLineID": "0901-1700000900", "AccountRef": {"ListID": "80000010-1700000000", "FullName": "Checking"}, "Amount": "500.00", "Memo": "Interest for the year"},
+   "JournalCreditLine": {"TxnLineID": "0902-1700000900", "AccountRef": {"ListID": "80000021-1700000000", "FullName": "Interest Income"}, "Amount": "500.00", "Memo": "Interest for the year"}},
+  {"TxnID": "1000-1700001000", "TimeCreated": "2025-01-01T09:00:00-08:00", "TimeModified": "2026-03-31T12:00:00-08:00", "EditSequence": "1700001000",
+   "TxnNumber": "1", "TxnDate": "2025-01-01", "RefNumber": "1", "IsAdjustment": "false",
+   "JournalDebitLine": {"TxnLineID": "1001-1700001000", "AccountRef": {"ListID": "80000010-1700000000", "FullName": "Checking"}, "Amount": "10000.00", "Memo": "Opening balance"},
+   "JournalCreditLine": {"TxnLineID": "1002-1700001000", "AccountRef": {"ListID": "80000017-1700000000", "FullName": "Opening Balance Equity"}, "Amount": "10000.00", "Memo": "Opening balance"}},
+  {"TxnID": "1010-1700002000", "TimeCreated": "2026-01-31T09:00:00-08:00", "TimeModified": "2026-03-31T12:00:00-08:00", "EditSequence": "1700002000",
+   "TxnNumber": "4", "TxnDate": "2026-01-31", "RefNumber": "2", "IsAdjustment": "true",
+   "JournalDebitLine": [
+     {"TxnLineID": "1011-1700002000", "AccountRef": {"ListID": "80000015-1700000000", "FullName": "Equipment:Computers"}, "Amount": "1200.00", "Memo": "Laptops contributed"},
+     {"TxnLineID": "1013-1700002000", "AccountRef": {"ListID": "8000001D-1700000000", "FullName": "Rent"}, "Amount": "300.00", "Memo": "January rent paid personally",
+      "ClassRef": {"ListID": "80000001-1700000080", "FullName": "Lab"}}
+   ],
+   "JournalCreditLine": {"TxnLineID": "1012-1700002000", "AccountRef": {"ListID": "80000017-1700000000", "FullName": "Opening Balance Equity"}, "Amount": "1500.00"}},
+  {"TxnID": "1020-1700002100", "TimeCreated": "2026-02-01T09:00:00-08:00", "TimeModified": "2026-03-31T12:00:00-08:00", "EditSequence": "1700002100",
+   "TxnNumber": "5", "TxnDate": "2026-02-01", "RefNumber": "3", "IsAdjustment": "false",
+   "JournalDebitLine": {"TxnLineID": "1021-1700002100", "AccountRef": {"ListID": "80000012-1700000000", "FullName": "Accounts Receivable"}, "Amount": "75.00",
+     "Memo": "Late fee", "EntityRef": {"ListID": "80000033-1700000100", "FullName": "Blue Heron Cafe"}},
+   "JournalCreditLine": {"TxnLineID": "1022-1700002100", "AccountRef": {"ListID": "80000021-1700000000", "FullName": "Interest Income"}, "Amount": "75.00", "Memo": "Late fee"}}
+]

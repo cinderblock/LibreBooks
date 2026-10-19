@@ -1,0 +1,8 @@
+[
+  {"TxnID": "7200-1700008200", "TimeCreated": "2026-03-08T09:00:00-08:00", "TimeModified": "2026-03-31T12:00:00-08:00", "EditSequence": "1700008200",
+   "TxnNumber": "62", "VendorRef": {"ListID": "80000042-1700000000", "FullName": "Office Mart"},
+   "TxnDate": "2026-03-08", "RefNumber": "PO-1", "ExpectedDate": "2026-03-20",
+   "TotalAmount": "300.00", "IsManuallyClosed": "false", "IsFullyReceived": "false", "IsToBePrinted": "false", "IsToBeEmailed": "false",
+   "PurchaseOrderLineRet": {"TxnLineID": "7201-1700008200", "ItemRef": {"ListID": "80000072-1700000200", "FullName": "Cable Kit"},
+     "Quantity": "10", "Rate": "30.00", "Amount": "300.00", "ReceivedQuantity": "0", "IsManuallyClosed": "false"}}
+]

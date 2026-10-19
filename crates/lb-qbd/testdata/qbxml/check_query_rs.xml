@@ -1,0 +1,94 @@
+<?xml version="1.0" ?>
+<QBXML>
+<QBXMLMsgsRs>
+<CheckQueryRs requestID="1" statusCode="0" statusSeverity="Info" statusMessage="Status OK" iteratorRemainingCount="0" iteratorID="{00000000-0000-0000-0000-000000000001}">
+<CheckRet>
+<TxnID>5010-1700006100</TxnID>
+<TimeCreated>2026-02-15T09:00:00-08:00</TimeCreated>
+<TimeModified>2026-03-31T12:00:00-08:00</TimeModified>
+<EditSequence>1700006100</EditSequence>
+<TxnNumber>41</TxnNumber>
+<AccountRef>
+<ListID>80000010-1700000000</ListID>
+<FullName>Checking</FullName>
+</AccountRef>
+<PayeeEntityRef>
+<ListID>80000042-1700000000</ListID>
+<FullName>Office Mart</FullName>
+</PayeeEntityRef>
+<RefNumber>1002</RefNumber>
+<TxnDate>2026-02-15</TxnDate>
+<Amount>455.00</Amount>
+<IsToBePrinted>false</IsToBePrinted>
+<ExpenseLineRet>
+<TxnLineID>5011-1700006100</TxnLineID>
+<AccountRef>
+<ListID>8000001F-1700000000</ListID>
+<FullName>Utilities:Internet</FullName>
+</AccountRef>
+<Amount>80.00</Amount>
+<Memo>Hotspot for site</Memo>
+<CustomerRef>
+<ListID>80000031-1700000100</ListID>
+<FullName>Acme Widgets:Phase 1</FullName>
+</CustomerRef>
+<BillableStatus>Billable</BillableStatus>
+</ExpenseLineRet>
+<ExpenseLineRet>
+<TxnLineID>5016-1700006100</TxnLineID>
+<AccountRef>
+<ListID>80000020-1700000000</ListID>
+<FullName>Bank Service Charges</FullName>
+</AccountRef>
+<Amount>15.00</Amount>
+</ExpenseLineRet>
+<ItemLineRet>
+<TxnLineID>5012-1700006100</TxnLineID>
+<ItemRef>
+<ListID>80000071-1700000200</ListID>
+<FullName>Install</FullName>
+</ItemRef>
+<Desc>Subcontracted install</Desc>
+<Quantity>2</Quantity>
+<Cost>60.00</Cost>
+<Amount>120.00</Amount>
+<CustomerRef>
+<ListID>80000033-1700000100</ListID>
+<FullName>Blue Heron Cafe</FullName>
+</CustomerRef>
+<BillableStatus>NotBillable</BillableStatus>
+</ItemLineRet>
+<ItemGroupLineRet>
+<TxnLineID>5013-1700006100</TxnLineID>
+<ItemGroupRef>
+<ListID>80000076-1700000200</ListID>
+<FullName>Install Bundle</FullName>
+</ItemGroupRef>
+<Desc>Install with cabling</Desc>
+<Quantity>2</Quantity>
+<TotalAmount>240.00</TotalAmount>
+<ItemLineRet>
+<TxnLineID>5014-1700006100</TxnLineID>
+<ItemRef>
+<ListID>80000071-1700000200</ListID>
+<FullName>Install</FullName>
+</ItemRef>
+<Quantity>2</Quantity>
+<Cost>60.00</Cost>
+<Amount>120.00</Amount>
+</ItemLineRet>
+<ItemLineRet>
+<TxnLineID>5015-1700006100</TxnLineID>
+<ItemRef>
+<ListID>80000072-1700000200</ListID>
+<FullName>Cable Kit</FullName>
+</ItemRef>
+<Quantity>4</Quantity>
+<Cost>30.00</Cost>
+<Amount>120.00</Amount>
+</ItemLineRet>
+</ItemGroupLineRet>
+</CheckRet>
+</CheckQueryRs>
+</QBXMLMsgsRs>
+</QBXML>

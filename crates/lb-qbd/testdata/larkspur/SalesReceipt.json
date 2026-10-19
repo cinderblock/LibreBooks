@@ -1,0 +1,10 @@
+[
+  {"TxnID": "7000-1700008000", "TimeCreated": "2026-03-06T09:00:00-08:00", "TimeModified": "2026-03-31T12:00:00-08:00", "EditSequence": "1700008000",
+   "TxnNumber": "60", "CustomerRef": {"ListID": "80000033-1700000100", "FullName": "Blue Heron Cafe"},
+   "TxnDate": "2026-03-06", "RefNumber": "SR-1", "IsPending": "false", "CheckNumber": "77",
+   "PaymentMethodRef": {"ListID": "80000009-1700000000", "FullName": "ACH"},
+   "Subtotal": "25.00", "SalesTaxPercentage": "0.00", "SalesTaxTotal": "0.00", "TotalAmount": "25.00",
+   "DepositToAccountRef": {"ListID": "80000010-1700000000", "FullName": "Checking"},
+   "SalesReceiptLineRet": {"TxnLineID": "7001-1700008000", "ItemRef": {"ListID": "80000072-1700000200", "FullName": "Cable Kit"},
+     "Quantity": "1", "Rate": "25.00", "Amount": "25.00", "SalesTaxCodeRef": {"ListID": "80000001-1700000050", "FullName": "Non"}}}
+]

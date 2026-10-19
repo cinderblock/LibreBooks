@@ -1,0 +1,34 @@
+{
+  "AccountingPreferences": {
+    "IsUsingAccountNumbers": "false",
+    "IsRequiringAccounts": "true",
+    "IsUsingClassTracking": "true",
+    "IsUsingAuditTrail": "true",
+    "IsAssigningJournalEntryNumbers": "true"
+  },
+  "JobsAndEstimatesPreferences": {
+    "IsUsingEstimates": "true",
+    "IsUsingProgressInvoicing": "false",
+    "IsPrintingItemsWithZeroAmounts": "false"
+  },
+  "MultiCurrencyPreferences": { "IsMultiCurrencyOn": "false" },
+  "PurchasesAndVendorsPreferences": {
+    "IsUsingInventory": "false",
+    "DaysBillsAreDue": "10",
+    "IsAutomaticallyUsingDiscounts": "false"
+  },
+  "ReportsPreferences": {
+    "AgingReportBasis": "AgeFromTransactionDate",
+    "SummaryReportBasis": "Cash"
+  },
+  "SalesAndCustomersPreferences": {
+    "IsTrackingReimbursedExpensesAsIncome": "false",
+    "IsAutoApplyingPayments": "true"
+  },
+  "SalesTaxPreferences": {
+    "DefaultItemSalesTaxRef": { "ListID": "80000090-1700000300", "FullName": "CA Sales Tax" },
+    "PaySalesTax": "Monthly",
+    "DefaultTaxableSalesTaxCodeRef": { "ListID": "80000002-1700000050", "FullName": "Tax" },
+    "DefaultNonTaxableSalesTaxCodeRef": { "ListID": "80000001-1700000050", "FullName": "Non" }
+  }
+}

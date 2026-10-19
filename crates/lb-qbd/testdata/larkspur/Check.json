@@ -1,0 +1,39 @@
+[
+  {"TxnID": "5000-1700006000", "TimeCreated": "2026-02-01T09:00:00-08:00", "TimeModified": "2026-03-31T12:00:00-08:00", "EditSequence": "1700006000",
+   "TxnNumber": "40", "AccountRef": {"ListID": "80000010-1700000000", "FullName": "Checking"},
+   "PayeeEntityRef": {"ListID": "80000041-1700000000", "FullName": "Landlord LLC"},
+   "RefNumber": "1001", "TxnDate": "2026-02-01", "Amount": "2000.00", "Memo": "February rent",
+   "Address": {"Addr1": "Landlord, LLC", "Addr2": "9 Example Rd", "City": "Springfield", "State": "CA", "PostalCode": "90004"},
+   "AddressBlock": {"Addr1": "Landlord, LLC", "Addr2": "9 Example Rd", "Addr3": "Springfield, CA 90004"},
+   "IsToBePrinted": "false",
+   "ExpenseLineRet": {"TxnLineID": "5001-1700006000", "AccountRef": {"ListID": "8000001D-1700000000", "FullName": "Rent"}, "Amount": "2000.00",
+     "Memo": "February rent", "ClassRef": {"ListID": "80000001-1700000080", "FullName": "Lab"}}},
+  {"TxnID": "5010-1700006100", "TimeCreated": "2026-02-15T09:00:00-08:00", "TimeModified": "2026-03-31T12:00:00-08:00", "EditSequence": "1700006100",
+   "TxnNumber": "41", "AccountRef": {"ListID": "80000010-1700000000", "FullName": "Checking"},
+   "PayeeEntityRef": {"ListID": "80000042-1700000000", "FullName": "Office Mart"},
+   "RefNumber": "1002", "TxnDate": "2026-02-15", "Amount": "455.00", "IsToBePrinted": "false",
+   "ExpenseLineRet": [
+     {"TxnLineID": "5011-1700006100", "AccountRef": {"ListID": "8000001F-1700000000", "FullName": "Utilities:Internet"}, "Amount": "80.00",
+      "Memo": "Hotspot for site", "CustomerRef": {"ListID": "80000031-1700000100", "FullName": "Acme Widgets:Phase 1"}, "BillableStatus": "Billable"},
+     {"TxnLineID": "5016-1700006100", "AccountRef": {"ListID": "80000020-1700000000", "FullName": "Bank Service Charges"}, "Amount": "15.00"}
+   ],
+   "ItemLineRet": {"TxnLineID": "5012-1700006100", "ItemRef": {"ListID": "80000071-1700000200", "FullName": "Install"}, "Desc": "Subcontracted install",
+     "Quantity": "2", "Cost": "60.00", "Amount": "120.00", "CustomerRef": {"ListID": "80000033-1700000100", "FullName": "Blue Heron Cafe"},
+     "BillableStatus": "NotBillable"},
+   "ItemGroupLineRet": {"TxnLineID": "5013-1700006100", "ItemGroupRef": {"ListID": "80000076-1700000200", "FullName": "Install Bundle"},
+     "Desc": "Install with cabling", "Quantity": "2", "TotalAmount": "240.00",
+     "ItemLineRet": [
+       {"TxnLineID": "5014-1700006100", "ItemRef": {"ListID": "80000071-1700000200", "FullName": "Install"}, "Quantity": "2", "Cost": "60.00", "Amount": "120.00"},
+       {"TxnLineID": "5015-1700006100", "ItemRef": {"ListID": "80000072-1700000200", "FullName": "Cable Kit"}, "Quantity": "4", "Cost": "30.00", "Amount": "120.00"}
+     ]}},
+  {"TxnID": "5020-1700006200", "TimeCreated": "2026-03-03T09:00:00-08:00", "TimeModified": "2026-03-31T12:00:00-08:00", "EditSequence": "1700006200",
+   "TxnNumber": "42", "AccountRef": {"ListID": "80000010-1700000000", "FullName": "Checking"},
+   "PayeeEntityRef": {"ListID": "80000040-1700000000", "FullName": "Pacific Power"},
+   "RefNumber": "1003", "TxnDate": "2026-03-03", "Amount": "0.00", "Memo": "VOID: wrong amount", "IsToBePrinted": "false",
+   "ExpenseLineRet": {"TxnLineID": "5021-1700006200", "AccountRef": {"ListID": "8000001E-1700000000", "FullName": "Utilities"}, "Amount": "0.00"}},
+  {"TxnID": "5030-1700006300", "TimeCreated": "2026-03-15T09:00:00-08:00", "TimeModified": "2026-03-31T12:00:00-08:00", "EditSequence": "1700006300",
+   "TxnNumber": "43", "AccountRef": {"ListID": "80000010-1700000000", "FullName": "Checking"},
+   "PayeeEntityRef": {"ListID": "80000050-1700000000", "FullName": "Dana Smith"},
+   "RefNumber": "1005", "TxnDate": "2026-03-15", "Amount": "50.00", "IsToBePrinted": "false",
+   "ExpenseLineRet": {"TxnLineID": "5031-1700006300", "AccountRef": {"ListID": "80000024-1700000000", "FullName": "Payroll Expenses"}, "Amount": "50.00", "Memo": "Stipend"}}
+]

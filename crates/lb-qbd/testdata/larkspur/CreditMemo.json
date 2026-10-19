@@ -1,0 +1,10 @@
+[
+  {"TxnID": "2100-1700003100", "TimeCreated": "2026-02-12T09:00:00-08:00", "TimeModified": "2026-03-31T12:00:00-08:00", "EditSequence": "1700003100",
+   "TxnNumber": "11", "CustomerRef": {"ListID": "80000031-1700000100", "FullName": "Acme Widgets:Phase 1"},
+   "ARAccountRef": {"ListID": "80000012-1700000000", "FullName": "Accounts Receivable"},
+   "TxnDate": "2026-02-12", "RefNumber": "CM-1", "IsPending": "false", "DueDate": "2026-02-12",
+   "Subtotal": "130.00", "SalesTaxPercentage": "0.00", "SalesTaxTotal": "0.00", "TotalAmount": "130.00", "CreditRemaining": "0.00",
+   "Memo": "Goodwill credit", "IsToBePrinted": "false", "IsToBeEmailed": "false",
+   "CreditMemoLineRet": {"TxnLineID": "2101-1700003100", "ItemRef": {"ListID": "80000070-1700000200", "FullName": "Engineering"},
+     "Desc": "Credit for delays", "Rate": "130.00", "Amount": "130.00", "SalesTaxCodeRef": {"ListID": "80000001-1700000050", "FullName": "Non"}}}
+]

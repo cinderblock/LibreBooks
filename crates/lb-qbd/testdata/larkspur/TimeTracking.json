@@ -1,0 +1,9 @@
+[
+  {"TxnID": "7300-1700008300", "TimeCreated": "2026-03-09T17:00:00-08:00", "TimeModified": "2026-03-31T12:00:00-08:00", "EditSequence": "1700008300",
+   "TxnNumber": "0", "TxnDate": "2026-03-09",
+   "EntityRef": {"ListID": "80000050-1700000000", "FullName": "Dana Smith"},
+   "CustomerRef": {"ListID": "80000031-1700000100", "FullName": "Acme Widgets:Phase 1"},
+   "ItemServiceRef": {"ListID": "80000070-1700000200", "FullName": "Engineering"},
+   "Duration": "PT2H30M", "PayrollItemWageRef": {"ListID": "80000001-1700000700", "FullName": "Hourly"},
+   "Notes": "Wiring review", "BillableStatus": "Billable"}
+]

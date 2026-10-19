@@ -1,0 +1,22 @@
+[
+  {"TxnID": "4000-1700005000", "TimeCreated": "2026-02-21T09:00:00-08:00", "TimeModified": "2026-03-31T12:00:00-08:00", "EditSequence": "1700005000",
+   "TxnNumber": "30", "TxnDate": "2026-02-21", "DepositToAccountRef": {"ListID": "80000010-1700000000", "FullName": "Checking"},
+   "Memo": "Deposit", "DepositTotal": "1450.00",
+   "CashBackInfoRet": {"TxnLineID": "4003-1700005000", "AccountRef": {"ListID": "80000020-1700000000", "FullName": "Bank Service Charges"}, "Memo": "cash back", "Amount": "25.00"},
+   "DepositLineRet": [
+     {"TxnType": "ReceivePayment", "TxnID": "3000-1700004000", "TxnLineID": "4001-1700005000", "PaymentTxnLineID": "3000-1700004000",
+      "EntityRef": {"ListID": "80000031-1700000100", "FullName": "Acme Widgets:Phase 1"},
+      "AccountRef": {"ListID": "80000013-1700000000", "FullName": "Undeposited Funds"}, "Memo": "Inv 1001", "CheckNumber": "5512",
+      "PaymentMethodRef": {"ListID": "80000003-1700000000", "FullName": "Check"}, "Amount": "1400.00"},
+     {"TxnLineID": "4002-1700005000", "EntityRef": {"ListID": "80000060-1700000000", "FullName": "Owner"},
+      "AccountRef": {"ListID": "80000021-1700000000", "FullName": "Interest Income"}, "Memo": "Interest", "Amount": "75.00",
+      "ClassRef": {"ListID": "80000001-1700000080", "FullName": "Lab"}}
+   ]},
+  {"TxnID": "4010-1700005100", "TimeCreated": "2026-03-02T09:00:00-08:00", "TimeModified": "2026-03-31T12:00:00-08:00", "EditSequence": "1700005100",
+   "TxnNumber": "31", "TxnDate": "2026-03-02", "DepositToAccountRef": {"ListID": "80000010-1700000000", "FullName": "Checking"},
+   "DepositTotal": "295.00",
+   "DepositLineRet": {"TxnType": "ReceivePayment", "TxnID": "3010-1700004100", "TxnLineID": "4011-1700005100",
+     "EntityRef": {"ListID": "80000033-1700000100", "FullName": "Blue Heron Cafe"},
+     "AccountRef": {"ListID": "80000013-1700000000", "FullName": "Undeposited Funds"}, "Amount": "295.00",
+     "PaymentMethodRef": {"ListID": "80000009-1700000000", "FullName": "ACH"}}}
+]

@@ -1,0 +1,7 @@
+[
+  {"ListID": "80000050-1700000000", "TimeCreated": "2023-11-14T22:13:20-08:00", "TimeModified": "2026-03-31T12:00:00-08:00", "EditSequence": "1700000000",
+   "Name": "Dana Smith", "IsActive": "true", "FirstName": "Dana", "LastName": "Smith", "PrintAs": "Dana Smith",
+   "EmployeeAddress": {"Addr1": "1 Example Ct", "City": "Springfield", "State": "CA", "PostalCode": "90002"},
+   "Phone": "555-0111", "Email": "dana@larkspur.example", "EmployeeType": "Regular", "PartOrFullTime": "FullTime",
+   "Gender": "Female", "BirthDate": "1990-01-01", "USCitizen": "true", "HiredDate": "2024-02-01", "SSN": "000-00-0000"}
+]
