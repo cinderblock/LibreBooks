@@ -924,6 +924,7 @@ dependencies = [
  "elliptic-curve",
  "rfc6979",
  "signature 2.2.0",
+ "spki",
 ]
 
 [[package]]
@@ -984,6 +985,7 @@ dependencies = [
  "generic-array",
  "group",
  "hkdf",
+ "pkcs8",
  "rand_core 0.6.4",
  "sec1",
  "subtle",
@@ -1952,7 +1954,8 @@ dependencies = [
  "base64 0.23.1",
  "ed25519-dalek 3.0.0",
  "jiff",
- "lb-store",
+ "lb-core",
+ "p256",
  "rand 0.10.3",
  "rusqlite",
  "serde",
@@ -1962,6 +1965,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.21",
  "tracing",
+ "ts-rs",
  "url",
  "uuid",
  "webauthn_rp",
@@ -3310,6 +3314,7 @@ dependencies = [
  "base16ct",
  "der",
  "generic-array",
+ "pkcs8",
  "subtle",
  "zeroize",
 ]
@@ -4377,6 +4382,7 @@ dependencies = [
  "rand 0.9.5",
  "rsa",
  "serde",
+ "serde_json",
  "url",
 ]
 
