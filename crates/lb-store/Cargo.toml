@@ -19,6 +19,7 @@ jiff.workspace = true
 uuid.workspace = true
 rust_decimal.workspace = true
 ts-rs.workspace = true
+sha2.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

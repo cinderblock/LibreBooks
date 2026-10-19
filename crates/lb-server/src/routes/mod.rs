@@ -5,6 +5,7 @@ use axum::routing::{get, post, put};
 
 use crate::state::AppState;
 
+mod banking;
 mod company;
 mod events;
 mod lists;
@@ -45,7 +46,38 @@ pub fn api() -> Router<AppState> {
         .route("/balances", get(txns::balances))
         .route("/open", get(txns::open_items))
         .route("/undeposited", get(txns::undeposited))
-        .route("/audit", get(company::audit));
+        .route("/audit", get(company::audit))
+        .route(
+            "/accounts/{id}/reconcile",
+            get(banking::reconcile_overview).post(banking::reconcile_start),
+        )
+        .route(
+            "/accounts/{id}/reconcile/undo",
+            post(banking::reconcile_undo),
+        )
+        .route(
+            "/accounts/{id}/opening-balance",
+            post(banking::opening_balance),
+        )
+        .route(
+            "/reconciliations/{id}",
+            get(banking::reconciliation).delete(banking::reconcile_discard),
+        )
+        .route("/reconciliations/{id}/mark", post(banking::reconcile_mark))
+        .route(
+            "/reconciliations/{id}/finish",
+            post(banking::reconcile_finish),
+        )
+        .route(
+            "/attachments",
+            get(banking::list_attachments).post(banking::upload),
+        )
+        .route(
+            "/attachments/{id}",
+            get(banking::get_attachment)
+                .put(banking::attach)
+                .delete(banking::delete_attachment),
+        );
     Router::new()
         .route("/health", get(system::health))
         .route("/session", get(system::session))

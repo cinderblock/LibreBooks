@@ -245,3 +245,38 @@ pub fn delete(w: &mut Writer<'_>, id: AccountId, edit_seq: i64) -> Result<()> {
     w.changed("account", sid, "delete");
     Ok(())
 }
+
+/// Give a new balance-sheet account its opening balance as of `date`, the way
+/// QBD's "Opening Balance" field does: a journal entry against Opening Balance
+/// Equity. `natural` is in the account's own sense (a loan's balance owed is
+/// positive). A/R and A/P get their opening balances from invoices and bills.
+pub fn set_opening_balance(
+    w: &mut Writer<'_>,
+    id: AccountId,
+    natural: lb_core::Money,
+    date: jiff::civil::Date,
+) -> Result<lb_core::TxnId> {
+    let a = get(&w.tx, id)?;
+    if !a.account_type.is_balance_sheet() {
+        return Err(StoreError::Invalid(
+            "only balance sheet accounts have opening balances".into(),
+        ));
+    }
+    if a.account_type.requires_name() {
+        return Err(StoreError::Invalid(
+            "enter invoices or bills for what's owed instead of an opening balance".into(),
+        ));
+    }
+    let obe = ensure_role(w, AccountRole::OpeningBalanceEquity)?;
+    if obe == id {
+        return Err(StoreError::Invalid(
+            "Opening Balance Equity can't open against itself".into(),
+        ));
+    }
+    let debit = a.account_type.natural(natural);
+    let mut je = lb_core::Txn::new(lb_core::TxnType::JournalEntry, date);
+    je.memo = Some("Opening Balance".into());
+    je.lines.push(lb_core::TxnLine::journal(id, debit));
+    je.lines.push(lb_core::TxnLine::journal(obe, -debit));
+    Ok(crate::txns::save(w, je)?.txn.id)
+}

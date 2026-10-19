@@ -16,6 +16,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use rusqlite::{Connection, OpenFlags, Transaction};
 
 pub mod accounts;
+pub mod attachments;
 pub mod audit;
 pub mod balances;
 pub mod codec;
@@ -26,6 +27,7 @@ pub mod extref;
 pub mod hier;
 pub mod items;
 pub mod lists;
+pub mod reconcile;
 pub mod schema;
 pub mod txns;
 

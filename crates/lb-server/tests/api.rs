@@ -288,3 +288,100 @@ async fn spa_routes_fall_back_and_api_misses_do_not() {
     let res = api.app.clone().oneshot(req).await.unwrap();
     assert_eq!(res.status(), StatusCode::NOT_FOUND);
 }
+
+#[tokio::test]
+async fn upload_a_receipt_and_fetch_it_back() {
+    let api = Api::new(AuthMode::Open);
+    let c = company(&api).await;
+    let boundary = "XLBOUNDARYX";
+    let body = format!(
+        "--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"receipt.png\"\r\nContent-Type: image/png\r\n\r\nPNGDATA\r\n--{boundary}--\r\n"
+    );
+    let req = Request::builder()
+        .method("POST")
+        .uri(format!("/api/v1/c/{c}/attachments"))
+        .header("x-librebooks", "1")
+        .header(
+            "content-type",
+            format!("multipart/form-data; boundary={boundary}"),
+        )
+        .body(Body::from(body))
+        .unwrap();
+    let res = api.app.clone().oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::CREATED);
+    let meta: Value =
+        serde_json::from_slice(&res.into_body().collect().await.unwrap().to_bytes()).unwrap();
+    assert_eq!(meta["filename"], "receipt.png");
+    let (s, inbox) = api
+        .call("GET", &format!("/api/v1/c/{c}/attachments"), None)
+        .await;
+    assert_eq!(s, StatusCode::OK);
+    assert_eq!(inbox.as_array().unwrap().len(), 1);
+    let req = Request::builder()
+        .uri(format!(
+            "/api/v1/c/{c}/attachments/{}",
+            meta["id"].as_str().unwrap()
+        ))
+        .body(Body::empty())
+        .unwrap();
+    let res = api.app.clone().oneshot(req).await.unwrap();
+    assert_eq!(res.headers()["content-type"], "image/png");
+    assert_eq!(
+        &res.into_body().collect().await.unwrap().to_bytes()[..],
+        b"PNGDATA"
+    );
+}
+
+#[tokio::test]
+async fn reconcile_over_the_api() {
+    let api = Api::new(AuthMode::Open);
+    let c = company(&api).await;
+    let base = format!("/api/v1/c/{c}");
+    let (_, bank) = api
+        .call(
+            "POST",
+            &format!("{base}/accounts"),
+            Some(account("Checking", "Bank")),
+        )
+        .await;
+    let bank_id = bank["id"].as_str().unwrap();
+    let (s, _) = api
+        .call(
+            "POST",
+            &format!("{base}/accounts/{bank_id}/opening-balance"),
+            Some(json!({ "amount": 5000, "date": "2026-09-01" })),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK);
+    let (s, rec) = api
+        .call(
+            "POST",
+            &format!("{base}/accounts/{bank_id}/reconcile"),
+            Some(json!({ "statement_date": "2026-09-30", "ending_balance": 5000 })),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{rec}");
+    let rid = rec["id"].as_str().unwrap();
+    let (_, view) = api
+        .call("GET", &format!("{base}/reconciliations/{rid}"), None)
+        .await;
+    let txn = view["lines"][0]["txn_id"].clone();
+    let (s, status) = api
+        .call(
+            "POST",
+            &format!("{base}/reconciliations/{rid}/mark"),
+            Some(json!({ "txn_ids": [txn], "marked": true })),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK);
+    assert_eq!(status["difference"], 0);
+    let (s, done) = api
+        .call(
+            "POST",
+            &format!("{base}/reconciliations/{rid}/finish"),
+            Some(json!({})),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{done}");
+    assert!(done["finished_at"].is_string());
+}
