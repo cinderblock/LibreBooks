@@ -208,12 +208,19 @@ impl FeedProvider for SimpleFin {
 
     fn fetch(&self, since: Option<Date>) -> BoxFuture<'_, Result<Vec<Statement>>> {
         Box::pin(async move {
-            let d = self.accounts(since).await?;
+            let mut d = self.accounts(since).await?;
             if d.statements.is_empty() && !d.errors.is_empty() {
                 return Err(FeedError::Provider {
                     provider: NAME,
                     message: d.errors.join("; "),
                 });
+            }
+            // The bridge's messages ("reauthenticate with Example Bank") travel
+            // with every statement, so whichever account a connection reads, the
+            // person sees them.
+            for s in &mut d.statements {
+                s.warnings
+                    .extend(d.errors.iter().map(|e| format!("SimpleFIN: {e}")));
             }
             Ok(d.statements)
         })
