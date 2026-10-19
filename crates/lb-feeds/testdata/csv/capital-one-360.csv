@@ -1,0 +1,4 @@
+Account Number,Transaction Description,Transaction Date,Transaction Type,Transaction Amount,Balance
+0000,Interest Paid,10/01/26,Credit,1.37,2001.37
+0000,Withdrawal to CHECKING XXXXXXX0000,10/05/26,Debit,500.00,1501.37
+0000,Deposit from ACME PAYROLL,10/15/26,Credit,"1,000.00",2501.37

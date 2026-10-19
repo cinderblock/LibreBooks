@@ -1,0 +1,5 @@
+﻿Transaction Date,Clearing Date,Description,Merchant,Category,Type,Amount (USD),Purchased By
+10/12/2026,10/13/2026,"APPLE.COM/BILL ONE APPLE PARK WAY 866-712-7753 CUPERTINO 95014 CA USA",Apple Services,Other,Purchase,9.99,Test User
+10/10/2026,10/10/2026,"ACH DEPOSIT INTERNET TRANSFER FROM ACCOUNT ENDING IN 0000",Ach Deposit Internet Transfer From Account Ending In 0000,Payment,Payment,-200.00,Test User
+10/08/2026,10/09/2026,"BLUE BOTTLE COFFEE 300 WEBSTER ST OAKLAND 94607 CA USA",Blue Bottle Coffee,Restaurants,Purchase,6.25,Test User
+10/07/2026,10/08/2026,"DAILY CASH ADJUSTMENT",Daily Cash Adjustment,Other,Debit,0.12,Test User

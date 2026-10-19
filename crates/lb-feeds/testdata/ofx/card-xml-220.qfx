@@ -1,0 +1,81 @@
+﻿<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<?OFX OFXHEADER="200" VERSION="220" SECURITY="NONE" OLDFILEUID="NONE" NEWFILEUID="NONE"?>
+<OFX>
+  <SIGNONMSGSRSV1>
+    <SONRS>
+      <STATUS>
+        <CODE>0</CODE>
+        <SEVERITY>INFO</SEVERITY>
+      </STATUS>
+      <DTSERVER>20261016101500.000[-4:EDT]</DTSERVER>
+      <LANGUAGE>ENG</LANGUAGE>
+      <FI>
+        <ORG>Example Card Services</ORG>
+        <FID>77701</FID>
+      </FI>
+      <INTU.BID>77701</INTU.BID>
+    </SONRS>
+  </SIGNONMSGSRSV1>
+  <CREDITCARDMSGSRSV1>
+    <CCSTMTTRNRS>
+      <TRNUID>1</TRNUID>
+      <STATUS>
+        <CODE>0</CODE>
+        <SEVERITY>INFO</SEVERITY>
+      </STATUS>
+      <CCSTMTRS>
+        <CURDEF>USD</CURDEF>
+        <CCACCTFROM>
+          <ACCTID>4000001234567890</ACCTID>
+        </CCACCTFROM>
+        <BANKTRANLIST>
+          <DTSTART>20260916</DTSTART>
+          <DTEND>20261015</DTEND>
+          <STMTTRN>
+            <TRNTYPE>DEBIT</TRNTYPE>
+            <DTPOSTED>20260920</DTPOSTED>
+            <DTUSER>20260918</DTUSER>
+            <TRNAMT>-42.17</TRNAMT>
+            <FITID>2026092024692163000000017</FITID>
+            <NAME>AMZN Mktp US*2K4AB1CD2</NAME>
+            <MEMO>Amzn.com/bill WA</MEMO>
+          </STMTTRN>
+          <STMTTRN>
+            <TRNTYPE>DEBIT</TRNTYPE>
+            <DTPOSTED>20260925</DTPOSTED>
+            <TRNAMT>-1,250.00</TRNAMT>
+            <FITID>2026092524692163000000018</FITID>
+            <NAME>DELTA AIR LINES</NAME>
+            <MEMO></MEMO>
+          </STMTTRN>
+          <STMTTRN>
+            <TRNTYPE>CREDIT</TRNTYPE>
+            <DTPOSTED>20261001</DTPOSTED>
+            <TRNAMT>500.00</TRNAMT>
+            <FITID>2026100124692163000000019</FITID>
+            <NAME>PAYMENT THANK YOU</NAME>
+          </STMTTRN>
+          <STMTTRN>
+            <TRNTYPE>CREDIT</TRNTYPE>
+            <DTPOSTED>20261004</DTPOSTED>
+            <TRNAMT>19.99</TRNAMT>
+            <FITID>2026100424692163000000020</FITID>
+            <PAYEE>
+              <NAME>Café Résumé Books</NAME>
+              <ADDR1>1 Main St</ADDR1>
+              <CITY>Springfield</CITY>
+              <STATE>OR</STATE>
+              <POSTALCODE>97477</POSTALCODE>
+              <PHONE>555-0100</PHONE>
+            </PAYEE>
+            <MEMO>RETURN</MEMO>
+          </STMTTRN>
+        </BANKTRANLIST>
+        <LEDGERBAL>
+          <BALAMT>-772.18</BALAMT>
+          <DTASOF>20261015120000.000[-4:EDT]</DTASOF>
+        </LEDGERBAL>
+      </CCSTMTRS>
+    </CCSTMTTRNRS>
+  </CREDITCARDMSGSRSV1>
+</OFX>
