@@ -33,8 +33,11 @@ pub fn get(
     .optional()?)
 }
 
-/// Look up by external id regardless of the source's record kind (QBD list ids are
-/// unique across a company's lists, so a `ListID` alone finds its record).
+/// Look up by external id regardless of the source's record kind. Only safe where
+/// the source's ids are unique across kinds (QBD `TxnID`s are). QBD `ListID`s are
+/// **not** unique across lists: in a real company file, Terms and Payment Methods
+/// share ids of the form `80000003-<same timestamp>`. Look those up with [`get`]
+/// and a kind.
 pub fn get_any_kind(
     c: &Connection,
     source: &str,
