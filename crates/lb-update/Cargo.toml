@@ -7,6 +7,7 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 authors.workspace = true
+build = "build.rs"
 
 [dependencies]
 serde.workspace = true
@@ -19,9 +20,14 @@ hex.workspace = true
 reqwest.workspace = true
 tokio.workspace = true
 self-replace.workspace = true
+jiff.workspace = true
+zip.workspace = true
+tempfile.workspace = true
+flate2 = "1.1.10"
+tar = "0.4.46"
 
 [dev-dependencies]
-tempfile.workspace = true
+axum.workspace = true
 
 [lints]
 workspace = true
