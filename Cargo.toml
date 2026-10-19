@@ -124,6 +124,9 @@ assigning_clones = "allow"
 similar_names = "allow"
 type_complexity = "allow"
 items_after_statements = "allow"
+many_single_char_names = "allow"
+unused_async = "allow"
+unused_async_trait_impl = "allow"
 
 [profile.release]
 opt-level = 3

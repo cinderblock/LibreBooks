@@ -922,6 +922,30 @@ pub fn accounts_of_types(c: &Connection, types: &[AccountType]) -> Result<Vec<Ac
     rows.map(|s| codec::parse_id(&s?)).collect()
 }
 
+/// Payments and sales receipts sitting in Undeposited Funds, not yet in a deposit
+/// (what Make Deposits offers).
+pub fn undeposited(c: &Connection) -> Result<Vec<TxnSummary>> {
+    let Some(uf) = accounts::by_role(c, AccountRole::UndepositedFunds)? else {
+        return Ok(Vec::new());
+    };
+    let mut stmt = c.prepare(
+        "SELECT t.id, t.txn_type, t.date, t.number, t.entity_id, e.full_name, t.account_id, a.full_name,
+                p.amount, t.open_balance, t.due_date, t.memo, t.is_void, t.is_pending, t.edit_seq
+         FROM posting p JOIN txn t ON t.id = p.txn_id
+              LEFT JOIN entity e ON e.id = t.entity_id
+              LEFT JOIN account a ON a.id = p.account_id
+         WHERE p.account_id = ?1 AND p.amount > 0 AND t.txn_type <> 'Deposit' AND t.is_void = 0
+           AND NOT EXISTS (SELECT 1 FROM deposit_link d WHERE d.payment_txn_id = t.id)
+         ORDER BY t.date, t.rowid",
+    )?;
+    let rows = stmt.query_map([uf.id.to_string()], summary_row)?;
+    let mut out = Vec::new();
+    for r in rows {
+        out.push(r??);
+    }
+    Ok(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::increment;
