@@ -36,7 +36,7 @@ pub const COMMENT_PREFIX: &str = "librebooks ";
 /// │ "Release signing key" in plans/self-update.md, then paste minisign.pub's  │
 /// │ contents here as `Some("untrusted comment: …\nRW…")`.                       │
 /// └──────────────────────────────────────────────────────────────────────────┘
-pub const PRODUCTION_PUBLIC_KEY: Option<&str> = None;
+pub const PRODUCTION_PUBLIC_KEY: Option<&str> = Some(include_str!("../../../minisign.pub"));
 
 /// The key this build trusts: `LB_UPDATE_PUBLIC_KEY` at build time (for testing a
 /// whole update against a throwaway key; it only affects a binary built with it
