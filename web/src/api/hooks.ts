@@ -24,6 +24,12 @@ import type {
 
 const LIST_STALE = 60_000;
 
+/** Who's signed in, and to which companies. */
+export function useSession() {
+  const api = useApi();
+  return useQuery({ queryKey: ['session'], queryFn: () => api.session(), retry: false, staleTime: 5 * 60_000 });
+}
+
 export function useCompanyInfo() {
   const api = useApi();
   const co = useCompanyId();

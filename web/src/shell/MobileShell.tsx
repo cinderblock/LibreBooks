@@ -29,6 +29,7 @@ import { useWindows } from '~/windows/WindowsProvider';
 import { paths } from '~/windows/paths';
 import { FixtureBadge, LiveIndicator, NAV_ICONS, ThemeToggle } from './chrome';
 import { NAV_ITEMS } from './menus';
+import { useSignOut } from './UserMenu';
 import { WindowHost } from './WindowHost';
 import classes from './shell.module.css';
 
@@ -47,6 +48,7 @@ export function MobileShell({ live, onShortcuts }: { live: LiveStatus; onShortcu
   const qc = useQuickCreate();
   const [plus, setPlus] = useState(false);
   const [more, setMore] = useState(false);
+  const signOut = useSignOut();
   const active = state.windows.find((w) => w.key === state.active);
   const title = active ? windowTitle(active, state.titles) : 'LibreBooks';
   const go = (p: string) => {
@@ -174,7 +176,14 @@ export function MobileShell({ live, onShortcuts }: { live: LiveStatus; onShortcu
             >
               Keyboard shortcuts
             </Button>
-            <ThemeToggle />
+            <Group gap="xs">
+              {signOut && (
+                <Button variant="subtle" color="gray" onClick={signOut}>
+                  Sign out
+                </Button>
+              )}
+              <ThemeToggle />
+            </Group>
           </Group>
         </Stack>
       </Drawer>

@@ -62,6 +62,19 @@ describe('HttpApiClient', () => {
     expect(get!.url).toBe('/api/v1/c/co1/txns?types=Check');
   });
 
+  test('the desktop app authenticates with its bearer token against its own base', async () => {
+    const calls: Array<{ url: string; init: RequestInit }> = [];
+    const fake = (async (url: string, init: RequestInit) => {
+      calls.push({ url, init });
+      return new Response('{"user":{"id":"u","display_name":"Me","role":"admin","kind":"local"},"companies":[],"sign_in":false}', { status: 200 });
+    }) as unknown as FetchFn;
+    const api = new HttpApiClient({ fetch: fake, token: 's3cret', baseUrl: 'http://127.0.0.1:8740/api/v1/' });
+    const s = await api.session();
+    expect(s.user.kind).toBe('local');
+    expect(calls[0]!.url).toBe('http://127.0.0.1:8740/api/v1/session');
+    expect((calls[0]!.init.headers as Record<string, string>).Authorization).toBe('Bearer s3cret');
+  });
+
   test('turns error envelopes into ApiError', async () => {
     const fake = (async () =>
       new Response('{"error":{"code":"posting","message":"refused","detail":{"code":"NoLines"}}}', { status: 422 })) as unknown as FetchFn;

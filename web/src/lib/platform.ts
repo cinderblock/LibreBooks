@@ -7,8 +7,11 @@ import type { Platform } from '~/keyboard/keymaps';
 
 const KEY = 'librebooks.keymap';
 
+/** Inside the desktop app: Tauri's globals, or the app's own injected config. */
 export function isTauri(): boolean {
-  return typeof window !== 'undefined' && ('__TAURI_INTERNALS__' in window || '__TAURI__' in window);
+  if (typeof window === 'undefined') return false;
+  const injected = (window as unknown as { __LIBREBOOKS__?: { mode?: string } }).__LIBREBOOKS__;
+  return injected?.mode === 'desktop' || '__TAURI_INTERNALS__' in window || '__TAURI__' in window;
 }
 
 export function detectOS(): OS {

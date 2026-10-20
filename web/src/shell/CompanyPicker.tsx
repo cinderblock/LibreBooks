@@ -1,17 +1,14 @@
-// `/`: who am I, which companies can I open. One company goes straight in.
-// Sign-in (passkeys, enrolment) is the next phase; until then an unauthenticated
-// session gets a plain explanation and the fixture-mode link.
+// `/`: who am I, which companies can I open. One company goes straight in;
+// no session goes to sign in.
 
 import { Alert, Anchor, Button, Card, Center, Loader, Stack, Text, Title } from '@mantine/core';
-import { useQuery } from '@tanstack/react-query';
 import { Navigate, useNavigate } from 'react-router';
-import { useApi } from '~/api/context';
 import { describeError, isApiError } from '~/api/errors';
+import { useSession } from '~/api/hooks';
 
 export function CompanyPicker() {
-  const api = useApi();
   const navigate = useNavigate();
-  const session = useQuery({ queryKey: ['session'], queryFn: () => api.session(), retry: false });
+  const session = useSession();
   if (session.isLoading) {
     return (
       <Center h="100dvh">
@@ -20,18 +17,14 @@ export function CompanyPicker() {
     );
   }
   if (session.error) {
-    const unauth = isApiError(session.error) && session.error.code === 'unauthenticated';
+    if (isApiError(session.error) && session.error.code === 'unauthenticated') return <Navigate to="/signin" replace />;
     return (
       <Center h="100dvh" p="md">
         <Stack maw={460}>
           <Title order={2}>LibreBooks</Title>
-          {unauth ? (
-            <Alert title="Sign in needed">Signing in with a passkey arrives with the server's auth screens.</Alert>
-          ) : (
-            <Alert color="red" title="Can't reach the server">
-              {describeError(session.error)}
-            </Alert>
-          )}
+          <Alert color="red" title="Can't reach the server">
+            {describeError(session.error)}
+          </Alert>
           <Text size="sm" c="dimmed">
             To try the interface without a server, open it in{' '}
             <Anchor href="/?fixtures=1">fixture mode</Anchor> (synthetic demo books held in memory).

@@ -21,10 +21,15 @@ import type {
   CompanyInfo,
   CompanySummary,
   DateRange,
+  EnrolFinish,
+  EnrolStart,
+  EnrolStartRequest,
   Health,
   ListName,
   ListQuery,
   ListRecords,
+  LoginFinish,
+  LoginStart,
   OpenTxn,
   PreviewOutcome,
   RegisterResponse,
@@ -34,6 +39,7 @@ import type {
   TxnSummary,
   TxnType,
   TxnWithPostings,
+  User,
 } from './types';
 
 type Method = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
@@ -43,7 +49,7 @@ export type FetchFn = (url: string, init: RequestInit) => Promise<Response>;
 
 export interface HttpClientOptions {
   baseUrl?: string;
-  /** Desktop local mode: `Authorization: Bearer <token>`. */
+  /** Desktop app: `Authorization: Bearer <token>` (and `?token=` on the event stream). */
   token?: string | null;
   fetch?: FetchFn;
 }
@@ -115,6 +121,21 @@ export class HttpApiClient implements ApiClient {
   }
   companies() {
     return this.request<CompanySummary[]>('GET', '/companies');
+  }
+  loginStart() {
+    return this.request<LoginStart>('POST', '/auth/login/start');
+  }
+  loginFinish(body: LoginFinish) {
+    return this.request<{ user: User }>('POST', '/auth/login/finish', { body });
+  }
+  enrolStart(body: EnrolStartRequest) {
+    return this.request<EnrolStart>('POST', '/auth/enroll/start', { body });
+  }
+  enrolFinish(body: EnrolFinish) {
+    return this.request<{ user: User }>('POST', '/auth/enroll/finish', { body });
+  }
+  logout() {
+    return this.request<void>('POST', '/auth/logout');
   }
   companyInfo(co: CompanyId) {
     return this.request<CompanyInfo>('GET', this.co(co, '/info'));
@@ -215,7 +236,8 @@ export class HttpApiClient implements ApiClient {
     let closed = false;
     let retry = 1000;
     let timer: ReturnType<typeof setTimeout> | undefined;
-    const url = `${this.base}/events?company=${encodeURIComponent(co)}`;
+    // EventSource can't send headers; the desktop app's token rides in the query (server accepts it for /events only).
+    const url = `${this.base}/events?company=${encodeURIComponent(co)}${this.token ? `&token=${encodeURIComponent(this.token)}` : ''}`;
     const connect = () => {
       if (closed) return;
       handlers.onStatus?.('connecting');

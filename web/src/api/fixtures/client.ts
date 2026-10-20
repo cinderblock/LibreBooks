@@ -184,17 +184,38 @@ export class FixtureApiClient implements ApiClient {
 
   // ---- server level ---------------------------------------------------------
 
+  // Fixture mode is always signed in as the demo user; there's nothing to sign in to.
+  private noAuth(): Promise<never> {
+    return Promise.reject(new ApiError(400, 'invalid', 'Sign-in is not available in fixture mode; you are already the demo user.'));
+  }
+  loginStart() {
+    return this.noAuth();
+  }
+  loginFinish() {
+    return this.noAuth();
+  }
+  enrolStart() {
+    return this.noAuth();
+  }
+  enrolFinish() {
+    return this.noAuth();
+  }
+  logout(): Promise<void> {
+    return this.delay(() => undefined);
+  }
+
   health(): Promise<Health> {
     return this.delay(() => ({ ok: true as const, version: 'fixtures', mode: 'server' as const }));
   }
   session(): Promise<Session> {
     return this.delay(() => ({
-      user: { id: 'fixture-user', display_name: 'Demo User', role: 'admin' },
+      user: { id: 'fixture-user', display_name: 'Demo User', role: 'admin' as const, kind: 'local' as const },
       companies: [this.summary()],
+      sign_in: false,
     }));
   }
   private summary(): CompanySummary {
-    return { id: FIXTURE_COMPANY_ID, name: this.info.name, role: 'admin' };
+    return { id: FIXTURE_COMPANY_ID, name: this.info.name, role: 'admin' as const };
   }
   companies(): Promise<CompanySummary[]> {
     return this.delay(() => [this.summary()]);

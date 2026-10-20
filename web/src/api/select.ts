@@ -26,10 +26,26 @@ export function fixtureMode(): FixtureMode {
   return import.meta.env.VITE_FIXTURES === '1' ? 'on' : 'off';
 }
 
-/** Desktop local mode injects its per-launch token before the SPA loads. */
-function desktopToken(): string | null {
-  const w = window as unknown as { __LIBREBOOKS_TOKEN__?: string };
-  return w.__LIBREBOOKS_TOKEN__ ?? null;
+/**
+ * What the desktop app injects before the SPA loads: its mode, the per-launch
+ * bearer token for its in-process server, and where that server is.
+ */
+export interface DesktopInjection {
+  mode: 'desktop';
+  token?: string | null;
+  /** The server root (`http://127.0.0.1:8740`) or the API base (`…/api/v1`). */
+  apiBase?: string | null;
+}
+
+export function desktopInjection(): DesktopInjection | null {
+  const w = window as unknown as { __LIBREBOOKS__?: DesktopInjection };
+  return w.__LIBREBOOKS__?.mode === 'desktop' ? w.__LIBREBOOKS__ : null;
+}
+
+function apiBaseUrl(base: string | null | undefined): string | undefined {
+  if (!base) return undefined;
+  const trimmed = base.replace(/\/+$/, '');
+  return /\/api\/v\d+$/.test(trimmed) ? trimmed : `${trimmed}/api/v1`;
 }
 
 export function createApiClient(): ApiClient {
@@ -41,5 +57,6 @@ export function createApiClient(): ApiClient {
     (window as unknown as { __librebooks?: FixtureApiClient }).__librebooks = client;
     return client;
   }
-  return new HttpApiClient({ token: desktopToken() });
+  const desktop = desktopInjection();
+  return new HttpApiClient({ token: desktop?.token ?? null, baseUrl: apiBaseUrl(desktop?.apiBase) });
 }

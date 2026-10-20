@@ -12,10 +12,15 @@ import type {
   CompanyInfo,
   CompanySummary,
   DateRange,
+  EnrolFinish,
+  EnrolStart,
+  EnrolStartRequest,
   Health,
   ListName,
   ListQuery,
   ListRecords,
+  LoginFinish,
+  LoginStart,
   OpenTxn,
   PreviewOutcome,
   RegisterResponse,
@@ -26,6 +31,7 @@ import type {
   TxnSummary,
   TxnType,
   TxnWithPostings,
+  User,
 } from './types';
 
 /** Every field optional: the server fills defaults. */
@@ -47,6 +53,14 @@ export interface ApiClient {
   health(): Promise<Health>;
   session(): Promise<Session>;
   companies(): Promise<CompanySummary[]>;
+
+  /** Passkey sign-in: options for `startAuthentication`, then its result. */
+  loginStart(): Promise<LoginStart>;
+  loginFinish(body: LoginFinish): Promise<{ user: User }>;
+  /** Enrolment with a one-time token: options for `startRegistration`, then its result. */
+  enrolStart(body: EnrolStartRequest): Promise<EnrolStart>;
+  enrolFinish(body: EnrolFinish): Promise<{ user: User }>;
+  logout(): Promise<void>;
 
   companyInfo(co: CompanyId): Promise<CompanyInfo>;
 

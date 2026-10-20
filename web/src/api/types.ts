@@ -2,8 +2,7 @@
 //
 // Everything that *is* generated is imported from ./generated and re-exported
 // here so screens have one import site. When the server crate starts exporting
-// one of the local stand-ins below (CompanyInfo, SaveOutcome, the session
-// shapes…), delete the local definition and re-export the generated one.
+// one of the local stand-ins below (SaveOutcome, the session shape…), delete the local definition and re-export the generated one.
 
 import type { Account } from './generated/Account';
 import type { Class } from './generated/Class';
@@ -21,13 +20,22 @@ import type { SalesTaxCode } from './generated/SalesTaxCode';
 import type { Terms } from './generated/Terms';
 import type { Txn } from './generated/Txn';
 import type { TypeEntry } from './generated/TypeEntry';
-import type { Address } from './generated/Address';
+import type { Role } from './generated/Role';
+import type { SessionKind } from './generated/SessionKind';
 
 export type { Account } from './generated/Account';
 export type { AccountBalance } from './generated/AccountBalance';
 export type { AccountId } from './generated/AccountId';
 export type { AccountType } from './generated/AccountType';
 export type { Address } from './generated/Address';
+export type { EnrolFinish } from './generated/EnrolFinish';
+export type { EnrolStart } from './generated/EnrolStart';
+export type { EnrolStartRequest } from './generated/EnrolStartRequest';
+export type { LoginFinish } from './generated/LoginFinish';
+export type { LoginStart } from './generated/LoginStart';
+export type { Role } from './generated/Role';
+export type { SessionKind } from './generated/SessionKind';
+export type { User } from './generated/User';
 export type { Application } from './generated/Application';
 export type { Class } from './generated/Class';
 export type { ClassId } from './generated/ClassId';
@@ -67,17 +75,21 @@ export interface Health {
   mode: 'server' | 'desktop';
 }
 
-export type Role = string;
-
 export interface CompanySummary {
   id: CompanyId;
   name: string;
   role: Role;
 }
 
+/**
+ * `GET /session`. `kind` says how this session signed in (passkey, device key,
+ * or the desktop app's local token); `sign_in` is true when the server uses
+ * sign-in at all (so "Sign out" means something).
+ */
 export interface Session {
-  user: { id: string; display_name: string; role: Role };
+  user: { id: string | null; display_name: string; role: Role; kind?: SessionKind };
   companies: CompanySummary[];
+  sign_in?: boolean;
 }
 
 /** One `event: change` from `/events?company=` (`data: {kind, id, action}`). */
@@ -90,47 +102,10 @@ export interface ChangeEvent {
 }
 
 // ---------------------------------------------------------------------------
-// Company (local stand-ins for lb-core's CompanyInfo / Preferences, which carry
-// `#[ts(export)]` but are not in generated/ yet).
+// Company
 
-export interface Preferences {
-  use_account_numbers: boolean;
-  use_class_tracking: boolean;
-  prompt_for_class: boolean;
-  warn_days_past: number | null;
-  warn_days_future: number | null;
-  auto_number_journal_entries: boolean;
-  inventory_enabled: boolean;
-  estimates_enabled: boolean;
-  sales_orders_enabled: boolean;
-  progress_invoicing: boolean;
-  sales_tax_enabled: boolean;
-  sales_tax_on_cash_basis: boolean;
-  reports_cash_basis: boolean;
-  billable_by_default: boolean;
-  default_markup_percent: string | null;
-  use_undeposited_funds: boolean;
-  auto_apply_payments: boolean;
-  default_check_account: string | null;
-  default_deposit_account: string | null;
-  multi_currency: boolean;
-}
-
-export interface CompanyInfo {
-  name: string;
-  legal_name: string | null;
-  address: Address;
-  legal_address: Address;
-  phone: string | null;
-  email: string | null;
-  website: string | null;
-  ein: string | null;
-  fiscal_year_start_month: number;
-  tax_year_start_month: number;
-  tax_form: string | null;
-  home_currency: string;
-  preferences: Preferences;
-}
+export type { CompanyInfo } from './generated/CompanyInfo';
+export type { Preferences } from './generated/Preferences';
 
 // ---------------------------------------------------------------------------
 // Lists

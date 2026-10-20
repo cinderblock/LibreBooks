@@ -6,12 +6,14 @@ import './app.css';
 
 import { createTheme, MantineProvider } from '@mantine/core';
 import { Notifications } from '@mantine/notifications';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { QueryCache, QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useState } from 'react';
 import { createBrowserRouter, Navigate, RouterProvider } from 'react-router';
 import { ApiProvider } from './api/context';
 import { isApiError } from './api/errors';
 import { createApiClient } from './api/select';
+import { Enrol } from './auth/Enrol';
+import { SignIn } from './auth/SignIn';
 import { KeyboardProvider } from './keyboard/KeyboardProvider';
 import { CompanyPicker } from './shell/CompanyPicker';
 import { CompanyShell } from './shell/CompanyShell';
@@ -26,12 +28,23 @@ const theme = createTheme({
 
 const router = createBrowserRouter([
   { path: '/', element: <CompanyPicker /> },
+  { path: '/signin', element: <SignIn /> },
+  { path: '/enroll', element: <Enrol /> },
   { path: '/c/:companyId/*', element: <CompanyShell /> },
   { path: '*', element: <Navigate to="/" replace /> },
 ]);
 
+/** A session that expired mid-use sends the person to sign in, then back. */
+function onQueryError(e: unknown) {
+  if (!isApiError(e) || e.code !== 'unauthenticated') return;
+  const here = window.location.pathname;
+  if (here === '/signin' || here === '/enroll') return;
+  void router.navigate(`/signin?next=${encodeURIComponent(here + window.location.search)}`, { replace: true });
+}
+
 function makeQueryClient() {
   return new QueryClient({
+    queryCache: new QueryCache({ onError: onQueryError }),
     defaultOptions: {
       queries: {
         // Client errors won't fix themselves; network blips might.

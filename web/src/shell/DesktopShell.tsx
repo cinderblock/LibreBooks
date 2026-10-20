@@ -13,6 +13,7 @@ import { useWindows } from '~/windows/WindowsProvider';
 import { FixtureBadge, LiveIndicator, NAV_ICONS, ThemeToggle } from './chrome';
 import type { RunCommand } from './GlobalCommands';
 import { MENUS, NAV_ITEMS, type MenuItem } from './menus';
+import { UserMenu } from './UserMenu';
 import { WindowHost } from './WindowHost';
 import classes from './shell.module.css';
 
@@ -186,6 +187,7 @@ export function DesktopShell({ live, run, onShortcuts }: { live: LiveStatus; run
         <FixtureBadge />
         <LiveIndicator status={live} />
         <ThemeToggle />
+        <UserMenu />
       </header>
       <div className={classes.body}>
         <NavRail />
