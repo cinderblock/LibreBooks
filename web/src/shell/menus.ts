@@ -21,7 +21,7 @@ export interface Menu {
   entries: MenuEntry[];
 }
 
-/** Forms not built yet; each opens a placeholder window naming it. */
+/** Every form slug (`/forms/<slug>/new`) and its menu label. */
 export const FORM_LABELS: Record<string, string> = {
   invoice: 'Create Invoices',
   'sales-receipt': 'Enter Sales Receipts',
@@ -30,21 +30,27 @@ export const FORM_LABELS: Record<string, string> = {
   estimate: 'Create Estimates',
   bill: 'Enter Bills',
   'pay-bills': 'Pay Bills',
+  'vendor-credit': 'Enter Vendor Credits',
   'purchase-order': 'Create Purchase Orders',
   'receive-items': 'Receive Items',
   deposit: 'Make Deposits',
   transfer: 'Transfer Funds',
   'cc-charge': 'Enter Credit Card Charges',
+  'cc-credit': 'Enter Credit Card Credits',
   journal: 'Make General Journal Entries',
   reconcile: 'Reconcile',
+  'bank-feeds': 'Bank Feeds',
   'pay-employees': 'Pay Employees',
   memorized: 'Memorized Transaction List',
 };
 
+/** Slugs with a real form; the rest open a placeholder naming them. */
+const BUILT_FORMS = new Set(['bill', 'vendor-credit', 'purchase-order', 'receive-items', 'cc-charge', 'cc-credit']);
+
 const form = (key: keyof typeof FORM_LABELS & string, extra: Partial<MenuItem> = {}): MenuItem => ({
   label: FORM_LABELS[key]!,
   path: paths.form(key),
-  todo: true,
+  todo: !BUILT_FORMS.has(key),
   ...extra,
 });
 
@@ -56,7 +62,7 @@ export const MENUS: Menu[] = [
       { label: 'Company Information', path: paths.company() },
       { divider: true },
       { label: 'Chart of Accounts', command: 'nav.chartOfAccounts', path: paths.accounts() },
-      form('journal'),
+      form('journal', { command: 'form.journal' }),
       { divider: true },
       { label: 'Find…', command: 'nav.find', path: paths.find() },
       { label: 'Search / Go To…', command: 'palette.open' },
@@ -68,10 +74,10 @@ export const MENUS: Menu[] = [
       { label: 'Customer Center', command: 'nav.customerCenter', path: paths.customers() },
       { divider: true },
       form('invoice', { command: 'form.invoice' }),
-      form('sales-receipt'),
-      form('receive-payment'),
-      form('credit-memo'),
-      form('estimate'),
+      form('sales-receipt', { command: 'form.salesReceipt' }),
+      form('receive-payment', { command: 'form.receivePayment' }),
+      form('credit-memo', { command: 'form.creditMemo' }),
+      form('estimate', { command: 'form.estimate' }),
     ],
   },
   {
@@ -79,9 +85,10 @@ export const MENUS: Menu[] = [
     entries: [
       { label: 'Vendor Center', command: 'nav.vendorCenter', path: paths.vendors() },
       { divider: true },
-      form('bill'),
-      form('pay-bills'),
-      form('purchase-order'),
+      form('bill', { command: 'form.bill', keywords: ['payable', 'vendor'] }),
+      form('pay-bills', { command: 'form.payBills' }),
+      form('vendor-credit', { command: 'form.vendorCredit' }),
+      form('purchase-order', { command: 'form.purchaseOrder', keywords: ['po'] }),
       form('receive-items'),
     ],
   },
@@ -93,13 +100,15 @@ export const MENUS: Menu[] = [
     label: 'Banking',
     entries: [
       { label: 'Write Checks', command: 'form.writeChecks', path: paths.newCheck(), keywords: ['check', 'pay', 'expense'] },
-      form('deposit'),
-      form('transfer'),
-      form('cc-charge'),
+      form('deposit', { command: 'form.deposit' }),
+      form('transfer', { command: 'form.transfer' }),
+      form('cc-charge', { command: 'form.ccCharge', keywords: ['credit card', 'visa'] }),
+      form('cc-credit'),
       { divider: true },
       { label: 'Use Register', command: 'nav.useRegister' },
       { label: 'Banking Overview', path: paths.banking() },
-      form('reconcile'),
+      form('reconcile', { command: 'nav.reconcile' }),
+      form('bank-feeds', { command: 'nav.bankFeeds', keywords: ['download', 'online banking', 'import'] }),
     ],
   },
   {

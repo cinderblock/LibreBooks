@@ -35,6 +35,60 @@
   grid-column: 1 / -1;
 }
 
+/* The other forms' headers: name wide, then date / number / amount; memo and address span. */
+.headerGrid {
+  display: grid;
+  grid-template-columns: 2fr 1fr 1fr 1fr;
+  gap: var(--mantine-spacing-sm) var(--mantine-spacing-md);
+  align-items: end;
+  padding: var(--mantine-spacing-md);
+  border: 1px solid var(--mantine-color-default-border);
+  border-radius: var(--mantine-radius-md);
+  background: light-dark(var(--mantine-color-gray-0), var(--mantine-color-dark-6));
+}
+
+.headerGrid .wide {
+  grid-column: 1 / 3;
+}
+
+.headerGrid .full {
+  grid-column: 1 / -1;
+}
+
+/* Totals under a sales form's lines. */
+.totals {
+  display: grid;
+  grid-template-columns: auto 140px;
+  gap: 4px 16px;
+  justify-content: end;
+  align-items: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.totals .label {
+  text-align: right;
+  color: var(--mantine-color-dimmed);
+}
+
+.totals .value {
+  text-align: right;
+  font-weight: 600;
+}
+
+.totals .grand {
+  font-size: var(--mantine-font-size-lg);
+  font-weight: 700;
+  border-top: 1px solid var(--mantine-color-text);
+}
+
+.balanced {
+  color: var(--mantine-color-teal-7);
+}
+
+.unbalanced {
+  color: var(--mantine-color-red-7);
+}
+
 .words {
   border-bottom: 1px solid var(--mantine-color-default-border);
   padding: 4px 2px;

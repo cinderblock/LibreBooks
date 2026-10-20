@@ -124,13 +124,15 @@ export function useBalanceMap(): Map<string, number> {
   return useMemo(() => new Map((data ?? []).map((b) => [b.account_id, b.debit_positive])), [data]);
 }
 
+/** The next number in a series: per bank account for checks, per type otherwise. */
 export function useNextNumber(type: TxnType, accountId: string | null, enabled = true) {
   const api = useApi();
   const co = useCompanyId();
+  const perAccount = type === 'Check' || type === 'BillPaymentCheck';
   return useQuery({
-    queryKey: qk.nextNumber(co, type, accountId),
-    queryFn: () => api.nextNumber(co, type, accountId),
-    enabled: enabled && !!accountId,
+    queryKey: qk.nextNumber(co, type, perAccount ? accountId : null),
+    queryFn: () => api.nextNumber(co, type, perAccount ? accountId : null),
+    enabled: enabled && (!perAccount || !!accountId),
     staleTime: 0,
   });
 }

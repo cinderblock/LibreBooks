@@ -42,8 +42,9 @@ export function parseWindowPath(relPath: string): WindowDesc | null {
       return seg.length === 1 ? one(a, a) : null;
     case 'banking':
       return seg.length === 1 ? one('banking', 'banking') : null;
+    // A prefilled form (hand-off token) is its own window: the token is in the key.
     case 'checks':
-      return seg.length === 2 && b === 'new' ? one('check', 'check:new') : null;
+      return seg.length === 2 && b === 'new' ? one('check', `check:new${q.draft ? `:${q.draft}` : ''}`) : null;
     case 'txns':
       return seg.length === 2 && b ? one('txn', `txn:${b}`, { txnId: b }) : null;
     case 'reports':
@@ -59,7 +60,7 @@ export function parseWindowPath(relPath: string): WindowDesc | null {
     case 'company':
       return seg.length === 1 ? one('company', 'company') : null;
     case 'forms':
-      return seg.length === 3 && b && c === 'new' ? one('form', `form:${b}`, { form: b }) : null;
+      return seg.length === 3 && b && c === 'new' ? one('form', `form:${b}${q.draft ? `:${q.draft}` : ''}`, { form: b }) : null;
     default:
       return null;
   }
@@ -74,7 +75,8 @@ export const paths = {
   vendors: (select?: string) => `/vendors${select ? `?select=${encodeURIComponent(select)}` : ''}`,
   employees: (select?: string) => `/employees${select ? `?select=${encodeURIComponent(select)}` : ''}`,
   banking: () => '/banking',
-  newCheck: () => '/checks/new',
+  /** A new check; `draft` is a hand-off token (`windows/handoff.ts`) for a prefilled one. */
+  newCheck: (draft?: string) => `/checks/new${draft ? `?draft=${encodeURIComponent(draft)}` : ''}`,
   txn: (id: string) => `/txns/${encodeURIComponent(id)}`,
   reports: () => '/reports',
   report: (id: string, params: Record<string, string | null | undefined> = {}) => {
@@ -85,5 +87,6 @@ export const paths = {
   find: () => '/find',
   list: (list: string) => `/lists/${encodeURIComponent(list)}`,
   company: () => '/company',
-  form: (form: string) => `/forms/${encodeURIComponent(form)}/new`,
+  /** A new form of a kind; `draft` is a hand-off token for a prefilled one. */
+  form: (form: string, draft?: string) => `/forms/${encodeURIComponent(form)}/new${draft ? `?draft=${encodeURIComponent(draft)}` : ''}`,
 };

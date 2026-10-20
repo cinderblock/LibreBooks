@@ -105,9 +105,9 @@ export function MobileShell({ live, onShortcuts }: { live: LiveStatus; onShortcu
           <SheetItem icon={<IconChecks size={26} />} label="Write Check" onClick={() => go(paths.newCheck())} />
           <SheetItem icon={<IconFileInvoice size={26} />} label="Invoice" onClick={() => go(paths.form('invoice'))} todo />
           <SheetItem icon={<IconCash size={26} />} label="Receive Payment" onClick={() => go(paths.form('receive-payment'))} todo />
-          <SheetItem icon={<IconReceipt size={26} />} label="Enter Bill" onClick={() => go(paths.form('bill'))} todo />
+          <SheetItem icon={<IconReceipt size={26} />} label="Enter Bill" onClick={() => go(paths.form('bill'))} />
           <SheetItem icon={<IconBuildingBank size={26} />} label="Deposit" onClick={() => go(paths.form('deposit'))} todo />
-          <SheetItem icon={<IconCreditCard size={26} />} label="Card Charge" onClick={() => go(paths.form('cc-charge'))} todo />
+          <SheetItem icon={<IconCreditCard size={26} />} label="Card Charge" onClick={() => go(paths.form('cc-charge'))} />
           <SheetItem
             icon={<IconUserPlus size={26} />}
             label="New Customer"

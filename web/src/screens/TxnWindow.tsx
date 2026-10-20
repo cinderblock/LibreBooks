@@ -6,7 +6,7 @@ import { Alert, Badge, Card, Group, Skeleton, Stack, Table, Text, Title } from '
 import { useEffect } from 'react';
 import { describeError } from '~/api/errors';
 import { useAccountIndex, useEntityIndex, useItemIndex, useTxn } from '~/api/hooks';
-import { WriteChecks } from '~/forms/WriteChecks';
+import { formFor } from '~/forms/registry';
 import { formatDate } from '~/lib/dates';
 import { formatMoney } from '~/lib/money';
 import { TXN_LABEL } from '~/lib/txnTypes';
@@ -20,7 +20,8 @@ export function TxnWindow() {
   if (isLoading) return <Skeleton m="md" h={300} />;
   if (error) return <Alert m="md" color="red">{describeError(error)}</Alert>;
   if (!data) return null;
-  if (data.txn.txn_type === 'Check') return <WriteChecks txnId={id} />;
+  const form = formFor(data.txn.txn_type);
+  if (form) return <>{form.render(data.txn, null)}</>;
   return <TransactionView />;
 }
 

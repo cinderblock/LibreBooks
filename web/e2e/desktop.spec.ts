@@ -53,6 +53,57 @@ test('write a check entirely from the keyboard, then find it in the register', a
   await page.screenshot({ path: test.info().outputPath('register-desktop.png') });
 });
 
+test('enter a bill: the vendor brings its terms, the due date follows, Save & New clears', async ({ page }) => {
+  await start(page);
+  await page.getByRole('menubar').getByText('Vendors', { exact: true }).click();
+  await page.getByRole('menuitem', { name: /Enter Bills/ }).click();
+  const form = page.getByTestId('form-bill');
+  await expect(form).toBeVisible();
+  const vendor = form.getByRole('combobox', { name: 'Vendor' });
+  await expect(vendor).toBeFocused();
+  await vendor.pressSequentially("Bob's");
+  await expect(vendor).toHaveValue("Bob's Finishing");
+  await page.keyboard.press('Tab');
+  // Bob's Finishing is on Net 15: the terms and the due date fill in.
+  await expect(form.getByRole('combobox', { name: 'Terms' })).toHaveValue('Net 15');
+  const date = await form.getByRole('textbox', { name: 'Date' }).inputValue();
+  const due = await form.getByRole('textbox', { name: 'Bill due' }).inputValue();
+  expect(due).not.toBe(date);
+  // The vendor's last bill is recalled (its subcontractor line), as QBD does.
+  await expect(form.getByRole('combobox', { name: 'Account, line 1' })).toHaveValue('Cost of Goods Sold:Subcontractors');
+  await expect(form.getByRole('textbox', { name: 'Amount, line 1' })).not.toHaveValue('');
+  // Change the line's amount; the amount due follows the lines.
+  const line = form.getByRole('textbox', { name: 'Amount, line 1' });
+  await line.click();
+  await line.fill('1250');
+  await page.keyboard.press('Tab');
+  await expect(form.getByRole('textbox', { name: 'Amount Due' })).toHaveValue('1,250.00');
+  await form.getByRole('button', { name: /Save & New/ }).click();
+  await expect(page.getByText(/Bill .*for \$1,250\.00 saved/)).toBeVisible();
+  await expect(vendor).toHaveValue('');
+  // The bill is now open for the vendor: the Vendor Center shows the balance.
+  await page.getByRole('navigation', { name: 'Navigation' }).getByRole('button', { name: 'Vendors' }).click();
+  await page.getByRole('textbox', { name: 'Find a vendor' }).fill("Bob's");
+  await expect(page.getByTestId('center-vendors').getByRole('heading', { name: "Bob's Finishing" })).toBeVisible();
+});
+
+test('a credit card charge flips to a credit; a purchase order says it posts nothing', async ({ page }) => {
+  await start(page, '/c/00000000-0000-4000-8000-00000000c0de/forms/cc-charge/new');
+  const form = page.getByTestId('form-cc-charge');
+  const card = form.getByRole('combobox', { name: 'Credit card account' });
+  await card.click();
+  await card.pressSequentially('Vis');
+  await expect(card).toHaveValue('Visa');
+  await page.keyboard.press('Tab');
+  // The segmented control's radio input is visually hidden; its label is what people click.
+  await form.getByText('Refund/Credit', { exact: true }).click();
+  await expect(page.getByTestId('form-cc-credit')).toBeVisible();
+  await page.goto('/c/00000000-0000-4000-8000-00000000c0de/forms/purchase-order/new');
+  const po = page.getByTestId('form-purchase-order');
+  await expect(po.getByText('Non-posting')).toBeVisible();
+  await expect(po.getByRole('tab', { name: /Expenses/ })).toHaveCount(0);
+});
+
 test('saving an empty check shows the problem inline', async ({ page }) => {
   await start(page, '/c/00000000-0000-4000-8000-00000000c0de/checks/new');
   const form = page.getByTestId('write-checks');

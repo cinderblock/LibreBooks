@@ -3,6 +3,8 @@
 
 import type { ReactNode } from 'react';
 import { WriteChecks } from '~/forms/WriteChecks';
+import { FORMS } from '~/forms/registry';
+import { FormLoader } from '~/forms/useTxnForm';
 import { Banking } from '~/screens/Banking';
 import { Center } from '~/screens/Centers';
 import { ChartOfAccounts } from '~/screens/ChartOfAccounts';
@@ -15,12 +17,26 @@ import { Register } from '~/screens/Register';
 import { ReportCenter, ReportWindow } from '~/screens/Reports';
 import { TxnWindow } from '~/screens/TxnWindow';
 import { FORM_LABELS } from '~/shell/menus';
+import { useWindow } from './WindowsProvider';
 import type { WindowDesc, WindowKind } from './model';
 
 interface KindDef {
   render(desc: WindowDesc): ReactNode;
   title(desc: WindowDesc): string;
-  /** Forms keep the window's state when it's hidden; lists and reports too. */
+}
+
+/** A `/forms/:slug/new` window: the registered form, or the placeholder for one not built yet. */
+function FormWindow() {
+  const win = useWindow();
+  const slug = win.desc.params.form ?? '';
+  const def = FORMS[slug];
+  if (!def) return <FormPlaceholder />;
+  return <FormLoader draftToken={win.desc.params.draft} render={(saved, initial) => def.render(saved, initial)} />;
+}
+
+function CheckWindow() {
+  const win = useWindow();
+  return <WriteChecks draftToken={win.desc.params.draft} />;
 }
 
 export const WINDOW_KINDS: Record<WindowKind, KindDef> = {
@@ -31,14 +47,14 @@ export const WINDOW_KINDS: Record<WindowKind, KindDef> = {
   vendors: { render: () => <Center which="vendors" />, title: () => 'Vendor Center' },
   employees: { render: () => <Center which="employees" />, title: () => 'Employee Center' },
   banking: { render: () => <Banking />, title: () => 'Banking' },
-  check: { render: () => <WriteChecks />, title: () => 'Write Checks' },
+  check: { render: () => <CheckWindow />, title: () => 'Write Checks' },
   txn: { render: () => <TxnWindow />, title: () => 'Transaction' },
   reports: { render: () => <ReportCenter />, title: () => 'Report Center' },
   report: { render: () => <ReportWindow />, title: () => 'Report' },
   find: { render: () => <Find />, title: () => 'Find' },
   list: { render: () => <ListWindow />, title: (d) => LIST_TITLES[d.params.list ?? ''] ?? 'List' },
   company: { render: () => <Company />, title: () => 'Company' },
-  form: { render: () => <FormPlaceholder />, title: (d) => FORM_LABELS[d.params.form ?? ''] ?? 'Form' },
+  form: { render: () => <FormWindow />, title: (d) => FORMS[d.params.form ?? '']?.label ?? FORM_LABELS[d.params.form ?? ''] ?? 'Form' },
 };
 
 export function windowTitle(desc: WindowDesc, titles: Record<string, string>): string {

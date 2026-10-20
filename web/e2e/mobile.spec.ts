@@ -40,6 +40,20 @@ test('the + sheet starts a check; lines are cards', async ({ page }) => {
   await expect(page.getByText('Bank and credit card accounts')).toBeVisible();
 });
 
+test('the + sheet starts a bill; the header stacks and the lines are cards', async ({ page }) => {
+  await start(page);
+  await page.getByRole('button', { name: 'Create' }).tap();
+  await page.getByText('Enter Bill', { exact: true }).tap();
+  const form = page.getByTestId('form-bill');
+  await expect(form).toBeVisible();
+  await expect(form.getByRole('combobox', { name: 'Vendor' })).toBeVisible();
+  await expect(form.getByRole('textbox', { name: 'Bill due' })).toBeVisible();
+  await expect(form.getByRole('tabpanel', { name: 'Expenses' }).getByText('Line 1')).toBeVisible();
+  await expect(page.getByRole('button', { name: /Save & Close/ })).toBeVisible();
+  await expectNoSideways(page);
+  await page.screenshot({ path: test.info().outputPath('bill-375.png') });
+});
+
 test('banking → a register as a tappable list', async ({ page }) => {
   await start(page);
   await page.getByRole('navigation', { name: 'Main' }).getByText('Banking', { exact: true }).tap();
