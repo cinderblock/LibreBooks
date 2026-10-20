@@ -8,13 +8,13 @@
 //   instead; pass it as `token`.
 // - Non-2xx answers become a typed `ApiError` from the error envelope.
 
-import type { Report, ReportCatalogEntry, ReportRequest } from '~/reports/types';
-import { type ApiClient, type EventHandlers, type EventSubscription, type TxnQuery, txnQueryParams } from './client';
+import { type ApiClient, type EventHandlers, type EventSubscription, type FileDownload, type TxnQuery, txnQueryParams } from './client';
 import { ApiError, apiErrorFromBody } from './errors';
 import { parseApiJson, stringifyApiJson } from './json';
 import type {
   AccountBalance,
   AuditEntry,
+  CatalogEntry,
   ChangeEvent,
   ClearedStatus,
   CompanyId,
@@ -30,9 +30,13 @@ import type {
   ListRecords,
   LoginFinish,
   LoginStart,
-  OpenTxn,
+  MemorizedDue,
   PreviewOutcome,
   RegisterResponse,
+  Report,
+  ReportRequest,
+  Saved,
+  SavedKind,
   SaveOutcome,
   Session,
   Txn,
@@ -41,6 +45,12 @@ import type {
   TxnWithPostings,
   User,
 } from './types';
+
+/** The filename a `Content-Disposition: attachment; filename="…"` header names. */
+export function dispositionFilename(header: string | null, fallback: string): string {
+  const m = header ? /filename\*?=(?:UTF-8''|")?([^";]+)"?/i.exec(header) : null;
+  return m?.[1] ? decodeURIComponent(m[1]) : fallback;
+}
 
 type Method = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
 
@@ -73,12 +83,18 @@ export class HttpApiClient implements ApiClient {
     this.doFetch = opts.fetch ?? ((url, init) => fetch(url, init));
   }
 
-  private async request<T>(method: Method, path: string, opts: { query?: URLSearchParams; body?: unknown } = {}): Promise<T> {
+  /**
+   * One request, with the auth and CSRF headers, raising `ApiError` on a non-2xx
+   * answer. `body` is JSON unless it's a `FormData` (multipart uploads), whose
+   * content type the browser sets (it carries the boundary).
+   */
+  private async raw(method: Method, path: string, opts: { query?: URLSearchParams; body?: unknown; accept?: string } = {}): Promise<Response> {
     const qs = opts.query?.toString();
     const url = `${this.base}${path}${qs ? `?${qs}` : ''}`;
-    const headers: Record<string, string> = { Accept: 'application/json' };
+    const headers: Record<string, string> = { Accept: opts.accept ?? 'application/json' };
     if (method !== 'GET') headers['X-LibreBooks'] = '1';
-    if (opts.body !== undefined) headers['Content-Type'] = 'application/json';
+    const multipart = typeof FormData !== 'undefined' && opts.body instanceof FormData;
+    if (opts.body !== undefined && !multipart) headers['Content-Type'] = 'application/json';
     if (this.token) headers.Authorization = `Bearer ${this.token}`;
     let res: Response;
     try {
@@ -86,13 +102,13 @@ export class HttpApiClient implements ApiClient {
         method,
         headers,
         credentials: 'include',
-        body: opts.body === undefined ? undefined : stringifyApiJson(opts.body),
+        body: opts.body === undefined ? undefined : multipart ? (opts.body as FormData) : stringifyApiJson(opts.body),
       });
     } catch (e) {
       throw new ApiError(0, 'network', (e as Error).message || 'Network error');
     }
-    const text = res.status === 204 ? '' : await res.text();
     if (!res.ok) {
+      const text = await res.text();
       let parsed: unknown;
       try {
         parsed = text ? JSON.parse(text) : undefined;
@@ -101,12 +117,24 @@ export class HttpApiClient implements ApiClient {
       }
       throw apiErrorFromBody(res.status, text, parsed);
     }
+    return res;
+  }
+
+  private async request<T>(method: Method, path: string, opts: { query?: URLSearchParams; body?: unknown } = {}): Promise<T> {
+    const res = await this.raw(method, path, opts);
+    const text = res.status === 204 ? '' : await res.text();
     if (text === '') return undefined as T;
     try {
       return parseApiJson<T>(text);
     } catch {
       throw new ApiError(res.status, 'bad_response', 'The server sent something that is not JSON.');
     }
+  }
+
+  /** A file the server produced, named by its Content-Disposition. */
+  private async download(method: Method, path: string, fallback: string, opts: { query?: URLSearchParams; body?: unknown } = {}): Promise<FileDownload> {
+    const res = await this.raw(method, path, { ...opts, accept: '*/*' });
+    return { blob: await res.blob(), filename: dispositionFilename(res.headers.get('content-disposition'), fallback) };
   }
 
   private co(co: CompanyId, path: string): string {
@@ -214,16 +242,46 @@ export class HttpApiClient implements ApiClient {
     return this.request<AccountBalance[]>('GET', this.co(co, '/balances'), { query: rangeParams(range) });
   }
   open(co: CompanyId, entityId: string, kind: 'receivable' | 'payable') {
-    return this.request<OpenTxn[]>('GET', this.co(co, '/open'), {
+    return this.request<TxnSummary[]>('GET', this.co(co, '/open'), {
       query: new URLSearchParams({ entity_id: entityId, kind }),
     });
   }
+  undeposited(co: CompanyId) {
+    return this.request<TxnSummary[]>('GET', this.co(co, '/undeposited'));
+  }
 
   reportCatalog(co: CompanyId) {
-    return this.request<ReportCatalogEntry[]>('GET', this.co(co, '/reports'));
+    return this.request<CatalogEntry[]>('GET', this.co(co, '/reports'));
   }
   runReport(co: CompanyId, request: ReportRequest) {
     return this.request<Report>('POST', this.co(co, '/reports/run'), { body: request });
+  }
+  exportReport(co: CompanyId, request: ReportRequest, format: 'csv') {
+    return this.download('POST', this.co(co, '/reports/export'), `${request.title ?? request.report}.${format}`, {
+      query: new URLSearchParams({ format }),
+      body: request,
+    });
+  }
+
+  saved(co: CompanyId, kind: SavedKind) {
+    return this.request<Saved[]>('GET', this.co(co, `/saved/${kind}`));
+  }
+  createSaved(co: CompanyId, kind: SavedKind, name: string, doc: unknown) {
+    return this.request<Saved>('POST', this.co(co, `/saved/${kind}`), { body: { name, doc } });
+  }
+  updateSaved(co: CompanyId, kind: SavedKind, id: string, name: string, doc: unknown) {
+    return this.request<Saved>('PUT', this.co(co, `/saved/${kind}/${encodeURIComponent(id)}`), { body: { name, doc } });
+  }
+  deleteSaved(co: CompanyId, kind: SavedKind, id: string) {
+    return this.request<void>('DELETE', this.co(co, `/saved/${kind}/${encodeURIComponent(id)}`));
+  }
+  memorizedDue(co: CompanyId) {
+    return this.request<MemorizedDue[]>('GET', this.co(co, '/memorized/due'));
+  }
+  useMemorized(co: CompanyId, id: string, date?: string | null) {
+    const p = new URLSearchParams();
+    if (date) p.set('date', date);
+    return this.request<Txn>('GET', this.co(co, `/memorized/${encodeURIComponent(id)}/use`), { query: p });
   }
 
   /**

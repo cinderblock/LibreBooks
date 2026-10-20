@@ -51,7 +51,7 @@ export function Register() {
     { enabled },
   );
   useShortcut('report.quick', () => {
-    if (accountId) open(paths.report('account_quickreport', { account: accountId, macro: 'ThisFiscalYearToDate' }));
+    if (accountId) open(paths.report('AccountQuickReport', { acct: accountId, dates: 'ThisFiscalYearToDate' }));
   }, { enabled });
   useShortcut('record.new', () => (account?.account_type === 'Bank' ? open(paths.newCheck()) : false), { enabled });
   useShortcut('record.edit', () => (selection.current ? open(paths.txn(selection.current.txn_id)) : false), { enabled });

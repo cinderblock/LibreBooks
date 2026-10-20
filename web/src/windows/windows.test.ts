@@ -16,12 +16,14 @@ describe('window paths', () => {
     expect(parseWindowPath('/forms/invoice/new')).toMatchObject({ key: 'form:invoice', params: { form: 'invoice' } });
   });
   test('reports are distinct per subject; dates change in place', () => {
-    const a = parseWindowPath('/reports/account_quickreport?account=a1&macro=ThisMonth');
-    const b = parseWindowPath('/reports/account_quickreport?macro=LastMonth&account=a1');
-    const c = parseWindowPath('/reports/account_quickreport?account=a2');
+    const a = parseWindowPath('/reports/AccountQuickReport?acct=a1&dates=ThisMonth');
+    const b = parseWindowPath('/reports/AccountQuickReport?dates=LastMonth&acct=a1&cols=Month');
+    const c = parseWindowPath('/reports/AccountQuickReport?acct=a2');
+    const d = parseWindowPath('/reports/AccountQuickReport?acct=a1&exact=1');
     expect(a?.key).toBe(b!.key);
     expect(a?.key).not.toBe(c!.key);
-    expect(b?.params.macro).toBe('LastMonth');
+    expect(a?.key).not.toBe(d!.key);
+    expect(b?.params.dates).toBe('LastMonth');
   });
   test('unknown paths', () => {
     expect(parseWindowPath('/nope')).toBeNull();

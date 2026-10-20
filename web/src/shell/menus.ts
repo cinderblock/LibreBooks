@@ -110,20 +110,46 @@ export const MENUS: Menu[] = [
       {
         label: 'Company & Financial',
         children: [
-          { label: 'Profit & Loss Standard', path: paths.report('profit_and_loss'), keywords: ['p&l', 'income statement'] },
-          { label: 'Balance Sheet Standard', path: paths.report('balance_sheet') },
+          { label: 'Profit & Loss Standard', path: paths.report('ProfitAndLoss'), keywords: ['p&l', 'income statement'] },
+          { label: 'Profit & Loss Detail', path: paths.report('ProfitAndLossDetail') },
+          { label: 'Profit & Loss by Class', path: paths.report('ProfitAndLossByClass') },
+          { label: 'Balance Sheet Standard', path: paths.report('BalanceSheet') },
+          { label: 'Statement of Cash Flows', path: paths.report('StatementOfCashFlows') },
+        ],
+      },
+      {
+        label: 'Customers & Receivables',
+        children: [
+          { label: 'A/R Aging Summary', path: paths.report('ArAgingSummary') },
+          { label: 'Customer Balance Summary', path: paths.report('CustomerBalanceSummary') },
+          { label: 'Open Invoices', path: paths.report('OpenInvoices') },
+        ],
+      },
+      {
+        label: 'Vendors & Payables',
+        children: [
+          { label: 'A/P Aging Summary', path: paths.report('ApAgingSummary') },
+          { label: 'Vendor Balance Summary', path: paths.report('VendorBalanceSummary') },
+          { label: 'Unpaid Bills Detail', path: paths.report('UnpaidBillsDetail') },
+        ],
+      },
+      {
+        label: 'Banking',
+        children: [
+          { label: 'Deposit Detail', path: paths.report('DepositDetail') },
+          { label: 'Check Detail', path: paths.report('CheckDetail') },
+          { label: 'Missing Checks', path: paths.report('MissingChecks') },
         ],
       },
       {
         label: 'Accountant & Taxes',
         children: [
-          { label: 'Trial Balance', path: paths.report('trial_balance') },
-          { label: 'Transaction List by Date', path: paths.report('transaction_list_by_date') },
+          { label: 'Trial Balance', path: paths.report('TrialBalance') },
+          { label: 'General Ledger', path: paths.report('GeneralLedger') },
+          { label: 'Journal', path: paths.report('Journal') },
+          { label: 'Transaction List by Date', path: paths.report('TransactionListByDate') },
+          { label: 'Audit Trail', path: paths.report('AuditTrail') },
         ],
-      },
-      {
-        label: 'Customers & Receivables',
-        children: [{ label: 'Customer Balance Summary', path: paths.report('customer_balance_summary') }],
       },
     ],
   },

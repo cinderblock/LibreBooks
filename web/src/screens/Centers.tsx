@@ -118,7 +118,7 @@ export function Center({ which }: { which: 'customers' | 'vendors' | 'employees'
   }, [showingDetail]); // eslint-disable-line react-hooks/exhaustive-deps
   useShortcut('record.new', () => void qc.createEntity('', [cfg.kind]), { enabled });
   useShortcut('record.edit', () => current && setEditing(current), { enabled });
-  useShortcut('report.quick', () => current && open(paths.report('transaction_list_by_date', { entity: current.id, macro: 'All' })), { enabled });
+  useShortcut('report.quick', () => current && open(paths.report('TransactionListByDate', { name: current.id, dates: 'All' })), { enabled });
 
   const list = (
     <div className={classes.centerList} style={mobile ? { width: '100%', flex: 1 } : undefined}>

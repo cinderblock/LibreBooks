@@ -66,13 +66,13 @@ test('customers list → detail with transactions', async ({ page }) => {
 });
 
 test('a report scrolls sideways inside itself, not the page', async ({ page }) => {
-  await start(page, `${CO}/reports/profit_and_loss`);
+  await start(page, `${CO}/reports/ProfitAndLoss`);
   await page.getByRole('combobox', { name: 'Dates' }).tap();
   await page.getByRole('option', { name: 'This Fiscal Year-to-date' }).tap();
   await expect(page.getByRole('combobox', { name: 'Dates' })).toHaveValue('This Fiscal Year-to-date');
   await expect(page.getByTestId('report-grid').getByText('Gross Profit')).toBeVisible();
   // The figures are on screen at 375px, not pushed off to the right.
-  const amount = page.getByTestId('report-grid').getByRole('columnheader', { name: 'Amount' });
+  const amount = page.getByTestId('report-grid').getByRole('columnheader').nth(1);
   const box = await amount.boundingBox();
   expect(box!.x + box!.width).toBeLessThanOrEqual(375);
   await expectNoSideways(page);

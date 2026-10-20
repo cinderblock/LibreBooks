@@ -23,7 +23,7 @@ import { paths } from '~/windows/paths';
 import classes from './screens.module.css';
 
 export function openAccount(open: (p: string) => void, a: Account) {
-  open(hasRegister(a.account_type) ? paths.register(a.id) : paths.report('account_quickreport', { account: a.id, macro: 'ThisFiscalYearToDate' }));
+  open(hasRegister(a.account_type) ? paths.register(a.id) : paths.report('AccountQuickReport', { acct: a.id, dates: 'ThisFiscalYearToDate' }));
 }
 
 export function ChartOfAccounts() {
@@ -53,7 +53,7 @@ export function ChartOfAccounts() {
 
   const enabled = win.isActiveNow;
   useShortcut('nav.useRegister', () => (current ? openAccount(open, current) : false), { enabled, scope: 'window' });
-  useShortcut('report.quick', () => current && open(paths.report('account_quickreport', { account: current.id, macro: 'ThisFiscalYearToDate' })), { enabled });
+  useShortcut('report.quick', () => current && open(paths.report('AccountQuickReport', { acct: current.id, dates: 'ThisFiscalYearToDate' })), { enabled });
   useShortcut('record.new', () => void qc.createAccount(''), { enabled });
   useShortcut('record.edit', () => current && setEditing(current), { enabled });
   useShortcut('record.delete', () => current && void remove(current), { enabled });

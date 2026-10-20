@@ -2,16 +2,17 @@
 // window table works for every company. Unknown paths return null (the shell
 // shows "not found" rather than guessing).
 
+import { SUBJECT_KEYS } from '~/reports/request';
 import type { WindowDesc } from './model';
 
 /**
- * Query keys that make a report window distinct: its subject. Dates and basis
- * change in place (as in QBD, where you modify the open report), so they're not
- * part of the key.
+ * Query keys that make a report window distinct: its subject (the filters that
+ * name an account, a customer…). Dates, basis and columns change in place (as
+ * in QBD, where you modify the open report), so they're not part of the key.
  */
-const REPORT_KEYS = ['account', 'entity'];
+const REPORT_KEYS = SUBJECT_KEYS;
 
-function search(params: URLSearchParams, keys?: string[]): string {
+function search(params: URLSearchParams, keys?: readonly string[]): string {
   const entries = [...params].filter(([k]) => !keys || keys.includes(k)).sort(([a], [b]) => a.localeCompare(b));
   const s = new URLSearchParams(entries).toString();
   return s ? `?${s}` : '';

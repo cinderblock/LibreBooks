@@ -93,7 +93,7 @@ export function Home() {
         </Card>
         <Stack gap="md">
           <SimpleGrid cols={2} spacing="md">
-            <Card withBorder padding="sm" className={classes.clickable} onClick={() => open(paths.report('customer_balance_summary'))}>
+            <Card withBorder padding="sm" className={classes.clickable} onClick={() => open(paths.report('CustomerBalanceSummary'))}>
               <Text size="sm" c="dimmed">
                 Customers owe you
               </Text>
@@ -113,7 +113,7 @@ export function Home() {
           <Card withBorder padding="sm">
             <Group justify="space-between" mb="xs">
               <Text fw={600}>Recent transactions</Text>
-              <Badge variant="light" className={classes.clickable} onClick={() => open(paths.report('transaction_list_by_date'))}>
+              <Badge variant="light" className={classes.clickable} onClick={() => open(paths.report('TransactionListByDate', { dates: 'ThisMonthToDate' }))}>
                 All
               </Badge>
             </Group>

@@ -3,8 +3,7 @@
 
 import type { QueryClient } from '@tanstack/react-query';
 import type { TxnQuery } from './client';
-import type { ReportRequest } from '~/reports/types';
-import type { ChangeEvent, CompanyId, DateRange, ListName, ListQuery } from './types';
+import type { ChangeEvent, CompanyId, DateRange, ListName, ListQuery, ReportRequest, SavedKind } from './types';
 
 export const qk = {
   company: (co: CompanyId) => ['c', co] as const,
@@ -21,10 +20,14 @@ export const qk = {
   open: (co: CompanyId, entityId: string, kind: string) => ['c', co, 'open', entityId, kind] as const,
   openAll: (co: CompanyId) => ['c', co, 'open'] as const,
   nextNumber: (co: CompanyId, type: string, accountId: string | null) => ['c', co, 'next-number', type, accountId] as const,
+  undeposited: (co: CompanyId) => ['c', co, 'undeposited'] as const,
   reportCatalog: (co: CompanyId) => ['c', co, 'reports'] as const,
   reportsAll: (co: CompanyId) => ['c', co, 'report'] as const,
   report: (co: CompanyId, req: ReportRequest) => ['c', co, 'report', req] as const,
   history: (co: CompanyId, id: string) => ['c', co, 'history', id] as const,
+  savedAll: (co: CompanyId) => ['c', co, 'saved'] as const,
+  saved: (co: CompanyId, kind: SavedKind) => ['c', co, 'saved', kind] as const,
+  memorizedDue: (co: CompanyId) => ['c', co, 'memorized-due'] as const,
 };
 
 /** Everything that depends on transactions' postings. */
@@ -33,6 +36,7 @@ export function invalidateTxnDerived(qc: QueryClient, co: CompanyId, txnId?: str
   void qc.invalidateQueries({ queryKey: qk.registerAll(co) });
   void qc.invalidateQueries({ queryKey: qk.balancesAll(co) });
   void qc.invalidateQueries({ queryKey: qk.openAll(co) });
+  void qc.invalidateQueries({ queryKey: qk.undeposited(co) });
   void qc.invalidateQueries({ queryKey: qk.reportsAll(co) });
   void qc.invalidateQueries({ queryKey: ['c', co, 'next-number'] });
   if (txnId) {
@@ -71,6 +75,11 @@ export function invalidateForEvent(qc: QueryClient, co: CompanyId, e: ChangeEven
   }
   if (e.kind === 'company' || e.kind === 'info') {
     void qc.invalidateQueries({ queryKey: qk.info(co) });
+    return;
+  }
+  if (e.kind === 'saved' || e.kind === 'memorized') {
+    void qc.invalidateQueries({ queryKey: qk.savedAll(co) });
+    void qc.invalidateQueries({ queryKey: qk.memorizedDue(co) });
     return;
   }
   void qc.invalidateQueries({ queryKey: qk.company(co) });

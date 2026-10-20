@@ -54,8 +54,9 @@ export function CommandPalette({ run }: { run: RunCommand }) {
       });
     }
     for (const r of reports) {
-      if (r.params.includes('account')) continue;
-      out.push({ id: `report:${r.id}`, label: r.name, description: `Report · ${r.category}`, group: 'Reports', run: () => windows.open(paths.report(r.id, { macro: r.default_macro })) });
+      // The QuickReport needs an account; it's reached from the accounts below.
+      if (r.id === 'AccountQuickReport') continue;
+      out.push({ id: `report:${r.id}`, label: r.name, description: `Report · ${r.category_label}`, group: 'Reports', keys: [r.description], run: () => windows.open(paths.report(r.id)) });
     }
     for (const a of accounts) {
       if (!a.is_active) continue;
@@ -65,7 +66,7 @@ export function CommandPalette({ run }: { run: RunCommand }) {
         description: `${ACCOUNT_TYPE_LABEL[a.account_type]} · ${hasRegister(a.account_type) ? 'register' : 'QuickReport'}`,
         group: 'Accounts',
         keys: a.number ? [a.number] : undefined,
-        run: () => windows.open(hasRegister(a.account_type) ? paths.register(a.id) : paths.report('account_quickreport', { account: a.id, macro: 'ThisFiscalYearToDate' })),
+        run: () => windows.open(hasRegister(a.account_type) ? paths.register(a.id) : paths.report('AccountQuickReport', { acct: a.id, dates: 'ThisFiscalYearToDate' })),
       });
     }
     for (const e of entities) {

@@ -1,6 +1,8 @@
 import { describe, expect, test } from 'bun:test';
+import { defaultRequest } from '~/reports/request';
 import { blankLine, blankTxn } from '../blank';
 import { ApiError } from '../errors';
+import type { Cell, Memorized, Row } from '../types';
 import { FIXTURE_COMPANY_ID, FixtureApiClient } from './client';
 
 const co = FIXTURE_COMPANY_ID;
@@ -28,10 +30,44 @@ describe('fixture books', () => {
 
   test('the balance sheet balances', async () => {
     const api = make();
-    const r = await api.runReport(co, { report: 'balance_sheet', macro: 'ThisFiscalYearToDate' });
-    const total = (label: string) => r.rows.find((row) => row.cells[0] === label)?.cells[1];
+    const r = await api.runReport(co, { ...defaultRequest('BalanceSheet'), date_macro: 'ThisFiscalYearToDate' });
+    const total = (label: string) => money(r.rows.find((row) => label === textOf(row))?.cells[1]);
     expect(total('TOTAL ASSETS')).toBe(total('TOTAL LIABILITIES & EQUITY'));
-    expect(total('TOTAL ASSETS') as number).toBeGreaterThan(0);
+    expect(total('TOTAL ASSETS')).toBeGreaterThan(0);
+    expect(r.basis).toBe('Accrual');
+    expect(r.subtitle.startsWith('As of ')).toBe(true);
+  });
+
+  test('summary options: monthly columns add a TOTAL, comparisons add change columns', async () => {
+    const api = make();
+    const monthly = await api.runReport(co, { ...defaultRequest('ProfitAndLoss'), date_macro: 'ThisFiscalYearToDate', columns: 'Month', percent_of_income: true });
+    expect(monthly.columns.at(-2)?.label).toBe('TOTAL');
+    expect(monthly.columns.at(-1)?.label).toBe('% of Income');
+    const net = monthly.rows.find((row) => textOf(row) === 'Net Income')!;
+    const months = monthly.columns.filter((c) => c.kind === 'Money' && c.label !== 'TOTAL').length;
+    const sum = net.cells.filter((c, i) => monthly.columns[i]!.kind === 'Money' && monthly.columns[i]!.label !== 'TOTAL').reduce((t, c) => t + money(c), 0);
+    expect(months).toBeGreaterThan(1);
+    expect(money(net.cells[monthly.columns.findIndex((c) => c.label === 'TOTAL')])).toBe(sum);
+    const compared = await api.runReport(co, { ...defaultRequest('ProfitAndLoss'), date_macro: 'ThisMonth', previous_period: true, dollar_change: true, percent_change: true });
+    expect(compared.columns.map((c) => c.label).slice(-2)).toEqual(['$ Change', '% Change']);
+  });
+
+  test('the catalog lists every report once with its options', async () => {
+    const api = make();
+    const c = await api.reportCatalog(co);
+    expect(c.length).toBe(46);
+    expect(new Set(c.map((e) => e.id)).size).toBe(46);
+    const pl = c.find((e) => e.id === 'ProfitAndLoss')!;
+    expect(pl.params.basis && pl.params.comparisons && pl.params.percent_of_income).toBe(true);
+    expect(c.find((e) => e.id === 'BalanceSheet')!.params.dates).toBe('AsOf');
+    expect(c.filter((e) => e.category === 'Lists').length).toBe(4);
+    // Every report in the catalog runs in fixture mode.
+    for (const e of c) {
+      const req = e.id === 'AccountQuickReport' ? { ...defaultRequest(e.id), filters: { ...defaultRequest(e.id).filters, accounts: [api.find('account', 'Checking')!] } } : e.id === 'JobProfitabilityDetail' ? { ...defaultRequest(e.id), filters: { ...defaultRequest(e.id).filters, names: [api.find('entity', 'Acme Corp')!] } } : defaultRequest(e.id);
+      const r = await api.runReport(co, req);
+      expect(r.id).toBe(e.id);
+      expect(r.columns.length).toBeGreaterThan(0);
+    }
   });
 
   test('register running balance ends at the account balance', async () => {
@@ -95,15 +131,61 @@ describe('fixture books', () => {
     expect(events).toContain('txn:cleared');
   });
 
-  test('reports drill down to transactions and QuickReports', async () => {
+  test('reports drill down to transactions and account detail', async () => {
     const api = make();
-    const pl = await api.runReport(co, { report: 'profit_and_loss', macro: 'ThisFiscalYearToDate' });
-    const drill = pl.rows.find((r) => r.drill?.kind === 'report')!.drill!;
-    expect(drill.kind).toBe('report');
-    if (drill.kind !== 'report') return;
-    const qr = await api.runReport(co, drill.request);
-    expect(qr.rows.some((r) => r.drill?.kind === 'txn')).toBe(true);
-    const net = pl.rows.find((r) => r.cells[0] === 'Net Income')!.cells[1];
-    expect(typeof net).toBe('number');
+    const pl = await api.runReport(co, { ...defaultRequest('ProfitAndLoss'), date_macro: 'ThisFiscalYearToDate' });
+    const cell = pl.rows.flatMap((r) => r.cells).find((c) => c.drill?.kind === 'Report')!;
+    const drill = cell.drill!;
+    if (drill.kind !== 'Report') throw new Error('expected a report drill');
+    expect(drill.request.report).toBe('TransactionDetailByAccount');
+    expect(drill.request.filters.accounts).toHaveLength(1);
+    const detail = await api.runReport(co, drill.request);
+    expect(detail.rows.some((r) => r.drill?.kind === 'Txn')).toBe(true);
+    // The account's detail total equals the P&L figure it was drilled from.
+    const figure = money(cell);
+    const subtotal = detail.rows.find((r) => r.kind === 'Subtotal')!;
+    expect(money(subtotal.cells[6])).toBe(figure);
+    expect(money(pl.rows.find((r) => textOf(r) === 'Net Income')!.cells[1])).not.toBeNaN();
+  });
+
+  test('CSV export names the file after the report', async () => {
+    const api = make();
+    const file = await api.exportReport(co, { ...defaultRequest('TrialBalance') }, 'csv');
+    expect(file.filename).toBe('Trial Balance.csv');
+    expect((await file.blob.text()).startsWith('Juniper Hill Woodworks\r\nTrial Balance')).toBe(true);
+  });
+
+  test('memorized reports and transactions are saved documents', async () => {
+    const api = make();
+    const s = await api.createSaved(co, 'memorized_report', 'Monthly P&L', { ...defaultRequest('ProfitAndLoss'), date_macro: 'LastMonth' });
+    expect((await api.saved(co, 'memorized_report')).map((d) => d.name)).toEqual(['Monthly P&L']);
+    await api.deleteSaved(co, 'memorized_report', s.id);
+    expect(await api.saved(co, 'memorized_report')).toEqual([]);
+
+    const rent = (await api.txns(co, { types: ['Check'], text: 'Shop rent', limit: 1 }))[0]!;
+    const template = (await api.txn(co, rent.id)).txn;
+    const m: Memorized = { template, repeat: 'Remind', interval: 'Monthly', next_date: today, days_in_advance: 3, remaining: null, group: null };
+    const saved = await api.createSaved(co, 'memorized_txn', 'Rent', m);
+    expect((await api.memorizedDue(co)).map((d) => d.name)).toEqual(['Rent']);
+    const fresh = await api.useMemorized(co, saved.id, '2026-11-01');
+    expect(fresh.edit_seq).toBe(0);
+    expect(fresh.id).not.toBe(template.id);
+    expect(fresh.date).toBe('2026-11-01');
+    expect(fresh.lines[0]!.amount).toBe(template.lines[0]!.amount);
+    api.advanceMemorized(saved.id);
+    expect(await api.memorizedDue(co)).toEqual([]);
+  });
+
+  test('open items include unused credits; undeposited lists payments not yet deposited', async () => {
+    const api = make();
+    const openInvoice = (await api.txns(co, { types: ['Invoice'], open_only: true }))[0]!;
+    const open = await api.open(co, openInvoice.entity_id!, 'receivable');
+    expect(open.every((o) => (o.open_balance ?? 0) > 0)).toBe(true);
+    expect(open.some((o) => o.id === openInvoice.id)).toBe(true);
+    const und = await api.undeposited(co);
+    expect(und.every((u) => u.txn_type === 'ReceivePayment' && u.amount > 0)).toBe(true);
   });
 });
+
+const textOf = (row: Row) => (row.cells[0]?.value.type === 'Text' ? row.cells[0].value.value : '');
+const money = (c: Cell | undefined) => (c?.value.type === 'Money' ? c.value.value : Number.NaN);

@@ -7,12 +7,13 @@
 
 import { blankLine } from '../blank';
 import { ApiError } from '../errors';
-import type { ApiClient, EventHandlers, EventSubscription, TxnQuery } from '../client';
+import type { ApiClient, EventHandlers, EventSubscription, FileDownload, TxnQuery } from '../client';
 import { clone } from '../json';
 import type {
   Account,
   AccountBalance,
   AuditEntry,
+  CatalogEntry,
   ChangeEvent,
   ClearedStatus,
   CompanyId,
@@ -24,11 +25,16 @@ import type {
   ListName,
   ListQuery,
   ListRecords,
-  OpenTxn,
+  Memorized,
+  MemorizedDue,
   Posting,
   PreviewOutcome,
   RegisterLine,
   RegisterResponse,
+  Report,
+  ReportRequest,
+  Saved,
+  SavedKind,
   SaveOutcome,
   Session,
   Txn,
@@ -36,13 +42,13 @@ import type {
   TxnType,
   TxnWithPostings,
 } from '../types';
-import type { Report, ReportCatalogEntry, ReportRequest } from '~/reports/types';
 import { accountTypeOrder } from '~/lib/accountTypes';
-import { addDays, todayIso } from '~/lib/dates';
+import { addDays, addMonths, todayIso } from '~/lib/dates';
 import { hierarchicalCompare } from '~/lib/tree';
+import { reportToCsv } from '~/reports/rows';
 import { fixturePost, type PostingBooks } from './post';
 import { FIXTURE_COMPANY_ID, buildSeed, stressNames } from './seed';
-import { FIXTURE_REPORTS, runFixtureReport } from './reports';
+import { fixtureCatalog, runFixtureReport } from './reports';
 
 export interface StoredTxn {
   txn: Txn;
@@ -65,6 +71,7 @@ type Lists = { [L in ListName]: ListRecords[L][] };
 const STRESS_ACCOUNT_ID = '00000000-0000-4000-9fff-000000000001';
 const AR_TYPES: TxnType[] = ['Invoice', 'CreditMemo', 'StatementCharge'];
 const AP_TYPES: TxnType[] = ['Bill', 'VendorCredit'];
+const PAYMENT_TYPES: TxnType[] = ['ReceivePayment', 'BillPaymentCheck', 'BillPaymentCreditCard'];
 
 export class FixtureApiClient implements ApiClient {
   readonly mode = 'fixtures' as const;
@@ -77,6 +84,8 @@ export class FixtureApiClient implements ApiClient {
   private listeners = new Set<EventHandlers>();
   private audit: AuditEntry[] = [];
   private stressLines: RegisterLine[] | null = null;
+  /** Memorized transactions and reports (`/saved/:kind`). */
+  private savedDocs: Saved[] = [];
 
   constructor(opts: FixtureOptions = {}) {
     this.latency = opts.latencyMs ?? 90;
@@ -355,14 +364,18 @@ export class FixtureApiClient implements ApiClient {
       if (s.txn.is_void) continue;
       for (const a of s.txn.applications) {
         m.set(a.target_txn_id, (m.get(a.target_txn_id) ?? 0) + a.amount + a.discount + a.credit_amount);
+        // A credit used against the target is used up by that much.
+        if (a.credit_txn_id && a.credit_amount) m.set(a.credit_txn_id, (m.get(a.credit_txn_id) ?? 0) + a.credit_amount);
       }
     }
     return m;
   }
 
   private openBalance(s: StoredTxn, applied: Map<string, number>): number | null {
-    if (![...AR_TYPES, ...AP_TYPES].includes(s.txn.txn_type)) return null;
     if (s.txn.is_void) return 0;
+    // A payment's open balance is what it hasn't applied yet (an unapplied credit).
+    if (PAYMENT_TYPES.includes(s.txn.txn_type)) return s.txn.amount - s.txn.applications.reduce((t, a) => t + a.amount + a.discount, 0);
+    if (![...AR_TYPES, ...AP_TYPES].includes(s.txn.txn_type)) return null;
     return s.total - (applied.get(s.txn.id) ?? 0);
   }
 
@@ -688,52 +701,171 @@ export class FixtureApiClient implements ApiClient {
     });
   }
 
-  open(co: CompanyId, entityId: string, kind: 'receivable' | 'payable'): Promise<OpenTxn[]> {
+  /**
+   * Open items for a name and its jobs, as `TxnSummary` rows whose
+   * `open_balance` is what is left: invoices/bills still owed, and credits and
+   * unapplied payments still unused (so a payment form can apply them).
+   */
+  open(co: CompanyId, entityId: string, kind: 'receivable' | 'payable'): Promise<TxnSummary[]> {
     this.checkCompany(co);
     const applied = this.appliedTo();
-    const types = kind === 'receivable' ? AR_TYPES : AP_TYPES;
+    const types: TxnType[] = kind === 'receivable' ? [...AR_TYPES, 'ReceivePayment'] : [...AP_TYPES, 'BillPaymentCheck', 'BillPaymentCreditCard'];
     const family = this.entityFamily(entityId);
     return this.delay(() =>
       [...this.txnStore.values()]
-        .filter((s) => types.includes(s.txn.txn_type) && s.txn.entity_id && family.has(s.txn.entity_id))
+        .filter((s) => types.includes(s.txn.txn_type) && s.txn.entity_id && family.has(s.txn.entity_id) && !s.txn.is_void)
+        .sort((a, b) => (a.txn.date < b.txn.date ? -1 : a.txn.date > b.txn.date ? 1 : a.seq - b.seq))
         .map((s) => ({ s, open: this.openBalance(s, applied) ?? 0 }))
         .filter(({ open }) => open > 0)
-        .map(({ s, open }) => ({
-          txn_id: s.txn.id,
-          txn_type: s.txn.txn_type,
-          date: s.txn.date,
-          number: s.txn.number,
-          due_date: s.txn.due_date,
-          amount: s.total,
-          open_balance: open,
-        })),
+        .map(({ s, open }) => ({ ...this.summaryOf(s, applied), open_balance: open })),
+    );
+  }
+
+  /** Payments (and sales receipts) sitting in Undeposited Funds, not yet on a deposit. */
+  undeposited(co: CompanyId): Promise<TxnSummary[]> {
+    this.checkCompany(co);
+    const applied = this.appliedTo();
+    const uf = this.lists.accounts.find((a) => a.role === 'UndepositedFunds');
+    if (!uf) return this.delay(() => []);
+    const deposited = new Set([...this.txnStore.values()].flatMap((s) => (s.txn.txn_type === 'Deposit' && !s.txn.is_void ? s.txn.lines.map((l) => l.linked_txn_id).filter(Boolean) : [])));
+    return this.delay(() =>
+      [...this.txnStore.values()]
+        .filter((s) => !s.txn.is_void && s.txn.txn_type !== 'Deposit' && !deposited.has(s.txn.id) && s.postings.some((p) => p.account_id === uf.id && p.amount > 0))
+        .sort((a, b) => (a.txn.date < b.txn.date ? -1 : a.txn.date > b.txn.date ? 1 : a.seq - b.seq))
+        .map((s) => ({ ...this.summaryOf(s, applied), account_id: uf.id, account_name: uf.full_name, amount: s.postings.filter((p) => p.account_id === uf.id).reduce((t, p) => t + p.amount, 0) })),
     );
   }
 
   // ---- reports --------------------------------------------------------------
 
-  reportCatalog(co: CompanyId): Promise<ReportCatalogEntry[]> {
+  reportCatalog(co: CompanyId): Promise<CatalogEntry[]> {
     this.checkCompany(co);
-    return this.delay(() => FIXTURE_REPORTS);
+    return this.delay(() => fixtureCatalog());
+  }
+
+  private buildReport(request: ReportRequest): Report {
+    return runFixtureReport(
+      {
+        info: this.info,
+        accounts: this.sorted('accounts'),
+        entities: this.lists.entities,
+        items: this.lists.items,
+        classes: this.lists.classes,
+        txns: [...this.txnStore.values()],
+        audit: this.audit,
+        today: this.today,
+      },
+      request,
+    );
   }
 
   runReport(co: CompanyId, request: ReportRequest): Promise<Report> {
     this.checkCompany(co);
     try {
-      const report = runFixtureReport(
-        {
-          info: this.info,
-          accounts: this.sorted('accounts'),
-          entities: this.lists.entities,
-          txns: [...this.txnStore.values()],
-          today: this.today,
-        },
-        request,
-      );
+      const report = this.buildReport(request);
       return this.delay(() => report);
     } catch (e) {
       return Promise.reject(e);
     }
+  }
+
+  exportReport(co: CompanyId, request: ReportRequest, format: 'csv'): Promise<FileDownload> {
+    this.checkCompany(co);
+    try {
+      const report = this.buildReport(request);
+      const name = `${report.title.replace(/[^\w -]+/g, '').trim() || 'report'}.${format}`;
+      return this.delay(() => ({ blob: new Blob([reportToCsv(report)], { type: 'text/csv;charset=utf-8' }), filename: name }));
+    } catch (e) {
+      return Promise.reject(e);
+    }
+  }
+
+  // ---- saved documents ------------------------------------------------------
+
+  saved(co: CompanyId, kind: SavedKind): Promise<Saved[]> {
+    this.checkCompany(co);
+    return this.delay(() => this.savedDocs.filter((s) => s.kind === kind).sort((a, b) => a.name.localeCompare(b.name)));
+  }
+
+  createSaved(co: CompanyId, kind: SavedKind, name: string, doc: unknown): Promise<Saved> {
+    this.checkCompany(co);
+    if (!name.trim()) return Promise.reject(new ApiError(400, 'invalid', 'A name is required', { field: 'name' }));
+    const now = new Date().toISOString();
+    const s: Saved = { id: crypto.randomUUID(), kind, name: name.trim(), doc: clone(doc), created_at: now, modified_at: now };
+    this.savedDocs.push(s);
+    this.emit('saved', s.id, 'created');
+    return this.delay(() => s);
+  }
+
+  updateSaved(co: CompanyId, kind: SavedKind, id: string, name: string, doc: unknown): Promise<Saved> {
+    this.checkCompany(co);
+    const i = this.savedDocs.findIndex((s) => s.id === id && s.kind === kind);
+    if (i < 0) return Promise.reject(new ApiError(404, 'not_found', 'Not found'));
+    const s: Saved = { ...this.savedDocs[i]!, name: name.trim(), doc: clone(doc), modified_at: new Date().toISOString() };
+    this.savedDocs[i] = s;
+    this.emit('saved', s.id, 'updated');
+    return this.delay(() => s);
+  }
+
+  deleteSaved(co: CompanyId, kind: SavedKind, id: string): Promise<void> {
+    this.checkCompany(co);
+    const i = this.savedDocs.findIndex((s) => s.id === id && s.kind === kind);
+    if (i < 0) return Promise.reject(new ApiError(404, 'not_found', 'Not found'));
+    this.savedDocs.splice(i, 1);
+    this.emit('saved', id, 'deleted');
+    return this.delay(() => undefined);
+  }
+
+  memorizedDue(co: CompanyId): Promise<MemorizedDue[]> {
+    this.checkCompany(co);
+    return this.delay(() =>
+      this.savedDocs
+        .filter((s) => s.kind === 'memorized_txn')
+        .flatMap((s) => {
+          const m = s.doc as Memorized;
+          if (m.repeat === 'Never' || m.remaining === 0 || !m.next_date) return [];
+          const horizon = addDays(this.today, m.days_in_advance);
+          return m.next_date <= horizon ? [{ id: s.id, name: s.name, due: m.next_date, repeat: m.repeat }] : [];
+        })
+        .sort((a, b) => a.due.localeCompare(b.due)),
+    );
+  }
+
+  useMemorized(co: CompanyId, id: string, date?: string | null): Promise<Txn> {
+    this.checkCompany(co);
+    const s = this.savedDocs.find((d) => d.id === id && d.kind === 'memorized_txn');
+    if (!s) return Promise.reject(new ApiError(404, 'not_found', 'No such memorized transaction'));
+    const m = s.doc as Memorized;
+    const t: Txn = {
+      ...clone(m.template),
+      id: crypto.randomUUID(),
+      date: date ?? this.today,
+      number: null,
+      edit_seq: 0,
+      created_at: null,
+      modified_at: null,
+      created_by: null,
+      modified_by: null,
+      is_void: false,
+      due_date: null,
+      discount_date: null,
+    };
+    t.lines = t.lines.map((l) => ({ ...l, id: crypto.randomUUID() }));
+    return this.delay(() => t);
+  }
+
+  /** The store advances a memorized transaction's schedule after it's entered. */
+  advanceMemorized(id: string) {
+    const s = this.savedDocs.find((d) => d.id === id && d.kind === 'memorized_txn');
+    if (!s) return;
+    const m = s.doc as Memorized;
+    if (!m.next_date || !m.interval) return;
+    const months: Partial<Record<NonNullable<Memorized['interval']>, number>> = { Monthly: 1, Quarterly: 3, SemiAnnually: 6, Annually: 12 };
+    const days: Partial<Record<NonNullable<Memorized['interval']>, number>> = { Daily: 1, Weekly: 7, BiWeekly: 14, SemiMonthly: 15 };
+    const next = months[m.interval] ? addMonths(m.next_date, months[m.interval]!) : addDays(m.next_date, days[m.interval] ?? 30);
+    s.doc = { ...m, next_date: next, remaining: m.remaining === null ? null : Math.max(0, m.remaining - 1) };
+    s.modified_at = new Date().toISOString();
+    this.emit('saved', s.id, 'updated');
   }
 
   // ---- events ---------------------------------------------------------------

@@ -95,8 +95,8 @@ test('windows stay open as tabs and Ctrl+F6 cycles them, keeping unsaved edits',
   await expect(memo).toHaveValue('half-written');
 });
 
-test('a report collapses and drills down to a QuickReport, then a transaction', async ({ page }) => {
-  await start(page, '/c/00000000-0000-4000-8000-00000000c0de/reports/profit_and_loss');
+test('a report collapses and drills down to account detail, then a transaction', async ({ page }) => {
+  await start(page, '/c/00000000-0000-4000-8000-00000000c0de/reports/ProfitAndLoss');
   const report = page.getByTestId('report-window');
   await report.getByRole('combobox', { name: 'Dates' }).click();
   await page.getByRole('option', { name: 'This Fiscal Year-to-date' }).click();
@@ -109,11 +109,40 @@ test('a report collapses and drills down to a QuickReport, then a transaction', 
   await grid.getByRole('button', { name: 'Collapse Income' }).click();
   await expect(grid.getByText('Total Income')).toBeHidden();
   await grid.getByRole('button', { name: 'Expand Income' }).click();
+  // Options: monthly columns add a TOTAL column; % of income adds percent columns.
+  await expect(page).toHaveURL(/dates=ThisFiscalYearToDate/);
+  await report.getByRole('combobox', { name: 'Columns' }).click();
+  await page.getByRole('option', { name: 'Month' }).click();
+  await expect(grid.getByRole('columnheader', { name: 'TOTAL' })).toBeVisible();
+  await report.getByRole('button', { name: 'Options' }).click();
+  await page.getByRole('checkbox', { name: '% of income' }).click();
+  await expect(grid.getByRole('columnheader', { name: '% of Income' }).first()).toBeVisible();
+  await page.keyboard.press('Escape');
   await grid.getByText('Design Services', { exact: true }).dblclick();
-  await expect(page.getByRole('tab', { name: /Design Services/ })).toBeVisible();
-  const qr = page.locator('[data-window^="report:account_quickreport"]').getByTestId('report-grid');
-  await qr.getByRole('row').nth(2).dblclick();
+  await expect(page.getByRole('tab', { name: /Transaction Detail by Account: Design Services/ })).toBeVisible();
+  const detail = page.locator('[data-window^="report:TransactionDetailByAccount"]').getByTestId('report-grid');
+  await detail.getByRole('row').nth(2).dblclick();
   await expect(page.getByRole('tab', { name: /Invoice/ })).toBeVisible();
+});
+
+test('the Report Center lists QBD categories; memorizing a report keeps it', async ({ page }) => {
+  await start(page, '/c/00000000-0000-4000-8000-00000000c0de/reports');
+  const center = page.getByTestId('report-center');
+  for (const c of ['Company & Financial', 'Customers & Receivables', 'Vendors & Payables', 'Banking', 'Accountant & Taxes', 'Lists']) {
+    await expect(center.getByText(c, { exact: true })).toBeVisible();
+  }
+  await center.getByRole('button', { name: 'Balance Sheet', exact: true }).click();
+  const report = page.getByTestId('report-window');
+  await expect(report.getByTestId('report-grid').getByText('TOTAL ASSETS')).toBeVisible();
+  await expect(report.getByRole('textbox', { name: 'As of' })).toBeVisible();
+  await report.getByRole('button', { name: 'Memorize report' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Memorize Report' });
+  await dialog.getByRole('textbox', { name: 'Name' }).fill('Month-end balance sheet');
+  await dialog.getByRole('button', { name: 'Memorize' }).click();
+  await expect(page.getByRole('tab', { name: 'Month-end balance sheet' })).toBeVisible();
+  await page.getByRole('tab', { name: 'Report Center' }).click();
+  await expect(center.getByText('Memorized Reports')).toBeVisible();
+  await expect(center.getByText('Month-end balance sheet')).toBeVisible();
 });
 
 test("someone else's save shows a banner, and saving over it asks", async ({ page }) => {

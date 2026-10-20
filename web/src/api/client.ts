@@ -2,10 +2,10 @@
 // (the real server, plans/api.md) and `FixtureApiClient` (in-memory synthetic
 // books for `?fixtures=1`). Screens never know which one they have.
 
-import type { Report, ReportCatalogEntry, ReportRequest } from '~/reports/types';
 import type {
   AccountBalance,
   AuditEntry,
+  CatalogEntry,
   ChangeEvent,
   ClearedStatus,
   CompanyId,
@@ -21,9 +21,13 @@ import type {
   ListRecords,
   LoginFinish,
   LoginStart,
-  OpenTxn,
+  MemorizedDue,
   PreviewOutcome,
   RegisterResponse,
+  Report,
+  ReportRequest,
+  Saved,
+  SavedKind,
   SaveOutcome,
   Session,
   Txn,
@@ -45,6 +49,12 @@ export interface EventHandlers {
   onChange(e: ChangeEvent): void;
   /** Connection state, for the "live" indicator. */
   onStatus?(status: 'connecting' | 'open' | 'error'): void;
+}
+
+/** A file the server produced (a CSV export, a company file). */
+export interface FileDownload {
+  blob: Blob;
+  filename: string;
 }
 
 export interface ApiClient {
@@ -83,10 +93,26 @@ export interface ApiClient {
   register(co: CompanyId, accountId: string, range?: Partial<DateRange>): Promise<RegisterResponse>;
   setCleared(co: CompanyId, accountId: string, txnId: string, status: ClearedStatus): Promise<void>;
   balances(co: CompanyId, range?: Partial<DateRange>): Promise<AccountBalance[]>;
-  open(co: CompanyId, entityId: string, kind: 'receivable' | 'payable'): Promise<OpenTxn[]>;
+  /**
+   * Open items for a name and its jobs: invoices, charges and unused credits /
+   * unapplied payments (receivable), or bills and unused credits (payable).
+   */
+  open(co: CompanyId, entityId: string, kind: 'receivable' | 'payable'): Promise<TxnSummary[]>;
+  /** Payments waiting in Undeposited Funds (Make Deposits). */
+  undeposited(co: CompanyId): Promise<TxnSummary[]>;
 
-  reportCatalog(co: CompanyId): Promise<ReportCatalogEntry[]>;
+  reportCatalog(co: CompanyId): Promise<CatalogEntry[]>;
   runReport(co: CompanyId, request: ReportRequest): Promise<Report>;
+  exportReport(co: CompanyId, request: ReportRequest, format: 'csv'): Promise<FileDownload>;
+
+  /** Saved documents: memorized transactions (`doc: Memorized`) and reports (`doc: ReportRequest`). */
+  saved(co: CompanyId, kind: SavedKind): Promise<Saved[]>;
+  createSaved(co: CompanyId, kind: SavedKind, name: string, doc: unknown): Promise<Saved>;
+  updateSaved(co: CompanyId, kind: SavedKind, id: string, name: string, doc: unknown): Promise<Saved>;
+  deleteSaved(co: CompanyId, kind: SavedKind, id: string): Promise<void>;
+  memorizedDue(co: CompanyId): Promise<MemorizedDue[]>;
+  /** A fresh, unsaved transaction from a memorized one (`edit_seq` 0, today's date). */
+  useMemorized(co: CompanyId, id: string, date?: string | null): Promise<Txn>;
 
   /** Live changes (SSE `/events?company=`); the fixture client emits its own. */
   subscribe(co: CompanyId, handlers: EventHandlers): EventSubscription;
@@ -106,4 +132,13 @@ export function txnQueryParams(q: TxnQuery = {}): URLSearchParams {
     }
   }
   return p;
+}
+
+/** Trigger a browser download of a file the API produced. */
+export function saveDownload(file: FileDownload) {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(file.blob);
+  a.download = file.filename;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 }

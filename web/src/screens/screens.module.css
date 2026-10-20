@@ -48,6 +48,12 @@
   cursor: pointer;
 }
 
+/* Two fields side by side on a phone (From / To). */
+.half {
+  flex: 1 1 calc(50% - 6px);
+  min-width: 0;
+}
+
 .num {
   font-variant-numeric: tabular-nums;
   white-space: nowrap;

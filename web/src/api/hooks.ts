@@ -3,7 +3,6 @@
 
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useMemo } from 'react';
-import type { ReportRequest } from '~/reports/types';
 import type { TxnQuery } from './client';
 import { useApi, useCompanyId } from './context';
 import { invalidateTxnDerived, qk } from './keys';
@@ -17,6 +16,8 @@ import type {
   ListQuery,
   ListRecords,
   RegisterResponse,
+  ReportRequest,
+  SavedKind,
   Txn,
   TxnType,
   TxnWithPostings,
@@ -144,12 +145,71 @@ export function useReport(req: ReportRequest | null) {
   const api = useApi();
   const co = useCompanyId();
   return useQuery({
-    queryKey: qk.report(co, req ?? { report: '' }),
+    queryKey: req ? qk.report(co, req) : [...qk.reportsAll(co), 'none'],
     queryFn: () => api.runReport(co, req!),
-    enabled: !!req?.report,
+    enabled: !!req,
     staleTime: 30_000,
     placeholderData: keepPreviousData,
   });
+}
+
+/** Open invoices/credits or bills/credits for a name (Receive Payments, Pay Bills). */
+export function useOpenItems(entityId: string | null, kind: 'receivable' | 'payable') {
+  const api = useApi();
+  const co = useCompanyId();
+  return useQuery({
+    queryKey: qk.open(co, entityId ?? '', kind),
+    queryFn: () => api.open(co, entityId!, kind),
+    enabled: !!entityId,
+    staleTime: 10_000,
+  });
+}
+
+/** Payments waiting in Undeposited Funds (Make Deposits). */
+export function useUndeposited(enabled = true) {
+  const api = useApi();
+  const co = useCompanyId();
+  return useQuery({ queryKey: qk.undeposited(co), queryFn: () => api.undeposited(co), enabled, staleTime: 10_000 });
+}
+
+export function useSaved(kind: SavedKind) {
+  const api = useApi();
+  const co = useCompanyId();
+  return useQuery({ queryKey: qk.saved(co, kind), queryFn: () => api.saved(co, kind), staleTime: 60_000 });
+}
+
+/** Create (no id) or replace (with id) a saved document. */
+export function useSaveSaved(kind: SavedKind) {
+  const api = useApi();
+  const co = useCompanyId();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, name, doc }: { id?: string | null; name: string; doc: unknown }) =>
+      id ? api.updateSaved(co, kind, id, name, doc) : api.createSaved(co, kind, name, doc),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: qk.savedAll(co) });
+      void qc.invalidateQueries({ queryKey: qk.memorizedDue(co) });
+    },
+  });
+}
+
+export function useDeleteSaved(kind: SavedKind) {
+  const api = useApi();
+  const co = useCompanyId();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.deleteSaved(co, kind, id),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: qk.savedAll(co) });
+      void qc.invalidateQueries({ queryKey: qk.memorizedDue(co) });
+    },
+  });
+}
+
+export function useMemorizedDue() {
+  const api = useApi();
+  const co = useCompanyId();
+  return useQuery({ queryKey: qk.memorizedDue(co), queryFn: () => api.memorizedDue(co), staleTime: 60_000 });
 }
 
 /** Create (edit_seq 0) or update a transaction; refreshes everything it touches. */
