@@ -1,0 +1,167 @@
+{
+  "tag_name": "2026.10.1",
+  "name": "2026.10.1",
+  "draft": false,
+  "prerelease": false,
+  "html_url": "https://github.com/cloudflare/cloudflared/releases/tag/2026.10.1",
+  "published_at": "2026-10-15T17:15:26Z",
+  "body": " \n### SHA256 Checksums:\n```\ncloudflared-amd64.pkg: 1640716fdba2ccc89726864602209a7bbf9c42348dfd954228a4589990bd7923\ncloudflared-arm64.pkg: 515d86686f7cdc7425ddb44c0b90a31346c4013a5a4334732c9490dd1fda07ec\ncloudflared-darwin-amd64.tgz: 8ccc6383aef109c8d88965937649a796febbb166dab4b73345e820623aee1ede\ncloudflared-darwin-arm64.tgz: 35b7e34c9a3f214d80d859c4223450c69e583c7668d228c45771026fe376cab9\ncloudflared-fips-linux-amd64: 7fe06420c05b9d5c3475cc4d930fdddee152e9c8523f6e7d38caee79eadb9068\ncloudflared-fips-linux-amd64.deb: d614f23c529cc07d355a47da9b322a2a0b7b9558b373d06c031ba093a7a45c08\ncloudflared-fips-linux-x86_64.rpm: f11a319d56908987e339f8480d1666499b9c740c108835318cd8be625a83aeb3\ncloudflared-linux-386: 9f5794f4e0bf2a4be8b3a3b8cc97720f60b3686089e07cebfd90aa9826b31749\ncloudflared-linux-386.deb: 1710421e2b9af26f26d51c9d88563ba61041060666a1ed96cda25a3444fb7ca2\ncloudflared-linux-386.rpm: f2f5c62c28f96f9f56601e0bbbd8a85a5f56a7b813b2dd4ed7cdea2a0345db69\ncloudflared-linux-aarch64.rpm: bf13890f308237223db01f34d2e394014a5eea0b612c8728833efc6a091b1aa9\ncloudflared-linux-amd64: 3bfc539f45d2620c71debb7a86be0efa737ed5ccbad9eb85c787116900e5c586\ncloudflared-linux-amd64.deb: 200573c872174ab449965655febadef8edfbb144ebcaa391b700b2dedbadb3cd\ncloudflared-linux-arm: 598445dbe19d789d2901c57bb9df5b070cc2c4f817c48b0ae2702a93d15a468e\ncloudflared-linux-arm.deb: 3989ff1249bd759c778a8a2382e79c032f061c4b7cb398961320f6c5a568abe1\ncloudflared-linux-arm.rpm: d0cf5f188b49808d2e390c7c75ab86c22d8ab8dba1ac515d8faa92d6031447bf\ncloudflared-linux-arm64: 2c65dfabf616c40efc7545d107d7a57ad5e21377e2964b7e88af19a238074a46\ncloudflared-linux-arm64.deb: f16c16b776a7f8edf7c5b365b5d2eba9544043b9867676295c930082448035b6\ncloudflared-linux-armhf: c047e24af9ed956b55d514e3a0e2d8020e9c6d0629c4731c8ec08bd79a29a050\ncloudflared-linux-armhf.deb: 5ec1769c6cda17bdb8907d99dcd3b574ef6fc618039056d77dd49b90e11f965f\ncloudflared-linux-armhf.rpm: 9a896c4a2253ceb6da6fb9864636463295c5b1d0d885422a8ab7fc58204dc535\ncloudflared-linux-x86_64.rpm: 31a084f530043ba511b6cb62acbe5e28d104e95a49266da33316d2be233650cc\ncloudflared-windows-386.exe: a0c9a47af2cbd681005e4c1210edf95f986ecc66cee6d68b0e42c484af465d2e\ncloudflared-windows-386.msi: 4fcf3980eb3ff9cac349e07246600044194d411b9e3264505bbb6aa2e3f8283a\ncloudflared-windows-amd64.exe: 4d2490e74082c5d48dbfedaf92576fa5bd1702379ab88eb7faa0cfbe8dc891b6\ncloudflared-windows-amd64.msi: 5afdf57c8e98bdfae7a5794be0df6d7fb0ed960fe2cda2ce20541434a487c1bd\n```",
+  "assets": [
+    {
+      "name": "cloudflared-amd64.pkg",
+      "size": 21783387,
+      "digest": "sha256:1640716fdba2ccc89726864602209a7bbf9c42348dfd954228a4589990bd7923",
+      "browser_download_url": "https://github.com/cloudflare/cloudflared/releases/download/2026.10.1/cloudflared-amd64.pkg"
+    },
+    {
+      "name": "cloudflared-arm64.pkg",
+      "size": 19822731,
+      "digest": "sha256:515d86686f7cdc7425ddb44c0b90a31346c4013a5a4334732c9490dd1fda07ec",
+      "browser_download_url": "https://github.com/cloudflare/cloudflared/releases/download/2026.10.1/cloudflared-arm64.pkg"
+    },
+    {
+      "name": "cloudflared-darwin-amd64.tgz",
+      "size": 21768449,
+      "digest": "sha256:3b0dbaf378337e9d7fb6cd235a76d1d6a7dee434c2d8edf9281164fb6a3837ab",
+      "browser_download_url": "https://github.com/cloudflare/cloudflared/releases/download/2026.10.1/cloudflared-darwin-amd64.tgz"
+    },
+    {
+      "name": "cloudflared-darwin-arm64.tgz",
+      "size": 19807806,
+      "digest": "sha256:647615df99d49cd179ea5e13ef760b9bbfb33630f6ae62f87e33dfadda60adcc",
+      "browser_download_url": "https://github.com/cloudflare/cloudflared/releases/download/2026.10.1/cloudflared-darwin-arm64.tgz"
+    },
+    {
+      "name": "cloudflared-fips-linux-amd64",
+      "size": 40227374,
+      "digest": "sha256:7fe06420c05b9d5c3475cc4d930fdddee152e9c8523f6e7d38caee79eadb9068",
+      "browser_download_url": "https://github.com/cloudflare/cloudflared/releases/download/2026.10.1/cloudflared-fips-linux-amd64"
+    },
+    {
+      "name": "cloudflared-fips-linux-amd64.deb",
+      "size": 19898214,
+      "digest": "sha256:d614f23c529cc07d355a47da9b322a2a0b7b9558b373d06c031ba093a7a45c08",
+      "browser_download_url": "https://github.com/cloudflare/cloudflared/releases/download/2026.10.1/cloudflared-fips-linux-amd64.deb"
+    },
+    {
+      "name": "cloudflared-fips-linux-x86_64.rpm",
+      "size": 19895147,
+      "digest": "sha256:f11a319d56908987e339f8480d1666499b9c740c108835318cd8be625a83aeb3",
+      "browser_download_url": "https://github.com/cloudflare/cloudflared/releases/download/2026.10.1/cloudflared-fips-linux-x86_64.rpm"
+    },
+    {
+      "name": "cloudflared-linux-386",
+      "size": 37649732,
+      "digest": "sha256:9f5794f4e0bf2a4be8b3a3b8cc97720f60b3686089e07cebfd90aa9826b31749",
+      "browser_download_url": "https://github.com/cloudflare/cloudflared/releases/download/2026.10.1/cloudflared-linux-386"
+    },
+    {
+      "name": "cloudflared-linux-386.deb",
+      "size": 19056774,
+      "digest": "sha256:1710421e2b9af26f26d51c9d88563ba61041060666a1ed96cda25a3444fb7ca2",
+      "browser_download_url": "https://github.com/cloudflare/cloudflared/releases/download/2026.10.1/cloudflared-linux-386.deb"
+    },
+    {
+      "name": "cloudflared-linux-386.rpm",
+      "size": 19046546,
+      "digest": "sha256:f2f5c62c28f96f9f56601e0bbbd8a85a5f56a7b813b2dd4ed7cdea2a0345db69",
+      "browser_download_url": "https://github.com/cloudflare/cloudflared/releases/download/2026.10.1/cloudflared-linux-386.rpm"
+    },
+    {
+      "name": "cloudflared-linux-aarch64.rpm",
+      "size": 18270708,
+      "digest": "sha256:bf13890f308237223db01f34d2e394014a5eea0b612c8728833efc6a091b1aa9",
+      "browser_download_url": "https://github.com/cloudflare/cloudflared/releases/download/2026.10.1/cloudflared-linux-aarch64.rpm"
+    },
+    {
+      "name": "cloudflared-linux-amd64",
+      "size": 40227032,
+      "digest": "sha256:3bfc539f45d2620c71debb7a86be0efa737ed5ccbad9eb85c787116900e5c586",
+      "browser_download_url": "https://github.com/cloudflare/cloudflared/releases/download/2026.10.1/cloudflared-linux-amd64"
+    },
+    {
+      "name": "cloudflared-linux-amd64.deb",
+      "size": 19897896,
+      "digest": "sha256:200573c872174ab449965655febadef8edfbb144ebcaa391b700b2dedbadb3cd",
+      "browser_download_url": "https://github.com/cloudflare/cloudflared/releases/download/2026.10.1/cloudflared-linux-amd64.deb"
+    },
+    {
+      "name": "cloudflared-linux-arm",
+      "size": 37121444,
+      "digest": "sha256:598445dbe19d789d2901c57bb9df5b070cc2c4f817c48b0ae2702a93d15a468e",
+      "browser_download_url": "https://github.com/cloudflare/cloudflared/releases/download/2026.10.1/cloudflared-linux-arm"
+    },
+    {
+      "name": "cloudflared-linux-arm.deb",
+      "size": 18298696,
+      "digest": "sha256:3989ff1249bd759c778a8a2382e79c032f061c4b7cb398961320f6c5a568abe1",
+      "browser_download_url": "https://github.com/cloudflare/cloudflared/releases/download/2026.10.1/cloudflared-linux-arm.deb"
+    },
+    {
+      "name": "cloudflared-linux-arm.rpm",
+      "size": 18287299,
+      "digest": "sha256:d0cf5f188b49808d2e390c7c75ab86c22d8ab8dba1ac515d8faa92d6031447bf",
+      "browser_download_url": "https://github.com/cloudflare/cloudflared/releases/download/2026.10.1/cloudflared-linux-arm.rpm"
+    },
+    {
+      "name": "cloudflared-linux-arm64",
+      "size": 37651992,
+      "digest": "sha256:2c65dfabf616c40efc7545d107d7a57ad5e21377e2964b7e88af19a238074a46",
+      "browser_download_url": "https://github.com/cloudflare/cloudflared/releases/download/2026.10.1/cloudflared-linux-arm64"
+    },
+    {
+      "name": "cloudflared-linux-arm64.deb",
+      "size": 18264968,
+      "digest": "sha256:f16c16b776a7f8edf7c5b365b5d2eba9544043b9867676295c930082448035b6",
+      "browser_download_url": "https://github.com/cloudflare/cloudflared/releases/download/2026.10.1/cloudflared-linux-arm64.deb"
+    },
+    {
+      "name": "cloudflared-linux-armhf",
+      "size": 37066557,
+      "digest": "sha256:c047e24af9ed956b55d514e3a0e2d8020e9c6d0629c4731c8ec08bd79a29a050",
+      "browser_download_url": "https://github.com/cloudflare/cloudflared/releases/download/2026.10.1/cloudflared-linux-armhf"
+    },
+    {
+      "name": "cloudflared-linux-armhf.deb",
+      "size": 18289116,
+      "digest": "sha256:5ec1769c6cda17bdb8907d99dcd3b574ef6fc618039056d77dd49b90e11f965f",
+      "browser_download_url": "https://github.com/cloudflare/cloudflared/releases/download/2026.10.1/cloudflared-linux-armhf.deb"
+    },
+    {
+      "name": "cloudflared-linux-armhf.rpm",
+      "size": 18278374,
+      "digest": "sha256:9a896c4a2253ceb6da6fb9864636463295c5b1d0d885422a8ab7fc58204dc535",
+      "browser_download_url": "https://github.com/cloudflare/cloudflared/releases/download/2026.10.1/cloudflared-linux-armhf.rpm"
+    },
+    {
+      "name": "cloudflared-linux-x86_64.rpm",
+      "size": 19894216,
+      "digest": "sha256:31a084f530043ba511b6cb62acbe5e28d104e95a49266da33316d2be233650cc",
+      "browser_download_url": "https://github.com/cloudflare/cloudflared/releases/download/2026.10.1/cloudflared-linux-x86_64.rpm"
+    },
+    {
+      "name": "cloudflared-windows-386.exe",
+      "size": 38055048,
+      "digest": "sha256:a0c9a47af2cbd681005e4c1210edf95f986ecc66cee6d68b0e42c484af465d2e",
+      "browser_download_url": "https://github.com/cloudflare/cloudflared/releases/download/2026.10.1/cloudflared-windows-386.exe"
+    },
+    {
+      "name": "cloudflared-windows-386.msi",
+      "size": 19935744,
+      "digest": "sha256:4fcf3980eb3ff9cac349e07246600044194d411b9e3264505bbb6aa2e3f8283a",
+      "browser_download_url": "https://github.com/cloudflare/cloudflared/releases/download/2026.10.1/cloudflared-windows-386.msi"
+    },
+    {
+      "name": "cloudflared-windows-amd64.exe",
+      "size": 55325120,
+      "digest": "sha256:4d2490e74082c5d48dbfedaf92576fa5bd1702379ab88eb7faa0cfbe8dc891b6",
+      "browser_download_url": "https://github.com/cloudflare/cloudflared/releases/download/2026.10.1/cloudflared-windows-amd64.exe"
+    },
+    {
+      "name": "cloudflared-windows-amd64.msi",
+      "size": 19762176,
+      "digest": "sha256:5afdf57c8e98bdfae7a5794be0df6d7fb0ed960fe2cda2ce20541434a487c1bd",
+      "browser_download_url": "https://github.com/cloudflare/cloudflared/releases/download/2026.10.1/cloudflared-windows-amd64.msi"
+    }
+  ]
+}

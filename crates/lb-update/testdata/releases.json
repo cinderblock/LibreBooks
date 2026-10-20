@@ -1,0 +1,105 @@
+[
+  {
+    "url": "https://api.github.com/repos/cinderblock/LibreBooks/releases/9005",
+    "html_url": "https://github.com/cinderblock/LibreBooks/releases/tag/nightly",
+    "id": 9005,
+    "tag_name": "nightly",
+    "name": "Nightly",
+    "draft": false,
+    "prerelease": true,
+    "created_at": "2026-10-18T00:00:00Z",
+    "published_at": "2026-10-18T00:00:00Z",
+    "assets": [],
+    "body": "Not a version."
+  },
+  {
+    "url": "https://api.github.com/repos/cinderblock/LibreBooks/releases/9004",
+    "html_url": "https://github.com/cinderblock/LibreBooks/releases/tag/v0.5.0",
+    "id": 9004,
+    "tag_name": "v0.5.0",
+    "name": "v0.5.0",
+    "draft": true,
+    "prerelease": false,
+    "created_at": "2026-10-17T00:00:00Z",
+    "published_at": null,
+    "assets": [],
+    "body": "A draft, never offered."
+  },
+  {
+    "url": "https://api.github.com/repos/cinderblock/LibreBooks/releases/9003",
+    "html_url": "https://github.com/cinderblock/LibreBooks/releases/tag/v0.4.0-rc.1",
+    "id": 9003,
+    "tag_name": "v0.4.0-rc.1",
+    "name": "v0.4.0-rc.1",
+    "draft": false,
+    "prerelease": true,
+    "created_at": "2026-10-16T00:00:00Z",
+    "published_at": "2026-10-16T00:00:00Z",
+    "assets": [
+      {
+        "name": "SHA256SUMS",
+        "size": 227,
+        "content_type": "text/plain",
+        "browser_download_url": "{BASE}/download/v0.4.0-rc.1/SHA256SUMS"
+      },
+      {
+        "name": "SHA256SUMS.minisig",
+        "size": 283,
+        "content_type": "application/octet-stream",
+        "browser_download_url": "{BASE}/download/v0.4.0-rc.1/SHA256SUMS.minisig"
+      }
+    ],
+    "body": "Release candidate."
+  },
+  {
+    "url": "https://api.github.com/repos/cinderblock/LibreBooks/releases/9002",
+    "html_url": "https://github.com/cinderblock/LibreBooks/releases/tag/v0.3.0",
+    "id": 9002,
+    "tag_name": "v0.3.0",
+    "name": "v0.3.0",
+    "draft": false,
+    "prerelease": false,
+    "created_at": "2026-10-15T00:00:00Z",
+    "published_at": "2026-10-15T00:00:00Z",
+    "assets": [
+      {
+        "name": "SHA256SUMS",
+        "size": 227,
+        "content_type": "text/plain",
+        "browser_download_url": "{BASE}/download/v0.3.0/SHA256SUMS"
+      },
+      {
+        "name": "SHA256SUMS.minisig",
+        "size": 283,
+        "content_type": "application/octet-stream",
+        "browser_download_url": "{BASE}/download/v0.3.0/SHA256SUMS.minisig"
+      },
+      {
+        "name": "librebooks-v0.3.0-x86_64-pc-windows-msvc.zip",
+        "size": 564,
+        "content_type": "application/zip",
+        "browser_download_url": "{BASE}/download/v0.3.0/librebooks-v0.3.0-x86_64-pc-windows-msvc.zip"
+      },
+      {
+        "name": "librebooks-v0.3.0-x86_64-unknown-linux-gnu.tar.gz",
+        "size": 507,
+        "content_type": "application/gzip",
+        "browser_download_url": "{BASE}/download/v0.3.0/librebooks-v0.3.0-x86_64-unknown-linux-gnu.tar.gz"
+      }
+    ],
+    "body": "Stable release."
+  },
+  {
+    "url": "https://api.github.com/repos/cinderblock/LibreBooks/releases/9001",
+    "html_url": "https://github.com/cinderblock/LibreBooks/releases/tag/v0.2.9",
+    "id": 9001,
+    "tag_name": "v0.2.9",
+    "name": "v0.2.9",
+    "draft": false,
+    "prerelease": false,
+    "created_at": "2026-10-01T00:00:00Z",
+    "published_at": "2026-10-01T00:00:00Z",
+    "assets": [],
+    "body": "Older."
+  }
+]

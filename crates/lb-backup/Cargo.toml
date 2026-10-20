@@ -21,9 +21,17 @@ age.workspace = true
 sha2.workspace = true
 hex.workspace = true
 zip.workspace = true
+tokio.workspace = true
+reqwest.workspace = true
+url.workspace = true
+quick-xml.workspace = true
+tempfile.workspace = true
+hmac = "0.13.0"
 
 [dev-dependencies]
-tempfile.workspace = true
+lb-core.workspace = true
+axum.workspace = true
+pretty_assertions.workspace = true
 
 [lints]
 workspace = true
