@@ -190,7 +190,8 @@ Phases are ordered; each ends usable. **Current step is marked ▶.**
   separate "downloaded" mark (`b084b6f`); auto-add stays strict; importing must
   not require the QB Bridge → merged QuickBooks transports (Web Connector SOAP
   endpoint, SDK over COM, import routes/settings/CLI; 91 lb-qbd tests). Whole
-  workspace: 623 tests. ▶ Running: web phase B agent. Next with the user: point
+  workspace: 623 tests; CI green at `5a2aa32`. ▶ Running: web phase B agent
+  (resumed 2026-10-20 09:20 PT after a session-limit cut-off). Next with the user: point
   QuickBooks' Web Connector on cad-3 at this server over HTTPS (steps in
   `plans/qbd-import.md`), run a sync, and see whether the 14 bridge gaps close.
 - Phase 1 — Ledger core
@@ -319,8 +320,10 @@ Phases are ordered; each ends usable. **Current step is marked ▶.**
 
 - [x] Survey environment, sibling projects, QB bridge shape.
 - [x] Phase 0: repo skeleton (`858b1be`); API contract `plans/api.md` (`091efac`).
-- [x] CI workflow (`c74ff31`); release workflow on tags + Dockerfile (`4058946`),
-      untested until the repo exists on GitHub.
+- [x] CI workflow (`c74ff31`); release workflow on tags + Dockerfile (`4058946`).
+      CI green on all three jobs (Rust Windows, Rust Linux, Web UI) at `5a2aa32`
+      after fixing the first runs' three failures. Release workflow still
+      unexercised until the first tag.
 - [x] Phase 1 core: lb-core posting rules for all 25 types (18 rule tests),
       lb-store company file (15 integration tests); reconciliation, opening
       balances, attachments (`ac5475c`). Inventory re-costing on back-dated
@@ -337,7 +340,8 @@ Phases are ordered; each ends usable. **Current step is marked ▶.**
       other forms, reports catalog UI, admin screens, register editing next.
 - [x] Phase 5: desktop merged (`5951bd2`): local + thin-client modes, NSIS built.
 - [x] Phase 6: backups, self-update, tunnel: libraries, server routes, CLI (merged).
-      Release workflow untested until the repo exists; no signing key yet.
+      Signing keys in GitHub secrets (`42946a7`); release workflow untested
+      until the first tag.
 - [x] Phase 7: feeds library and routes (merged); feeds UI pending (phase B).
 - [ ] Phase 8: parity tail.
 - [ ] Phase 9: native QBW research.
