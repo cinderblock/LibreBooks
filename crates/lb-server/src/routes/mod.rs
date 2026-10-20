@@ -5,6 +5,7 @@ use axum::routing::{get, post, put};
 
 use crate::state::AppState;
 
+mod auth;
 mod banking;
 mod company;
 mod events;
@@ -86,5 +87,48 @@ pub fn api() -> Router<AppState> {
             get(system::companies).post(system::create_company),
         )
         .route("/events", get(events::stream))
+        .route("/auth/login/start", post(auth::login_start))
+        .route("/auth/login/finish", post(auth::login_finish))
+        .route("/auth/enroll", get(auth::enroll_inspect))
+        .route("/auth/enroll/start", post(auth::enroll_start))
+        .route("/auth/enroll/finish", post(auth::enroll_finish))
+        .route("/auth/device/challenge", post(auth::device_challenge))
+        .route("/auth/device/login", post(auth::device_login))
+        .route("/auth/device/enroll", post(auth::device_enroll))
+        .route("/auth/logout", post(auth::logout))
+        .route("/auth/passkeys", get(auth::my_passkeys))
+        .route(
+            "/auth/passkeys/{id}",
+            axum::routing::patch(auth::rename_passkey).delete(auth::delete_passkey),
+        )
+        .route("/auth/devices", get(auth::my_devices))
+        .route(
+            "/auth/devices/{id}",
+            axum::routing::delete(auth::revoke_device),
+        )
+        .route("/auth/sessions", get(auth::my_sessions))
+        .route(
+            "/auth/sessions/{id}",
+            axum::routing::delete(auth::revoke_session),
+        )
+        .route(
+            "/auth/enrollments",
+            get(auth::list_enrollments).post(auth::create_enrollment),
+        )
+        .route(
+            "/auth/enrollments/{id}",
+            axum::routing::delete(auth::revoke_enrollment),
+        )
+        .route("/users", get(auth::list_users))
+        .route(
+            "/users/{id}",
+            get(auth::get_user)
+                .patch(auth::update_user)
+                .delete(auth::delete_user),
+        )
+        .route(
+            "/users/{id}/companies/{company}",
+            put(auth::grant_access).delete(auth::revoke_access),
+        )
         .nest("/c/{company}", company)
 }

@@ -71,12 +71,12 @@ impl TxnQuery {
 
 pub async fn query(
     State(s): State<AppState>,
-    _p: Principal,
+    p: Principal,
     Path(company): Path<CompanyId>,
     Query(q): Query<TxnQuery>,
 ) -> ApiResult<Json<Vec<TxnSummary>>> {
     let filter = q.into_filter()?;
-    let books = s.companies.get(company)?;
+    let books = s.books_for(&p, company, Role::Viewer)?;
     Ok(Json(
         blocking(move || books.read(|c| txns::query(c, &filter))).await?,
     ))
@@ -84,10 +84,10 @@ pub async fn query(
 
 pub async fn get(
     State(s): State<AppState>,
-    _p: Principal,
+    p: Principal,
     Path((company, id)): Path<(CompanyId, TxnId)>,
 ) -> ApiResult<Json<Value>> {
-    let books = s.companies.get(company)?;
+    let books = s.books_for(&p, company, Role::Viewer)?;
     let (txn, postings) =
         blocking(move || books.read(|c| Ok((txns::get(c, id)?, txns::postings(c, id)?)))).await?;
     Ok(Json(json!({ "txn": txn, "postings": postings })))
@@ -99,11 +99,10 @@ pub async fn create(
     Path(company): Path<CompanyId>,
     Json(txn): Json<Txn>,
 ) -> ApiResult<(StatusCode, Json<SaveOutcome>)> {
-    p.require(Role::Bookkeeper)?;
     if txn.edit_seq != 0 {
         return Err(ApiError::invalid("a new transaction has edit_seq 0"));
     }
-    let books = s.companies.get(company)?;
+    let books = s.books_for(&p, company, Role::Bookkeeper)?;
     let actor = p.actor();
     let out = blocking(move || books.write(&actor, |w| txns::save(w, txn))).await?;
     Ok((StatusCode::CREATED, Json(out)))
@@ -115,11 +114,10 @@ pub async fn update(
     Path((company, id)): Path<(CompanyId, TxnId)>,
     Json(txn): Json<Txn>,
 ) -> ApiResult<Json<SaveOutcome>> {
-    p.require(Role::Bookkeeper)?;
     if txn.id != id {
         return Err(ApiError::invalid("the id in the path and the body differ"));
     }
-    let books = s.companies.get(company)?;
+    let books = s.books_for(&p, company, Role::Bookkeeper)?;
     let actor = p.actor();
     Ok(Json(
         blocking(move || books.write(&actor, |w| txns::save(w, txn))).await?,
@@ -131,11 +129,11 @@ pub async fn update(
 /// with sales tax still previews.
 pub async fn preview(
     State(s): State<AppState>,
-    _p: Principal,
+    p: Principal,
     Path(company): Path<CompanyId>,
     Json(txn): Json<Txn>,
 ) -> ApiResult<Json<Value>> {
-    let books = s.companies.get(company)?;
+    let books = s.books_for(&p, company, Role::Viewer)?;
     let posted = blocking(move || {
         books.read(|c| {
             let ctx = PreviewContext {
@@ -227,8 +225,7 @@ pub async fn void(
     Path((company, id)): Path<(CompanyId, TxnId)>,
     Json(body): Json<EditSeq>,
 ) -> ApiResult<Json<SaveOutcome>> {
-    p.require(Role::Bookkeeper)?;
-    let books = s.companies.get(company)?;
+    let books = s.books_for(&p, company, Role::Bookkeeper)?;
     let actor = p.actor();
     Ok(Json(
         blocking(move || books.write(&actor, |w| txns::void(w, id, body.edit_seq))).await?,
@@ -241,8 +238,7 @@ pub async fn delete(
     Path((company, id)): Path<(CompanyId, TxnId)>,
     Query(q): Query<EditSeq>,
 ) -> ApiResult<StatusCode> {
-    p.require(Role::Bookkeeper)?;
-    let books = s.companies.get(company)?;
+    let books = s.books_for(&p, company, Role::Bookkeeper)?;
     let actor = p.actor();
     blocking(move || books.write(&actor, |w| txns::delete(w, id, q.edit_seq))).await?;
     Ok(StatusCode::NO_CONTENT)
@@ -256,23 +252,23 @@ pub struct NextNumberQuery {
 
 pub async fn next_number(
     State(s): State<AppState>,
-    _p: Principal,
+    p: Principal,
     Path(company): Path<CompanyId>,
     Query(q): Query<NextNumberQuery>,
 ) -> ApiResult<Json<Value>> {
     let t =
         TxnType::parse(&q.r#type).ok_or_else(|| ApiError::invalid("unknown transaction type"))?;
-    let books = s.companies.get(company)?;
+    let books = s.books_for(&p, company, Role::Viewer)?;
     let n = blocking(move || books.read(|c| txns::next_number(c, t, q.account_id))).await?;
     Ok(Json(json!({ "number": n })))
 }
 
 pub async fn history(
     State(s): State<AppState>,
-    _p: Principal,
+    p: Principal,
     Path((company, id)): Path<(CompanyId, TxnId)>,
 ) -> ApiResult<Json<Vec<audit::AuditEntry>>> {
-    let books = s.companies.get(company)?;
+    let books = s.books_for(&p, company, Role::Viewer)?;
     Ok(Json(
         blocking(move || books.read(|c| audit::history(c, "txn", &id.to_string()))).await?,
     ))
@@ -287,11 +283,11 @@ pub struct RangeQuery {
 
 pub async fn register(
     State(s): State<AppState>,
-    _p: Principal,
+    p: Principal,
     Path((company, account)): Path<(CompanyId, AccountId)>,
     Query(q): Query<RangeQuery>,
 ) -> ApiResult<Json<Value>> {
-    let books = s.companies.get(company)?;
+    let books = s.books_for(&p, company, Role::Viewer)?;
     let (opening, lines) =
         blocking(move || books.read(|c| balances::register(c, account, q.from, q.to))).await?;
     Ok(Json(json!({ "opening": opening, "lines": lines })))
@@ -308,8 +304,7 @@ pub async fn set_cleared(
     Path((company, account, txn)): Path<(CompanyId, AccountId, TxnId)>,
     Json(body): Json<ClearedBody>,
 ) -> ApiResult<StatusCode> {
-    p.require(Role::Bookkeeper)?;
-    let books = s.companies.get(company)?;
+    let books = s.books_for(&p, company, Role::Bookkeeper)?;
     let actor = p.actor();
     blocking(move || {
         books.write(&actor, |w| {
@@ -322,11 +317,11 @@ pub async fn set_cleared(
 
 pub async fn balances(
     State(s): State<AppState>,
-    _p: Principal,
+    p: Principal,
     Path(company): Path<CompanyId>,
     Query(q): Query<RangeQuery>,
 ) -> ApiResult<Json<Vec<lb_store::AccountBalance>>> {
-    let books = s.companies.get(company)?;
+    let books = s.books_for(&p, company, Role::Viewer)?;
     let sums = blocking(move || books.read(|c| balances::sums(c, q.from, q.to))).await?;
     let mut out: Vec<lb_store::AccountBalance> = sums
         .into_iter()
@@ -349,7 +344,7 @@ pub struct OpenQuery {
 /// name and its jobs: what Receive Payments and Pay Bills show.
 pub async fn open_items(
     State(s): State<AppState>,
-    _p: Principal,
+    p: Principal,
     Path(company): Path<CompanyId>,
     Query(q): Query<OpenQuery>,
 ) -> ApiResult<Json<Vec<TxnSummary>>> {
@@ -376,7 +371,7 @@ pub async fn open_items(
         limit: Some(5000),
         ..TxnFilter::default()
     };
-    let books = s.companies.get(company)?;
+    let books = s.books_for(&p, company, Role::Viewer)?;
     Ok(Json(
         blocking(move || books.read(|c| txns::query(c, &filter))).await?,
     ))
@@ -384,9 +379,9 @@ pub async fn open_items(
 
 pub async fn undeposited(
     State(s): State<AppState>,
-    _p: Principal,
+    p: Principal,
     Path(company): Path<CompanyId>,
 ) -> ApiResult<Json<Vec<TxnSummary>>> {
-    let books = s.companies.get(company)?;
+    let books = s.books_for(&p, company, Role::Viewer)?;
     Ok(Json(blocking(move || books.read(txns::undeposited)).await?))
 }

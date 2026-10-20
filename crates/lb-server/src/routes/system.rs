@@ -15,22 +15,26 @@ pub async fn health(State(s): State<AppState>) -> Json<Value> {
 }
 
 pub async fn session(State(s): State<AppState>, p: Principal) -> ApiResult<Json<Value>> {
-    let companies = s.companies.list()?;
-    let role = p.role;
+    let companies = companies_json(&s, &p)?;
+    let kind = p.session.as_ref().map(|sp| sp.kind);
     Ok(Json(json!({
-        "user": { "id": p.user_id, "display_name": p.display_name, "role": role },
-        "companies": companies.into_iter().map(|c| json!({ "id": c.id, "name": c.name, "role": role })).collect::<Vec<_>>(),
+        "user": { "id": p.user_id, "display_name": p.display_name, "role": p.role, "kind": kind },
+        "companies": companies,
+        "sign_in": s.sessions.is_some(),
     })))
 }
 
 pub async fn companies(State(s): State<AppState>, p: Principal) -> ApiResult<Json<Value>> {
-    let role = p.role;
-    let list = s.companies.list()?;
-    Ok(Json(json!(
-        list.into_iter()
-            .map(|c| json!({ "id": c.id, "name": c.name, "role": role }))
+    Ok(Json(companies_json(&s, &p)?))
+}
+
+fn companies_json(s: &AppState, p: &Principal) -> ApiResult<Value> {
+    Ok(json!(
+        s.companies_for(p)?
+            .into_iter()
+            .map(|(c, role)| json!({ "id": c.id, "name": c.name, "role": role }))
             .collect::<Vec<_>>()
-    )))
+    ))
 }
 
 #[derive(Deserialize)]

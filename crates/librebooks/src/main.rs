@@ -1,15 +1,16 @@
 //! The `librebooks` command: run the server, manage company files, check them.
 //!
-//! Later subcommands (enrolment, backups, QuickBooks import, updates) arrive as
-//! their crates do; see `plans/librebooks.md`.
+//! Later subcommands (backups, QuickBooks import, updates) arrive as their
+//! crates do; see `plans/librebooks.md`.
 
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand};
+use lb_auth::{AuthConfig, AuthStore, EnrolmentPurpose, NewEnrolment, RelyingParty, Role};
 use lb_core::CompanyInfo;
-use lb_server::{AuthMode, Mode, ServerConfig};
+use lb_server::{AuthMode, Mode, ServerConfig, Sessions};
 
 #[derive(Parser, Debug)]
 #[command(
@@ -37,10 +38,43 @@ enum Command {
             env = "LIBREBOOKS_BIND"
         )]
         binds: Vec<SocketAddr>,
-        /// Serve without any authentication. Only allowed on loopback addresses;
-        /// for development until passkeys are wired in.
+        /// The address people reach this server at, e.g.
+        /// `https://books.example.com`. Passkeys are bound to it. Repeat for
+        /// several. `http://localhost:<port>` is always accepted too.
+        #[arg(
+            long = "public-url",
+            env = "LIBREBOOKS_PUBLIC_URL",
+            value_delimiter = ','
+        )]
+        public_urls: Vec<String>,
+        /// A header carrying the real client address from a proxy on this
+        /// machine (`cf-connecting-ip` behind cloudflared).
+        #[arg(long, env = "LIBREBOOKS_CLIENT_IP_HEADER")]
+        client_ip_header: Option<String>,
+        /// Serve without any sign-in. Only allowed on loopback addresses; for
+        /// development.
         #[arg(long)]
         no_auth: bool,
+    },
+    /// Make an enrolment link: a new person, or another passkey or device for
+    /// someone who has one. Single use, short-lived.
+    Enroll {
+        /// The new person's role.
+        #[arg(long, default_value = "bookkeeper")]
+        role: String,
+        /// Their name, suggested on the enrolment page.
+        #[arg(long)]
+        name: Option<String>,
+        /// Minutes until the link expires.
+        #[arg(long, default_value_t = 15)]
+        minutes: u32,
+        /// The address the link points at.
+        #[arg(
+            long,
+            env = "LIBREBOOKS_PUBLIC_URL",
+            default_value = "http://localhost:8740"
+        )]
+        public_url: String,
     },
     /// Company files.
     Company {
@@ -87,22 +121,101 @@ fn main() -> Result<()> {
         None => default_data_dir()?,
     };
     match cli.command {
-        Command::Serve { binds, no_auth } => serve(&data_dir, &binds, no_auth),
+        Command::Serve {
+            binds,
+            public_urls,
+            client_ip_header,
+            no_auth,
+        } => serve(&data_dir, &binds, &public_urls, client_ip_header, no_auth),
+        Command::Enroll {
+            role,
+            name,
+            minutes,
+            public_url,
+        } => enroll(&data_dir, &role, name, minutes, &public_url),
         Command::Company { command } => company(&data_dir, command),
         Command::Check { file } => check(&file),
     }
 }
 
-fn serve(data_dir: &Path, binds: &[SocketAddr], no_auth: bool) -> Result<()> {
-    if !no_auth {
-        bail!(
-            "passkey sign-in isn't wired into the server yet; for now run with --no-auth (loopback only)"
-        );
+/// Where the server keeps its users, credentials and sessions.
+fn auth_db(data_dir: &Path) -> PathBuf {
+    data_dir.join("server.db")
+}
+
+/// Passkey relying parties: each public URL, plus `localhost` on every
+/// loopback port the server listens on.
+fn auth_config(binds: &[SocketAddr], public_urls: &[String]) -> Result<AuthConfig> {
+    let mut rps = Vec::new();
+    for url in public_urls {
+        rps.push(RelyingParty::for_origin(
+            url.trim_end_matches('/'),
+            "LibreBooks",
+        )?);
     }
+    let local: Vec<String> = binds
+        .iter()
+        .filter(|a| a.ip().is_loopback() || a.ip().is_unspecified())
+        .map(|a| format!("http://localhost:{}", a.port()))
+        .collect();
+    if !local.is_empty() {
+        rps.push(RelyingParty::new("localhost", "LibreBooks", local));
+    }
+    // A LAN address can't hold a passkey (browsers refuse IP addresses), but a
+    // device key works there.
+    let extra_device_origins = binds
+        .iter()
+        .filter(|a| !a.ip().is_loopback() && !a.ip().is_unspecified())
+        .map(|a| format!("http://{a}"))
+        .collect();
+    Ok(AuthConfig {
+        relying_parties: rps,
+        extra_device_origins,
+        ..AuthConfig::default()
+    })
+}
+
+fn serve(
+    data_dir: &Path,
+    binds: &[SocketAddr],
+    public_urls: &[String],
+    client_ip_header: Option<String>,
+    no_auth: bool,
+) -> Result<()> {
+    std::fs::create_dir_all(data_dir)?;
+    let sessions = if no_auth {
+        None
+    } else {
+        let store = AuthStore::open(&auth_db(data_dir), auth_config(binds, public_urls)?)?;
+        let public_origin = public_urls
+            .first()
+            .map(|u| u.trim_end_matches('/').to_owned())
+            .or_else(|| {
+                binds
+                    .first()
+                    .map(|a| format!("http://localhost:{}", a.port()))
+            });
+        if let Some(first) = store.bootstrap()? {
+            let base = public_origin.clone().unwrap_or_default();
+            println!();
+            println!(
+                "  No one can sign in yet. Open this link within the hour to create the first admin:"
+            );
+            println!();
+            println!("    {}/enroll#token={}", base, first.token);
+            println!();
+        }
+        Some(Sessions {
+            store,
+            public_origin,
+            client_ip_header,
+        })
+    };
     let config = ServerConfig {
         data_dir: data_dir.to_owned(),
         mode: Mode::Server,
         auth: AuthMode::Open,
+        sessions,
     };
     for addr in binds {
         lb_server::check_bind(&config, *addr)?;
@@ -123,9 +236,13 @@ fn serve(data_dir: &Path, binds: &[SocketAddr], no_auth: bool) -> Result<()> {
             );
             let app = app.clone();
             tasks.push(tokio::spawn(async move {
-                axum::serve(listener, app)
-                    .with_graceful_shutdown(shutdown_signal())
-                    .await
+                // Connect info gives sign-in rate limiting the client's address.
+                axum::serve(
+                    listener,
+                    app.into_make_service_with_connect_info::<SocketAddr>(),
+                )
+                .with_graceful_shutdown(shutdown_signal())
+                .await
             }));
         }
         if !lb_server::assets::has_ui() {
@@ -142,6 +259,44 @@ fn serve(data_dir: &Path, binds: &[SocketAddr], no_auth: bool) -> Result<()> {
 async fn shutdown_signal() {
     let _ = tokio::signal::ctrl_c().await;
     tracing::info!("shutting down");
+}
+
+fn enroll(
+    data_dir: &Path,
+    role: &str,
+    name: Option<String>,
+    minutes: u32,
+    public_url: &str,
+) -> Result<()> {
+    let role = match role {
+        "admin" => Role::Admin,
+        "bookkeeper" => Role::Bookkeeper,
+        "viewer" => Role::Viewer,
+        other => bail!("--role is admin, bookkeeper or viewer, not {other:?}"),
+    };
+    let path = auth_db(data_dir);
+    if !path.exists() {
+        bail!(
+            "{} doesn't exist yet; run `librebooks serve` once first",
+            path.display()
+        );
+    }
+    let store = AuthStore::open(&path, AuthConfig::default())?;
+    let minted = store.operator_enrolment(&NewEnrolment {
+        purpose: EnrolmentPurpose::NewUser,
+        role: Some(role),
+        user_id: None,
+        company_id: None,
+        display_name: name,
+        ttl_minutes: Some(minutes),
+    })?;
+    println!(
+        "{}/enroll#token={}",
+        public_url.trim_end_matches('/'),
+        minted.token
+    );
+    eprintln!("single use; expires {}", minted.expires_at);
+    Ok(())
 }
 
 fn company(data_dir: &Path, command: CompanyCommand) -> Result<()> {

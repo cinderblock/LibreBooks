@@ -9,7 +9,7 @@ use lb_store::Books;
 use serde::Serialize;
 use tokio::sync::broadcast;
 
-use crate::auth::AuthMode;
+use crate::auth::{AuthMode, Principal, Role, Sessions};
 use crate::error::{ApiError, ApiResult};
 
 /// File extension of a company file.
@@ -187,6 +187,41 @@ pub struct Inner {
     pub companies: Companies,
     pub events: broadcast::Sender<ChangeEvent>,
     pub auth: AuthMode,
+    pub sessions: Option<Sessions>,
+}
+
+impl AppState {
+    /// The company's books, if `p` may use them with at least `need`. People
+    /// signed in with sessions see only companies they've been given (admins see
+    /// all); a company they can't see is "not found", not "forbidden".
+    pub fn books_for(&self, p: &Principal, company: CompanyId, need: Role) -> ApiResult<Books> {
+        let role = self
+            .company_role(p, company)?
+            .ok_or_else(|| ApiError::not_found("company"))?;
+        if role < need {
+            return Err(ApiError::forbidden());
+        }
+        self.companies.get(company)
+    }
+
+    /// `p`'s role in a company, or `None` without access.
+    pub fn company_role(&self, p: &Principal, company: CompanyId) -> ApiResult<Option<Role>> {
+        match (&p.session, &self.sessions) {
+            (Some(sp), Some(s)) => Ok(s.store.company_role(sp, company)?),
+            _ => Ok(Some(p.role)),
+        }
+    }
+
+    /// The companies `p` can see, with their role in each.
+    pub fn companies_for(&self, p: &Principal) -> ApiResult<Vec<(CompanySummary, Role)>> {
+        let mut out = Vec::new();
+        for c in self.companies.list()? {
+            if let Some(r) = self.company_role(p, c.id)? {
+                out.push((c, r));
+            }
+        }
+        Ok(out)
+    }
 }
 
 impl std::ops::Deref for AppState {

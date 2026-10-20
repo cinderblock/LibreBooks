@@ -158,11 +158,11 @@ small_list!(TypeEntry);
 
 async fn list_h<R: Resource>(
     State(s): State<AppState>,
-    _p: Principal,
+    p: Principal,
     Path(company): Path<CompanyId>,
     Query(q): Query<ListQuery>,
 ) -> ApiResult<Json<Vec<R>>> {
-    let books = s.companies.get(company)?;
+    let books = s.books_for(&p, company, Role::Viewer)?;
     Ok(Json(
         blocking(move || books.read(|c| R::list(c, &q))).await?,
     ))
@@ -170,10 +170,10 @@ async fn list_h<R: Resource>(
 
 async fn get_h<R: Resource>(
     State(s): State<AppState>,
-    _p: Principal,
+    p: Principal,
     Path((company, id)): Path<(CompanyId, String)>,
 ) -> ApiResult<Json<R>> {
-    let books = s.companies.get(company)?;
+    let books = s.books_for(&p, company, Role::Viewer)?;
     Ok(Json(
         blocking(move || books.read(|c| R::get(c, &id))).await?,
     ))
@@ -185,11 +185,10 @@ async fn create_h<R: Resource>(
     Path(company): Path<CompanyId>,
     Json(rec): Json<R>,
 ) -> ApiResult<(StatusCode, Json<R>)> {
-    p.require(Role::Bookkeeper)?;
     if rec.edit_seq() != 0 {
         return Err(ApiError::invalid("a new record has edit_seq 0"));
     }
-    let books = s.companies.get(company)?;
+    let books = s.books_for(&p, company, Role::Bookkeeper)?;
     let actor = p.actor();
     let saved = blocking(move || books.write(&actor, |w| R::save(w, rec))).await?;
     Ok((StatusCode::CREATED, Json(saved)))
@@ -201,7 +200,6 @@ async fn update_h<R: Resource>(
     Path((company, id)): Path<(CompanyId, String)>,
     Json(rec): Json<R>,
 ) -> ApiResult<Json<R>> {
-    p.require(Role::Bookkeeper)?;
     if rec.id_string() != id {
         return Err(ApiError::invalid("the id in the path and the body differ"));
     }
@@ -210,7 +208,7 @@ async fn update_h<R: Resource>(
             "updating needs the edit_seq it was read with",
         ));
     }
-    let books = s.companies.get(company)?;
+    let books = s.books_for(&p, company, Role::Bookkeeper)?;
     let actor = p.actor();
     Ok(Json(
         blocking(move || books.write(&actor, |w| R::save(w, rec))).await?,
@@ -228,8 +226,7 @@ async fn delete_h<R: Resource>(
     Path((company, id)): Path<(CompanyId, String)>,
     Query(q): Query<DeleteQuery>,
 ) -> ApiResult<StatusCode> {
-    p.require(Role::Bookkeeper)?;
-    let books = s.companies.get(company)?;
+    let books = s.books_for(&p, company, Role::Bookkeeper)?;
     let actor = p.actor();
     blocking(move || books.write(&actor, |w| R::delete(w, &id, q.edit_seq))).await?;
     Ok(StatusCode::NO_CONTENT)

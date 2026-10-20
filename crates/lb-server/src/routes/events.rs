@@ -12,7 +12,7 @@ use serde::Deserialize;
 use tokio_stream::StreamExt;
 use tokio_stream::wrappers::BroadcastStream;
 
-use crate::auth::Principal;
+use crate::auth::{Principal, Role};
 use crate::error::ApiResult;
 use crate::state::AppState;
 
@@ -23,11 +23,11 @@ pub struct EventsQuery {
 
 pub async fn stream(
     State(s): State<AppState>,
-    _p: Principal,
+    p: Principal,
     Query(q): Query<EventsQuery>,
 ) -> ApiResult<Sse<impl Stream<Item = Result<Event, Infallible>>>> {
     // Opening the company now makes sure its changes are wired to the bus.
-    s.companies.get(q.company)?;
+    s.books_for(&p, q.company, Role::Viewer)?;
     let company = q.company;
     let rx = s.events.subscribe();
     let stream = BroadcastStream::new(rx).filter_map(move |msg| match msg {

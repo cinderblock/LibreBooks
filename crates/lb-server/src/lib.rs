@@ -24,7 +24,7 @@ pub mod error;
 mod routes;
 pub mod state;
 
-pub use auth::{AuthMode, Principal, Role};
+pub use auth::{AuthMode, Principal, Role, Sessions};
 pub use state::{AppState, ChangeEvent, Companies, Mode};
 
 /// How to run a server.
@@ -34,6 +34,9 @@ pub struct ServerConfig {
     pub data_dir: PathBuf,
     pub mode: Mode,
     pub auth: AuthMode,
+    /// Passkey and device sign-in; `None` serves only the local token (desktop)
+    /// or nobody-signs-in (`AuthMode::Open`, loopback development).
+    pub sessions: Option<Sessions>,
 }
 
 impl ServerConfig {
@@ -53,6 +56,7 @@ pub fn state(config: &ServerConfig) -> std::io::Result<AppState> {
             companies,
             events,
             auth: config.auth.clone(),
+            sessions: config.sessions.clone(),
         }),
     })
 }
@@ -99,7 +103,10 @@ pub enum StartError {
 
 /// Refuse configurations that would expose the books.
 pub fn check_bind(config: &ServerConfig, addr: SocketAddr) -> Result<(), StartError> {
-    if matches!(config.auth, AuthMode::Open) && !addr.ip().is_loopback() {
+    if matches!(config.auth, AuthMode::Open)
+        && config.sessions.is_none()
+        && !addr.ip().is_loopback()
+    {
         return Err(StartError::OpenBeyondLoopback(addr));
     }
     Ok(())

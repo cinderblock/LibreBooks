@@ -27,6 +27,7 @@ impl Api {
             data_dir: dir.path().to_owned(),
             mode: Mode::Server,
             auth,
+            sessions: None,
         };
         let app = router(state(&config).unwrap());
         Api {

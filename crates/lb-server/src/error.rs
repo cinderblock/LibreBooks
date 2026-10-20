@@ -113,3 +113,27 @@ impl From<tokio::task::JoinError> for ApiError {
         ApiError::internal(format!("a worker failed: {e}"))
     }
 }
+
+impl From<lb_auth::AuthError> for ApiError {
+    fn from(e: lb_auth::AuthError) -> Self {
+        let code = e.code();
+        let status = match code {
+            "invalid" => StatusCode::BAD_REQUEST,
+            "unauthenticated" => StatusCode::UNAUTHORIZED,
+            "forbidden" => StatusCode::FORBIDDEN,
+            "not_found" => StatusCode::NOT_FOUND,
+            "conflict" => StatusCode::CONFLICT,
+            "rate_limited" => StatusCode::TOO_MANY_REQUESTS,
+            _ => StatusCode::INTERNAL_SERVER_ERROR,
+        };
+        let detail = match &e {
+            lb_auth::AuthError::RateLimited { retry_after } => {
+                Some(json!({ "retry_after": retry_after.as_secs() }))
+            }
+            _ => None,
+        };
+        let mut err = ApiError::new(status, code, e.to_string());
+        err.detail = detail;
+        err
+    }
+}

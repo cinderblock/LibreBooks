@@ -19,10 +19,10 @@ use crate::state::AppState;
 
 pub async fn reconcile_overview(
     State(s): State<AppState>,
-    _p: Principal,
+    p: Principal,
     Path((company, account)): Path<(CompanyId, AccountId)>,
 ) -> ApiResult<Json<Value>> {
-    let books = s.companies.get(company)?;
+    let books = s.books_for(&p, company, Role::Viewer)?;
     let (current, history, beginning) = blocking(move || {
         books.read(|c| {
             Ok((
@@ -52,8 +52,7 @@ pub async fn reconcile_start(
     Path((company, account)): Path<(CompanyId, AccountId)>,
     Json(b): Json<StartBody>,
 ) -> ApiResult<Json<Reconciliation>> {
-    p.require(Role::Bookkeeper)?;
-    let books = s.companies.get(company)?;
+    let books = s.books_for(&p, company, Role::Bookkeeper)?;
     let actor = p.actor();
     Ok(Json(
         blocking(move || {
@@ -77,8 +76,7 @@ pub async fn reconcile_undo(
     p: Principal,
     Path((company, account)): Path<(CompanyId, AccountId)>,
 ) -> ApiResult<Json<Value>> {
-    p.require(Role::Bookkeeper)?;
-    let books = s.companies.get(company)?;
+    let books = s.books_for(&p, company, Role::Bookkeeper)?;
     let actor = p.actor();
     let undone =
         blocking(move || books.write(&actor, |w| reconcile::undo_last(w, account))).await?;
@@ -87,10 +85,10 @@ pub async fn reconcile_undo(
 
 pub async fn reconciliation(
     State(s): State<AppState>,
-    _p: Principal,
+    p: Principal,
     Path((company, id)): Path<(CompanyId, ReconciliationId)>,
 ) -> ApiResult<Json<Value>> {
-    let books = s.companies.get(company)?;
+    let books = s.books_for(&p, company, Role::Viewer)?;
     let (rec, lines, status) = blocking(move || {
         books.read(|c| {
             Ok((
@@ -118,8 +116,7 @@ pub async fn reconcile_mark(
     Path((company, id)): Path<(CompanyId, ReconciliationId)>,
     Json(b): Json<MarkBody>,
 ) -> ApiResult<Json<reconcile::ReconcileStatus>> {
-    p.require(Role::Bookkeeper)?;
-    let books = s.companies.get(company)?;
+    let books = s.books_for(&p, company, Role::Bookkeeper)?;
     let actor = p.actor();
     Ok(Json(
         blocking(move || {
@@ -142,8 +139,7 @@ pub async fn reconcile_finish(
     Path((company, id)): Path<(CompanyId, ReconciliationId)>,
     Json(b): Json<FinishBody>,
 ) -> ApiResult<Json<Reconciliation>> {
-    p.require(Role::Bookkeeper)?;
-    let books = s.companies.get(company)?;
+    let books = s.books_for(&p, company, Role::Bookkeeper)?;
     let actor = p.actor();
     Ok(Json(
         blocking(move || books.write(&actor, |w| reconcile::finish(w, id, b.adjust))).await?,
@@ -155,8 +151,7 @@ pub async fn reconcile_discard(
     p: Principal,
     Path((company, id)): Path<(CompanyId, ReconciliationId)>,
 ) -> ApiResult<StatusCode> {
-    p.require(Role::Bookkeeper)?;
-    let books = s.companies.get(company)?;
+    let books = s.books_for(&p, company, Role::Bookkeeper)?;
     let actor = p.actor();
     blocking(move || books.write(&actor, |w| reconcile::discard(w, id))).await?;
     Ok(StatusCode::NO_CONTENT)
@@ -174,8 +169,7 @@ pub async fn opening_balance(
     Path((company, account)): Path<(CompanyId, AccountId)>,
     Json(b): Json<OpeningBody>,
 ) -> ApiResult<Json<Value>> {
-    p.require(Role::Bookkeeper)?;
-    let books = s.companies.get(company)?;
+    let books = s.books_for(&p, company, Role::Bookkeeper)?;
     let actor = p.actor();
     let txn = blocking(move || {
         books.write(&actor, |w| {
@@ -194,7 +188,6 @@ pub async fn upload(
     Path(company): Path<CompanyId>,
     mut form: Multipart,
 ) -> ApiResult<(StatusCode, Json<AttachmentMeta>)> {
-    p.require(Role::Bookkeeper)?;
     let mut file: Option<(String, String, Vec<u8>)> = None;
     let mut record_kind: Option<String> = None;
     let mut record_id: Option<String> = None;
@@ -236,7 +229,7 @@ pub async fn upload(
         }
     }
     let (name, mime, data) = file.ok_or_else(|| ApiError::invalid("no file was sent"))?;
-    let books = s.companies.get(company)?;
+    let books = s.books_for(&p, company, Role::Bookkeeper)?;
     let actor = p.actor();
     let meta = blocking(move || {
         books.write(&actor, |w| {
@@ -257,11 +250,11 @@ pub struct AttachmentQuery {
 
 pub async fn list_attachments(
     State(s): State<AppState>,
-    _p: Principal,
+    p: Principal,
     Path(company): Path<CompanyId>,
     Query(q): Query<AttachmentQuery>,
 ) -> ApiResult<Json<Vec<AttachmentMeta>>> {
-    let books = s.companies.get(company)?;
+    let books = s.books_for(&p, company, Role::Viewer)?;
     Ok(Json(
         blocking(move || {
             books.read(|c| match (q.record_kind, q.record_id) {
@@ -275,10 +268,10 @@ pub async fn list_attachments(
 
 pub async fn get_attachment(
     State(s): State<AppState>,
-    _p: Principal,
+    p: Principal,
     Path((company, id)): Path<(CompanyId, AttachmentId)>,
 ) -> ApiResult<Response> {
-    let books = s.companies.get(company)?;
+    let books = s.books_for(&p, company, Role::Viewer)?;
     let (meta, data) = blocking(move || books.read(|c| attachments::get(c, id))).await?;
     // Served as a download unless it's something a browser shows safely inline.
     let inline = meta.mime.starts_with("image/") && meta.mime != "image/svg+xml"
@@ -318,8 +311,7 @@ pub async fn attach(
     Path((company, id)): Path<(CompanyId, AttachmentId)>,
     Json(b): Json<AttachBody>,
 ) -> ApiResult<Json<AttachmentMeta>> {
-    p.require(Role::Bookkeeper)?;
-    let books = s.companies.get(company)?;
+    let books = s.books_for(&p, company, Role::Bookkeeper)?;
     let actor = p.actor();
     Ok(Json(
         blocking(move || {
@@ -336,8 +328,7 @@ pub async fn delete_attachment(
     p: Principal,
     Path((company, id)): Path<(CompanyId, AttachmentId)>,
 ) -> ApiResult<StatusCode> {
-    p.require(Role::Bookkeeper)?;
-    let books = s.companies.get(company)?;
+    let books = s.books_for(&p, company, Role::Bookkeeper)?;
     let actor = p.actor();
     blocking(move || books.write(&actor, |w| attachments::delete(w, id))).await?;
     Ok(StatusCode::NO_CONTENT)
