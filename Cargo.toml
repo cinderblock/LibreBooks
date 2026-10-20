@@ -94,6 +94,9 @@ quick-xml = { version = "0.42", features = ["serialize"] }
 directories = "6.0"
 qrcode = { version = "0.14", default-features = false, features = ["svg"] }
 self-replace = "1.5"
+# The headless server as a long-running service (`librebooks service`).
+tracing-appender = "0.2"
+windows-service = "0.8"
 
 # Test-only
 tempfile = "3.27"

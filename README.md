@@ -99,10 +99,40 @@ librebooks secret set <name>                 # value on stdin; refer to it as se
 Settings are in `server.json` in the data folder (also editable from the web UI);
 credentials live in the encrypted `secrets.age`, never in the settings. Backups
 are on by default (daily, into `<data folder>/backups`; add a second destination).
-Under systemd, `Restart=on-failure` plus `RestartForceExitStatus=75` lets a
-self-update restart the server; a full example unit, the Windows service setup,
-and the reasons behind all of it are in
-[`plans/server-ops.md`](plans/server-ops.md).
+The reasons behind all of it are in [`plans/server-ops.md`](plans/server-ops.md).
+
+### As a service
+
+The same server, started with the machine. `service install` takes `serve`'s
+options and bakes them, with the data folder, into the service's command line,
+so the service runs exactly what `serve` would; `--print` shows what would be
+registered without registering anything.
+
+```sh
+# Windows (from an administrator prompt): a native service, "LibreBooks" in services.msc
+librebooks service install --data-dir "D:\LibreBooks" --bind 0.0.0.0:8740 --public-url https://books.example.com
+librebooks service start | stop | status | uninstall
+
+# Linux: a systemd unit for this user (~/.config/systemd/user/librebooks.service) ...
+librebooks service install --data-dir ~/books --bind 127.0.0.1:8740
+# ... or system-wide (/etc/systemd/system), as a dedicated account that owns the data folder
+sudo librebooks service install --system --run-as librebooks --data-dir /var/lib/librebooks
+librebooks service start | stop | status | uninstall [--system]
+```
+
+On Windows a Stop from the service manager is the same graceful shutdown as
+Ctrl+C (requests finish, a backup in progress completes, cloudflared stops),
+the log is `logs/server.<date>.log` in the data folder (a service has no
+console), and the recovery actions registered at install restart the service
+after a failure and after the exit code 75 a self-update leaves with.
+`--account` runs it as something other than LocalSystem; the account must be
+able to write the data folder and the program's folder.
+
+On Linux the unit has `Restart=on-failure`, `RestartForceExitStatus=75`,
+`KillSignal=SIGTERM`, `TimeoutStopSec=90` and sandboxing (`ProtectSystem=strict`
+with only the data folder and the program's folder writable, `PrivateTmp`,
+`NoNewPrivileges`). `start`, `stop` and `status` are `systemctl`. A user unit
+stops at logout unless `loginctl enable-linger` is set.
 
 ## Money
 

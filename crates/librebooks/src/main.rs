@@ -1,18 +1,21 @@
 //! The `librebooks` command: run the server, manage company files, check them.
 //!
 //! Backups, self-update, the tunnel and secrets are in `ops.rs`
-//! (`plans/server-ops.md`); later subcommands (QuickBooks import) arrive as
-//! their crates do; see `plans/librebooks.md`.
+//! (`plans/server-ops.md`); running the server as a Windows service or a
+//! systemd unit is in `service/`; later subcommands (QuickBooks import) arrive
+//! as their crates do; see `plans/librebooks.md`.
 
 mod ops;
+mod service;
 
 mod import;
 
+use std::ffi::OsString;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
-use clap::{Parser, Subcommand};
+use clap::{Args, Parser, Subcommand};
 use lb_auth::{AuthConfig, AuthStore, EnrolmentPurpose, NewEnrolment, RelyingParty, Role};
 use lb_core::CompanyInfo;
 use lb_server::{AuthMode, Mode, ServerConfig, Sessions};
@@ -42,30 +45,8 @@ struct Cli {
 enum Command {
     /// Run the server: the API and the web UI.
     Serve {
-        /// Addresses to listen on. Repeat for several.
-        #[arg(
-            long = "bind",
-            default_value = "127.0.0.1:8740",
-            env = "LIBREBOOKS_BIND"
-        )]
-        binds: Vec<SocketAddr>,
-        /// The address people reach this server at, e.g.
-        /// `https://books.example.com`. Passkeys are bound to it. Repeat for
-        /// several. `http://localhost:<port>` is always accepted too.
-        #[arg(
-            long = "public-url",
-            env = "LIBREBOOKS_PUBLIC_URL",
-            value_delimiter = ','
-        )]
-        public_urls: Vec<String>,
-        /// A header carrying the real client address from a proxy on this
-        /// machine (`cf-connecting-ip` behind cloudflared).
-        #[arg(long, env = "LIBREBOOKS_CLIENT_IP_HEADER")]
-        client_ip_header: Option<String>,
-        /// Serve without any sign-in. Only allowed on loopback addresses; for
-        /// development.
-        #[arg(long)]
-        no_auth: bool,
+        #[command(flatten)]
+        args: ServeArgs,
     },
     /// Make an enrolment link: a new person, or another passkey or device for
     /// someone who has one. Single use, short-lived.
@@ -123,6 +104,67 @@ enum Command {
         #[command(subcommand)]
         command: ops::SecretCommand,
     },
+    /// Run the server as a system service: a Windows service, or a systemd
+    /// unit on Linux.
+    Service {
+        #[command(subcommand)]
+        command: service::ServiceCommand,
+    },
+}
+
+/// `serve`'s options. `service install` takes the same ones and bakes them into
+/// the service's command line, so a service runs exactly what `serve` would.
+#[derive(Args, Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ServeArgs {
+    /// Addresses to listen on. Repeat for several.
+    #[arg(
+        long = "bind",
+        default_value = "127.0.0.1:8740",
+        env = "LIBREBOOKS_BIND"
+    )]
+    binds: Vec<SocketAddr>,
+    /// The address people reach this server at, e.g.
+    /// `https://books.example.com`. Passkeys are bound to it. Repeat for
+    /// several. `http://localhost:<port>` is always accepted too.
+    #[arg(
+        long = "public-url",
+        env = "LIBREBOOKS_PUBLIC_URL",
+        value_delimiter = ','
+    )]
+    public_urls: Vec<String>,
+    /// A header carrying the real client address from a proxy on this
+    /// machine (`cf-connecting-ip` behind cloudflared).
+    #[arg(long, env = "LIBREBOOKS_CLIENT_IP_HEADER")]
+    client_ip_header: Option<String>,
+    /// Serve without any sign-in. Only allowed on loopback addresses; for
+    /// development.
+    #[arg(long)]
+    no_auth: bool,
+}
+
+impl ServeArgs {
+    /// These options as command-line arguments again, for a service's command
+    /// line. Everything is spelled out (defaults and values that came from the
+    /// environment included), since a service has neither.
+    pub(crate) fn to_args(&self) -> Vec<OsString> {
+        let mut out: Vec<OsString> = Vec::new();
+        for b in &self.binds {
+            out.push("--bind".into());
+            out.push(b.to_string().into());
+        }
+        for u in &self.public_urls {
+            out.push("--public-url".into());
+            out.push(u.into());
+        }
+        if let Some(h) = &self.client_ip_header {
+            out.push("--client-ip-header".into());
+            out.push(h.into());
+        }
+        if self.no_auth {
+            out.push("--no-auth".into());
+        }
+        out
+    }
 }
 
 #[derive(Subcommand, Debug)]
@@ -145,32 +187,82 @@ fn default_data_dir() -> Result<PathBuf> {
     Ok(dirs.data_dir().to_owned())
 }
 
+/// Where tracing output goes.
+#[derive(Debug, Clone, Copy)]
+enum LogTarget<'a> {
+    /// Standard error, as a command run from a terminal expects.
+    Console,
+    /// Daily files in `<data dir>/logs` (`server.<date>.log`, the newest 14
+    /// kept), for a service that has no console.
+    DataDir(&'a Path),
+}
+
+/// Install the tracing subscriber. The guard (for a file target) flushes what
+/// is still buffered when it is dropped, so it lives until the process ends.
+fn init_logging(
+    target: LogTarget<'_>,
+) -> Result<Option<tracing_appender::non_blocking::WorkerGuard>> {
+    let filter = || {
+        tracing_subscriber::EnvFilter::try_from_default_env()
+            .unwrap_or_else(|_| "info,tower_http=info".into())
+    };
+    match target {
+        LogTarget::Console => {
+            tracing_subscriber::fmt().with_env_filter(filter()).init();
+            Ok(None)
+        }
+        LogTarget::DataDir(data_dir) => {
+            let dir = data_dir.join("logs");
+            std::fs::create_dir_all(&dir)
+                .with_context(|| format!("couldn't create {}", dir.display()))?;
+            let file = tracing_appender::rolling::RollingFileAppender::builder()
+                .rotation(tracing_appender::rolling::Rotation::DAILY)
+                .filename_prefix("server")
+                .filename_suffix("log")
+                .max_log_files(14)
+                .build(&dir)
+                .with_context(|| format!("couldn't open a log file in {}", dir.display()))?;
+            let (writer, guard) = tracing_appender::non_blocking(file);
+            tracing_subscriber::fmt()
+                .with_env_filter(filter())
+                .with_ansi(false)
+                .with_writer(writer)
+                .init();
+            Ok(Some(guard))
+        }
+    }
+}
+
 fn main() -> Result<()> {
     let cli = Cli::parse();
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "info,tower_http=info".into()),
-        )
-        .init();
     let data_dir = match cli.data_dir {
         Some(d) => d,
         None => default_data_dir()?,
     };
-    match cli.command {
-        Command::Serve {
-            binds,
-            public_urls,
-            client_ip_header,
-            no_auth,
-        } => serve(
-            &data_dir,
-            &binds,
-            &public_urls,
-            client_ip_header,
-            no_auth,
-            cli.secret_key_file,
-        ),
+    // A Windows service has no console; its log goes to the data folder. (Under
+    // systemd `service run` is `serve`, and the journal keeps standard error.)
+    let as_service = cfg!(windows)
+        && matches!(
+            cli.command,
+            Command::Service {
+                command: service::ServiceCommand::Run { .. }
+            }
+        );
+    let _log_guard = init_logging(if as_service {
+        LogTarget::DataDir(&data_dir)
+    } else {
+        LogTarget::Console
+    })?;
+    let result = match cli.command {
+        Command::Serve { args } => {
+            let restart = serve(
+                &data_dir,
+                &args,
+                cli.secret_key_file,
+                ops::Control::console(),
+            )?;
+            ops::restart_or_exit(restart)
+        }
         Command::Enroll {
             role,
             name,
@@ -184,7 +276,13 @@ fn main() -> Result<()> {
         Command::Update { command } => ops::update(&data_dir, &command),
         Command::Tunnel { command } => ops::tunnel(&data_dir, cli.secret_key_file, command),
         Command::Secret { command } => ops::secret(&data_dir, cli.secret_key_file, command),
+        Command::Service { command } => service::run(&data_dir, cli.secret_key_file, command),
+    };
+    if as_service && let Err(e) = &result {
+        // Nobody reads a service's standard error; its log is in the data folder.
+        tracing::error!("{e:#}");
     }
+    result
 }
 
 /// Where the server keeps its users, credentials and sessions.
@@ -224,19 +322,23 @@ fn auth_config(binds: &[SocketAddr], public_urls: &[String]) -> Result<AuthConfi
     })
 }
 
-fn serve(
+/// Build the server's configuration and run it until `control` says stop (or
+/// an update was installed). The same code serves `librebooks serve` and the
+/// Windows service; only the `Control` differs. Returns the restart request,
+/// if an update asked for one.
+pub(crate) fn serve(
     data_dir: &Path,
-    binds: &[SocketAddr],
-    public_urls: &[String],
-    client_ip_header: Option<String>,
-    no_auth: bool,
+    args: &ServeArgs,
     secret_key: Option<PathBuf>,
-) -> Result<()> {
+    control: ops::Control,
+) -> Result<Option<lb_update::Restart>> {
+    let binds = args.binds.as_slice();
     std::fs::create_dir_all(data_dir)?;
     // Passkeys are bound to hostnames when sign-in starts, so the settings'
     // public URLs and the tunnel's hostname join the command line's here.
     let (_, settings) = lb_server::ops::settings::load_or_create(data_dir)?;
-    let mut public_urls: Vec<String> = public_urls
+    let mut public_urls: Vec<String> = args
+        .public_urls
         .iter()
         .map(|u| u.trim_end_matches('/').to_owned())
         .collect();
@@ -246,7 +348,7 @@ fn serve(
         }
     }
     let public_urls = public_urls.as_slice();
-    let sessions = if no_auth {
+    let sessions = if args.no_auth {
         None
     } else {
         let store = AuthStore::open(&auth_db(data_dir), auth_config(binds, public_urls)?)?;
@@ -260,18 +362,26 @@ fn serve(
             });
         if let Some(first) = store.bootstrap()? {
             let base = public_origin.clone().unwrap_or_default();
-            println!();
-            println!(
-                "  No one can sign in yet. Open this link within the hour to create the first admin:"
-            );
-            println!();
-            println!("    {}/enroll#token={}", base, first.token);
-            println!();
+            let link = format!("{base}/enroll#token={}", first.token);
+            if control.console {
+                println!();
+                println!(
+                    "  No one can sign in yet. Open this link within the hour to create the first admin:"
+                );
+                println!();
+                println!("    {link}");
+                println!();
+            } else {
+                // A service's only voice is its log.
+                tracing::warn!(
+                    "no one can sign in yet; open this link within the hour to create the first admin: {link}"
+                );
+            }
         }
         Some(Sessions {
             store,
             public_origin,
-            client_ip_header,
+            client_ip_header: args.client_ip_header.clone(),
         })
     };
     let config = ServerConfig {
@@ -283,7 +393,7 @@ fn serve(
     for addr in binds {
         lb_server::check_bind(&config, *addr)?;
     }
-    ops::run_server(&config, binds, secret_key)
+    ops::run_server(&config, binds, secret_key, control)
 }
 
 fn enroll(
@@ -371,5 +481,78 @@ fn check(file: &Path) -> Result<()> {
             println!("{p}");
         }
         bail!("{} problem(s) in {}", problems.len(), file.display())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn parse(argv: &[&str]) -> Cli {
+        Cli::try_parse_from(std::iter::once("librebooks").chain(argv.iter().copied()))
+            .expect("parses")
+    }
+
+    fn serve_args(cli: Cli) -> ServeArgs {
+        match cli.command {
+            Command::Serve { args } => args,
+            Command::Service {
+                command: service::ServiceCommand::Install(install),
+            } => install.serve,
+            other => panic!("not a serve command: {other:?}"),
+        }
+    }
+
+    /// What `service install` was given comes back out of `to_args` as
+    /// arguments `serve` parses to the same thing.
+    #[test]
+    fn serve_args_round_trip() {
+        let given = serve_args(parse(&[
+            "service",
+            "install",
+            "--bind",
+            "127.0.0.1:9000",
+            "--bind",
+            "[::1]:9001",
+            "--public-url",
+            "https://books.example.com/,https://b.example.org",
+            "--client-ip-header",
+            "cf-connecting-ip",
+            "--no-auth",
+        ]));
+        let rendered = given.to_args();
+        let strings: Vec<String> = rendered
+            .iter()
+            .map(|s| s.to_str().expect("utf-8").to_owned())
+            .collect();
+        assert_eq!(
+            strings,
+            [
+                "--bind",
+                "127.0.0.1:9000",
+                "--bind",
+                "[::1]:9001",
+                "--public-url",
+                "https://books.example.com/",
+                "--public-url",
+                "https://b.example.org",
+                "--client-ip-header",
+                "cf-connecting-ip",
+                "--no-auth",
+            ]
+        );
+        let mut argv = vec!["serve"];
+        argv.extend(strings.iter().map(String::as_str));
+        assert_eq!(serve_args(parse(&argv)), given);
+    }
+
+    /// Defaults are spelled out too: a service's command line stands alone.
+    #[test]
+    fn serve_args_spell_out_defaults() {
+        let given = serve_args(parse(&["service", "install"]));
+        let rendered = given.to_args();
+        assert_eq!(rendered.len(), 2);
+        assert_eq!(rendered[0], "--bind");
+        assert_eq!(rendered[1], "127.0.0.1:8740");
     }
 }

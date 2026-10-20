@@ -30,6 +30,11 @@ place that is never readable over the API.
 - New files: `lb-server/src/secrets.rs`, `lb-server/src/ops/{mod,settings,backups,update,tunnel,access,feeds}.rs`,
   `lb-server/src/routes/{ops,backups,feeds}.rs`, `lb-server/tests/{ops,feeds}.rs`,
   `lb-server/tests/support/mod.rs`, `librebooks/src/ops.rs`.
+- Service work (branch `worktree-agent-a335c5b9cf55f2181`, from `13d39ad`):
+  `librebooks/src/service/{mod,windows,systemd}.rs`; `main.rs` gained
+  `ServeArgs` (shared by `serve`, `service install` and `service run`) and a
+  file log target; `ops::run_server` takes a `Control` (stop future + ready
+  callback) and returns the restart request instead of acting on it.
 - Build/test through the CPU broker:
   `node ~/.claude/bin/cpu-slots.mjs run --slots 4 --label "librebooks server-ops" -- cargo test -p lb-server`.
 
@@ -160,6 +165,9 @@ librebooks backup restore <backup-id | file.lbk> [--company] [--name] [--identit
 librebooks update check|install
 librebooks tunnel status | setup --hostname H (token on stdin or LIBREBOOKS_TUNNEL_TOKEN) | disable
 librebooks secret set NAME (value on stdin) | delete NAME | list
+librebooks service install [--name N] [--print] [<serve flags>] [--account A (Windows)] [--system [--run-as U[:G]] (Linux)]
+librebooks service uninstall | start | stop | status [--name N] [--system (Linux)]
+librebooks service run …     (hidden: what the Windows SCM starts; `serve` on Linux)
 global: --data-dir, --secret-key-file
 ```
 
@@ -214,13 +222,19 @@ must exist before the first start: `age-keygen -o /etc/librebooks/secret.key`
 `%d` needs systemd 250+). Without the two credential lines the key is made in the
 data folder the first time a secret is saved.
 
-**Windows service**: set `LIBREBOOKS_SUPERVISED=1` in the service's environment
-and make recovery restart on any failure, including a clean non-zero exit:
-`sc failure librebooks reset= 0 actions= restart/5000` and
-`sc failureflag librebooks 1`. The service account must be able to write the
-program's folder (self-update) and the data folder. LibreBooks has no native
-Windows-service entry point yet (see Gaps); run it under a wrapper (WinSW, NSSM,
-or `sc create` with a wrapper) that forwards stop as Ctrl+C.
+`librebooks service install` writes a unit of this shape (without the
+`LoadCredential` lines, and with `--data-dir` on the command line instead of
+the environment variable): per user by default, `--system [--run-as user]`
+for `/etc/systemd/system`.
+
+**Windows service**: `librebooks service install` (administrator prompt)
+registers a native service: `librebooks service run --name … --data-dir …
+<serve flags>`, automatic start after Tcpip, recovery "restart after 5 s, 5 s,
+30 s" with failure actions also on a non-crash stop, so the exit code 75 after
+a self-update brings the new version up. The service account (`--account`,
+LocalSystem by default) must be able to write the program's folder
+(self-update) and the data folder. The log is `<data dir>/logs/server.<date>.log`
+(daily, 14 kept). The old wrapper route (WinSW, NSSM) still works with `serve`.
 
 **Containers**: never self-update (pull the image); `LIBREBOOKS_CONTAINER=1`.
 
@@ -239,6 +253,28 @@ or `sc create` with a wrapper) that forwards stop as Ctrl+C.
   `spawn_blocking`.
 - The scheduler's own `last_success_at` does not see manual backups; a manual
   "run now" doesn't move the scheduled one (at worst one extra backup).
+- **Service design.** `ops::run_server` is driven by a `Control { stop, ready,
+  console }`: the console's `stop` is Ctrl+C/SIGTERM, the Windows service's is a
+  watch channel the SCM control handler (Stop, Shutdown) flips; `ready` fires once
+  every listener is bound (the service reports Running there). So a SCM stop is
+  byte-for-byte the Ctrl+C path (listeners drain, housekeeping aborted,
+  `Background::shutdown`: loops, schedulers, cloudflared), and SERVICE_STOPPED is
+  reported only after `run_server` returned. Status: StartPending (wait hint 30 s)
+  → Running (accepts Stop|Shutdown) → StopPending (90 s, set in the handler) →
+  Stopped. `run_server` now *returns* the restart request; `restart_or_exit` acts
+  on it at a console, while the service ignores the variant and stops with
+  ServiceSpecific(75): a service can't set `LIBREBOOKS_SUPERVISED` for itself
+  (`set_var` is unsafe in edition 2024 and the workspace denies `unsafe_code`),
+  and respawning a child from inside a service would be a non-service process.
+  The SCM's recovery actions (registered by `install`, non-crash failures
+  included) restart it. `service_main` gets its parameters through a `static
+  Mutex<Option<ServiceContext>>` because the SCM callback takes none of ours.
+  The systemd side is a pure `unit_file(&UnitSpec)` (compiled with
+  `cfg(any(unix, test))` so its tests run on Windows too) plus a `cfg(unix)`
+  driver around `systemctl`; `quote()` is systemd's quoting (`"…"` with `\\`
+  and `\"`, `%` doubled). `tracing-appender`'s `latest_symlink` fails hard where
+  symlinks need privileges, so no `server.log` alias: files are
+  `server.<date>.log`.
 
 ## Gaps / later
 
@@ -247,8 +283,15 @@ or `sc create` with a wrapper) that forwards stop as Ctrl+C.
 - **Live tunnel status from the CLI**: `librebooks tunnel status` shows settings,
   token validity and the cloudflared it would run; the live connection state is
   only in the running server's API.
-- **No native Windows service** entry point (`windows-service` crate): needed for
-  a clean SCM stop; until then a wrapper.
+- **The real SCM registration is untested**: `service install` was never run on
+  a machine (only `--print`, the unit tests, and `service run` from a console,
+  which refuses with the SCM's error and writes the log file). The first real
+  install/start/stop/uninstall cycle on a Windows box is still to do.
+- **Service environment**: the SCM registration doesn't set `LIBREBOOKS_SUPERVISED`
+  (the `windows-service` crate has no environment API; it would be the registry
+  `Environment` value), so `lb-update`'s *advice* text in the UI describes a
+  respawn while the service in fact stops with 75 and is restarted by the SCM.
+  Cosmetic.
 - **`.lbk` import** over the API: multipart `POST /companies/import` (streams
   the upload to `.restore/` under the data folder, then `import_lbk`); the CLI's
   `backup restore x.lbk` does the same from a path.
@@ -282,6 +325,14 @@ or `sc create` with a wrapper) that forwards stop as Ctrl+C.
 - [x] CLI: `backup`, `update`, `tunnel`, `secret`; `serve` with background work,
       SIGTERM, graceful shutdown and restart after update.
 - [x] `plans/api.md` updated.
+- [x] `librebooks service`: Windows SCM entry point and install/uninstall/
+      start/stop/status (`windows-service`), systemd unit generation (3 unit
+      tests: quoting, user unit with spaces, system unit with User/Group) and
+      `systemctl` driver, `ServeArgs` shared by `serve` and the service (2
+      round-trip tests), file log for the service, README section. SIGTERM was
+      already handled in `shutdown_signal`.
+- [ ] A real `service install` → start → stop → uninstall cycle on Windows and
+      on a systemd box (never run; see Gaps).
 
 ## Things not to do
 
