@@ -202,10 +202,12 @@ Phases are ordered; each ends usable. **Current step is marked ▶.**
   (`1e1cd08`). Merged: the server as a service (`27fc74d`:
   `librebooks service install|uninstall|start|stop|status|run`, Windows SCM
   entry point with the Ctrl+C shutdown path, rolling log file, systemd unit
-  generation; the real SCM/systemctl cycle is untested by rule). ▶ Next: the
-  server gaps the web plan lists (`plans/web-ui.md` → "For the server":
-  `/open` by name, `/balances/names`, `MintedEnrolment.url`, `?token=` on
-  attachments, `wait` on parity, an all-attachments list). Next with the user: point
+  generation; the real SCM/systemctl cycle is untested by rule). The server
+  gaps the web plan listed are closed (`bfa063a`: `/balances/names`, all-
+  attachments list; the rest were already so and are now documented); a Web
+  Connector session race CI found is fixed (`90fc1f6`). ▶ Next: the UI
+  follow-ups in `plans/web-ui.md` (generated types for the stand-ins,
+  `/balances/names` in the centres, an Attached tab). Next with the user: point
   QuickBooks' Web Connector on cad-3 at this server over HTTPS (steps in
   `plans/qbd-import.md`), run a sync, and see whether the 14 bridge gaps close.
 - Phase 1 — Ledger core

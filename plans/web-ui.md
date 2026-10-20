@@ -390,38 +390,26 @@ Phase B (commits on `worktree-agent-af93b28647e2ebef7`):
 
 ## For the server
 
-Things the UI wanted that the API doesn't do (or does differently), recorded
-rather than worked around twice:
+Things the UI wanted that the API didn't do, and where each stands after the
+2026-10-20 server pass (`bfa063a`, `1e1cd08`):
 
-- `GET /open` is documented without `entity_id`; the UI sends `entity_id` and
-  `kind`. Pay Bills uses `GET /txns?types=Bill&open_only=true` instead because
-  bills are per vendor only.
-- `GET /open` returns `TxnSummary[]`; the UI reads `open_balance` from it and
-  treats credits/unapplied payments as negative open items.
-- `GET /balances/names` (per-name balances) would replace the centres summing
-  open transactions.
-- ts-rs `u64`/`i64` fields come out as `bigint` (`AttachmentMeta.size`,
-  `FeedConnection.edit_seq`, `FeedRule.priority`); `#[ts(type = "number")]`
-  would make the generated types match the JSON.
-- `RegisterLine.downloaded` and the QuickBooks import types are on master but
-  not in this worktree's generated files; the UI builds against local copies.
-- `POST /auth/enrollments` returns `{id, token, purpose, expires_at, url}`; the
-  generated `MintedEnrolment` lacks `url`. The UI's `MintedEnrolmentLink` adds it.
-- `GET /attachments/:id` needs the session cookie; the desktop app's bearer
-  token can't ride on an `<img src>`. The UI appends `?token=` as it does for
-  `/events` — the server should accept it there too (it doesn't yet).
-- `PATCH /auth/passkeys/:id` and the revoke routes are assumed to answer 204
-  (the UI refetches rather than reading a body).
-- `GET /import/qbd/status?wait=N` is long-polled while a sync runs; the UI
-  assumes it returns as soon as progress changes. `POST /import/qbd/parity` is
-  202 and the report is fetched afterwards; a `wait` on `GET …/parity` would
-  let the UI block instead of polling.
-- No route lists *all* attachments (attached and not); only the inbox or one
-  record's. An "Attached" tab needs one.
-- Restoring a backup creates a company; `GET /session` must include it for the
-  picker to show it (the UI invalidates the session query).
-- The closing date error is assumed to be `closed_period` with
-  `detail.closing_date`; the fixture sends 409.
+- Done: `GET /balances/names` (per-name A/R and A/P with jobs rolled up) replaces
+  the centres summing open transactions; `GET /attachments?all=true` lists every
+  document for an "Attached" tab; every `u64`/`i64` field exports as `number`
+  (no `bigint` anywhere, `asNumber()` is a no-op guard now); `RegisterLine.downloaded`
+  and the QuickBooks import types are generated on master, so the local
+  stand-ins for them can go.
+- Already so, now documented: `GET /open` takes `entity_id` and `kind`;
+  `?token=` is accepted on every route (so `<img src="/attachments/:id?token=">`
+  works in the desktop app); `GET /import/qbd/parity?wait=N` long-polls like
+  `status`; the closing-date refusal is 423 `closed_period` with
+  `detail.closing_date` (the fixture's 409 should follow).
+- Still as the UI assumed: `POST /auth/enrollments` adds `url` beside the
+  generated `MintedEnrolment` fields (the UI's `MintedEnrolmentLink`); passkey
+  rename/revoke answer 204; a restored or imported company appears in
+  `GET /session` on the next fetch.
+- UI follow-ups from the above: swap the stand-ins for the generated types, use
+  `/balances/names` in the centres, add the "Attached" tab.
 
 ## Open questions for the user
 
