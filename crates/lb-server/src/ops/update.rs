@@ -50,6 +50,7 @@ pub fn release_options(data_dir: &Path, config: &UpdateConfig) -> Result<Updater
         target: Target::RunningExe,
         download_dir: data_dir.join("updates"),
         download_limit: lb_update::DOWNLOAD_LIMIT,
+        smoke_test: true,
     })
 }
 
@@ -189,7 +190,10 @@ impl From<UpdateError> for ApiError {
             UpdateError::Network(_) | UpdateError::Http { .. } | UpdateError::Feed(_) => {
                 ApiError::new(StatusCode::BAD_GATEWAY, "network", message)
             }
-            UpdateError::Trust(_) | UpdateError::Checksum | UpdateError::NoAsset { .. } => {
+            UpdateError::Trust(_)
+            | UpdateError::Checksum
+            | UpdateError::NoAsset { .. }
+            | UpdateError::SmokeTest(_) => {
                 ApiError::new(StatusCode::BAD_GATEWAY, "untrusted", message)
             }
             UpdateError::NotSelfUpdatable(_) | UpdateError::NothingToRollBack => {

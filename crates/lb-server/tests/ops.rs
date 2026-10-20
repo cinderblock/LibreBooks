@@ -362,6 +362,8 @@ fn test_updater(base: &str, exe: &Path) -> UpdaterOptions {
         target: Target::Path(exe.to_owned()),
         download_dir: exe.parent().unwrap().join("updates"),
         download_limit: lb_update::DOWNLOAD_LIMIT,
+        // The "binary" is a stand-in, not something that answers --version.
+        smoke_test: false,
     }
 }
 

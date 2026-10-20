@@ -159,8 +159,9 @@ draft, rc, stable, older).
 
 ## Gaps / later
 
-- No post-install smoke test (`new --version`) before replacing; worth adding
-  once the CLI's `--version` output is fixed.
+- Before replacing, the new binary must answer `--version` (30 s, clean exit,
+  naming the release's version): `install::smoke_test`, on by default
+  (`UpdaterOptions::smoke_test`), off in tests whose binary is a stand-in.
 - Download progress is not reported (the archive is ~10 MB).
 - Only the first page (30 releases) of the API is read.
 

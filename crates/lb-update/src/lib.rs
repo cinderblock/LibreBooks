@@ -65,6 +65,8 @@ pub enum UpdateError {
     Checksum,
     #[error("the update archive is unusable: {0}")]
     Archive(String),
+    #[error("the new version failed its check before install: {0}")]
+    SmokeTest(String),
     #[error("{0}")]
     NotSelfUpdatable(String),
     #[error("there is no previous version to go back to")]

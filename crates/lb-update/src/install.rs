@@ -415,6 +415,67 @@ impl Restart {
     }
 }
 
+/// How long the new binary gets to answer `--version`.
+const SMOKE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// Run `binary --version` and require a clean exit naming `expected`: a
+/// truncated, corrupt or wrong-platform download fails here, before anything
+/// is replaced. The new binary runs with no arguments but `--version`, so it
+/// touches no data.
+///
+/// # Errors
+/// [`UpdateError::SmokeTest`] with what went wrong.
+pub fn smoke_test(binary: &Path, expected: &crate::Version) -> Result<(), UpdateError> {
+    use std::process::{Command, Stdio};
+    let failed = |what: String| UpdateError::SmokeTest(what);
+    let mut child = Command::new(binary)
+        .arg("--version")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| failed(format!("{} would not start: {e}", binary.display())))?;
+    let started = std::time::Instant::now();
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => break,
+            Ok(None) if started.elapsed() < SMOKE_TIMEOUT => {
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+            Ok(None) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(failed(format!(
+                    "no answer to --version within {} s",
+                    SMOKE_TIMEOUT.as_secs()
+                )));
+            }
+            Err(e) => return Err(failed(format!("could not wait for --version: {e}"))),
+        }
+    }
+    let out = child
+        .wait_with_output()
+        .map_err(|e| failed(format!("could not read --version's output: {e}")))?;
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    if !out.status.success() {
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        return Err(failed(format!(
+            "--version exited with {}: {}",
+            out.status,
+            stderr.trim()
+        )));
+    }
+    let want = expected.to_string();
+    let want = want.trim_start_matches('v');
+    if !stdout.contains(want) {
+        return Err(failed(format!(
+            "--version printed {:?}, not {want}",
+            stdout.trim()
+        )));
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

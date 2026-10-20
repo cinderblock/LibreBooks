@@ -95,6 +95,8 @@ fn rig(base: &str, target: &str, current: &str, kind: Option<InstallKind>) -> Ri
         target: Target::Path(exe.clone()),
         download_dir: dir.path().join("updates"),
         download_limit: lb_update::DOWNLOAD_LIMIT,
+        // The fixture binary is bytes, not a program: see the smoke-test test.
+        smoke_test: false,
     })
     .unwrap();
     Rig {
@@ -251,6 +253,7 @@ async fn downloads_have_a_size_limit() {
         target: Target::Path(r.exe.clone()),
         download_dir: dir.path().to_owned(),
         download_limit: 100,
+        smoke_test: false,
     })
     .unwrap();
     let CheckOutcome::Available(a) = r.updater.check().await.unwrap() else {
@@ -306,4 +309,38 @@ async fn tick_follows_the_policy() {
     );
     // Then it waits for the restart.
     assert!(rig.updater.tick().await.unwrap().is_none());
+}
+
+/// With the smoke test on, a "binary" that can't answer `--version` (the
+/// fixture is bytes, not a program) is refused before anything is replaced.
+#[tokio::test]
+async fn the_new_binary_must_answer_version_before_it_replaces_anything() {
+    let (base, _server) = github().await;
+    let mut r = rig(&base, LINUX, "0.2.9", None);
+    let dir = tempfile::tempdir().unwrap();
+    r.updater = Updater::new(UpdaterOptions {
+        source: FeedSource {
+            api_base: base.clone(),
+            owner: "cinderblock".into(),
+            repo: "LibreBooks".into(),
+            target: LINUX.into(),
+        },
+        key: TrustedKey::decode(&String::from_utf8(testdata("test.pub")).unwrap()).unwrap(),
+        current: Build::parse("0.2.9").unwrap(),
+        config: UpdateConfig::default(),
+        install_kind: InstallKind::SelfUpdatable { exe: r.exe.clone() },
+        target: Target::Path(r.exe.clone()),
+        download_dir: dir.path().to_owned(),
+        download_limit: lb_update::DOWNLOAD_LIMIT,
+        smoke_test: true,
+    })
+    .unwrap();
+    let CheckOutcome::Available(a) = r.updater.check().await.unwrap() else {
+        panic!("offered");
+    };
+    let downloaded = r.updater.download(&a).await.unwrap();
+    let err = r.updater.install(&downloaded).await.unwrap_err();
+    assert!(matches!(err, UpdateError::SmokeTest(_)), "{err}");
+    assert_eq!(std::fs::read(&r.exe).unwrap(), b"the old version");
+    assert!(matches!(r.updater.status().phase, Phase::Failed { .. }));
 }

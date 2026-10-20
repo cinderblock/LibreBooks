@@ -42,6 +42,10 @@ pub struct UpdaterOptions {
     pub download_dir: PathBuf,
     /// Largest archive accepted.
     pub download_limit: u64,
+    /// Run the new binary's `--version` before it replaces anything, so a
+    /// truncated or wrong-platform download fails here. Off in tests whose
+    /// "binary" is a stand-in.
+    pub smoke_test: bool,
 }
 
 /// A verified release newer than what is running.
@@ -365,7 +369,8 @@ impl Updater {
     /// # Errors
     /// [`UpdateError::NotSelfUpdatable`] for a copy that cannot update itself
     /// (with what to do instead), [`UpdateError::Checksum`] if the archive changed
-    /// since it was verified, or an archive or disk error.
+    /// since it was verified, [`UpdateError::SmokeTest`] if the new binary can't
+    /// answer `--version` with its version, or an archive or disk error.
     pub async fn install(&self, downloaded: &Downloaded) -> Result<Installed, UpdateError> {
         if let Some(advice) = self.options.install_kind.advice() {
             return Err(UpdateError::NotSelfUpdatable(advice));
@@ -377,9 +382,10 @@ impl Updater {
         let target = self.options.target.clone();
         let source = self.options.source.clone();
         let dir = self.options.download_dir.clone();
+        let smoke = self.options.smoke_test;
         let downloaded2 = downloaded.clone();
         let result = tokio::task::spawn_blocking(move || {
-            install_blocking(&downloaded2, &source, &dir, &target)
+            install_blocking(&downloaded2, &source, &dir, &target, smoke)
         })
         .await
         .map_err(|e| UpdateError::Archive(format!("the install task failed: {e}")))
@@ -506,6 +512,7 @@ fn install_blocking(
     source: &FeedSource,
     dir: &std::path::Path,
     target: &Target,
+    smoke_test: bool,
 ) -> Result<(PathBuf, PathBuf), UpdateError> {
     // Hash once more: the file sat on disk since it was checked.
     let bytes = std::fs::read(&downloaded.path).map_err(UpdateError::io("read the download"))?;
@@ -524,6 +531,9 @@ fn install_blocking(
         feed::binary_name(&source.target),
         &binary,
     )?;
+    if smoke_test {
+        install::smoke_test(&binary, &downloaded.release.version)?;
+    }
     let out = install::replace_binary(&binary, target)?;
     let _ = std::fs::remove_file(&downloaded.path);
     Ok(out)
