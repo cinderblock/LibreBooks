@@ -135,3 +135,25 @@ test("someone else's save shows a banner, and saving over it asks", async ({ pag
   await page.getByRole('button', { name: 'Save mine anyway' }).click();
   await expect(page.getByText(/saved\./)).toBeVisible();
 });
+
+test('stress: a 100,000-line register and 5,000 more names stay responsive', async ({ page }) => {
+  const stressAccount = '00000000-0000-4000-9fff-000000000001';
+  await page.goto(`/c/00000000-0000-4000-8000-00000000c0de/accounts/${stressAccount}/register?fixtures=stress&latency=0&keymap=browser`);
+  await expect(page.getByText('100,000 transactions')).toBeVisible({ timeout: 20_000 });
+  const grid = page.getByTestId('register-grid');
+  // Only a screenful of rows is in the DOM, however long the register.
+  expect(await grid.getByRole('row').count()).toBeLessThan(80);
+  await grid.focus();
+  const t0 = Date.now();
+  await page.keyboard.press('Control+Home');
+  await expect(grid.locator('#reg-row-0')).toHaveAttribute('aria-selected', 'true');
+  await page.keyboard.press('Control+End'); // the new-transaction line, after 100,000 others
+  await expect(grid.locator('#reg-row-100000[data-entry]')).toBeVisible();
+  expect(Date.now() - t0).toBeLessThan(3_000);
+  // QuickFill over every name (5,000+), filtering per keystroke.
+  await page.goto('/c/00000000-0000-4000-8000-00000000c0de/checks/new');
+  const payee = page.getByTestId('write-checks').getByRole('combobox', { name: 'Payee' });
+  await payee.click();
+  await payee.pressSequentially('juniper fre');
+  await expect(page.getByRole('option', { name: /Juniper Freight/ }).first()).toBeVisible();
+});
