@@ -1,4 +1,4 @@
-# LibreBooks web UI (phases A and B)
+# LibreBooks web UI (phases A, B and C)
 
 Living plan for the SPA under `web/`. Master plan: `plans/librebooks.md`
 (decisions 7 and 13). HTTP contract: `plans/api.md`. Auth library:
@@ -18,6 +18,12 @@ and the administrative and account screens (users, enrolment links, My
 Account, server settings, backups, QuickBooks import, closing date, memorized
 transactions, attachments, merge).
 
+Phase C (2026-10-20) took up what the server pass of the same day enabled: the
+generated QuickBooks import and `NameBalance` types replace the UI's local
+copies, the centres read `GET /balances/names`, Attachments gained the Attached
+tab on `GET /attachments?all=true`, and the fixture answers 423 for the closing
+date as the server does.
+
 User requirements this meets: mobile first class from day one; QuickBooks-quality
 input (QBD keyboard shortcuts, QuickFill, date keys, the amount calculator);
 reports and views. The Tauri desktop app loads this same SPA, so the keymap
@@ -28,7 +34,8 @@ Ctrl+W/T/N/Tab can't be captured).
 
 - Phase A was built on worktree branch `worktree-agent-ab818e840111ec792`,
   phase B on `worktree-agent-af93b28647e2ebef7` (both merged by the parent
-  session). The parent merges `master` in; the worktree never does.
+  session), phase C on `worktree-agent-a9571472f4dda8acb`. The parent merges
+  `master` in; the worktree never does.
 - Vite 8, React 19 (StrictMode), Mantine 9.7 (has `Menubar`), React Router 8.5
   (v7-style API from `react-router`), TanStack Query 5, TanStack Virtual 3,
   TypeScript 7 (`tsc`), Bun 1.4 (package manager + unit tests), Playwright 1.64,
@@ -38,9 +45,9 @@ Ctrl+W/T/N/Tab can't be captured).
   1 slot for check/tests, 2 for `vite build` and for Playwright's 2 workers):
   - `bun run dev` → http://localhost:5740. Add `?fixtures=1` (or
     `?fixtures=stress`, `&latency=0`, `&keymap=desktop|browser`).
-  - `bun run check` = `tsc --noEmit && bun test src/` (233 unit tests, 21 files).
+  - `bun run check` = `tsc --noEmit && bun test src/` (235 unit tests, 21 files).
   - `bun run test:e2e` (Playwright; starts the dev server with `VITE_FIXTURES=1`;
-    one-time `bunx playwright install chromium`). 40 smoke tests: 26 desktop
+    one-time `bunx playwright install chromium`). 41 smoke tests: 27 desktop
     (1366×860) and 14 at 375px.
   - `bun run build`.
 - Generated API types live in `web/src/api/generated/` (ts-rs). Never edit them.
@@ -139,6 +146,7 @@ also invalidates everything derived from transactions), `user`/`enrolment`,
 | `ReportViewer` | Any `Report`: sticky header and label column, outline collapse showing subtotals, QuickZoom drill (txn / report / register), keyboard, virtualized; CSV export. |
 | `ReportCenter`, `ReportWindow` | `GET /reports` catalog by QBD category with memorized reports; a report window with the options bar (date macro / from–to, basis, columns, comparisons, show zero), filters modal, Export CSV (`POST /reports/export?format=csv`), Memorize (`POST /saved/memorized_report`), drill-down from `Drill`. |
 | `KeyList` | List windows: virtualized, ↑↓ PgUp PgDn Home End Enter, type-to-jump. |
+| `Center` | Customer, Vendor and Employee Centers: the names with jobs indented, **Balance** (the name's own open items) and **Balance Total** (with its jobs) from `GET /balances/names`, the detail with contact, bill-to, balance card and transactions, edit, New transaction menu, Ctrl+Q QuickReport. |
 | `useTxnForm` / `TxnFormActions` | The form engine (see below) and the standard action bar: Delete, Void, Journal, Memorize, paperclip (Attachments for this transaction), Revert/Clear, Save & New, Save & Close. |
 | `PurchaseForm` | Write Checks, Enter Bills, Vendor Credits, Credit Card Charges/Credits, Item Receipts, Purchase Orders (non-posting, says so): Expenses/Items tabs, terms → due/discount dates, recall of the payee's last transaction. |
 | `SalesForm` | Invoices, Sales Receipts, Credit Memos, Estimates (non-posting): item lines with qty × rate, sales tax item and customer tax code, live server-confirmed totals (`PostingsPanel`). |
@@ -148,7 +156,7 @@ also invalidates everything derived from transactions), `user`/`enrolment`,
 | `Reconcile` | Begin (statement date, ending balance, service charge, interest) then the two-column window: Mark All, running difference, Enter Adjustment, Discard, Undo Last; one column at a time on phones. |
 | `BankFeeds` | Accounts summary, the download queue with Match (scored candidates) / Add (preview) / Ignore / Undo, rules (conditions → actions, reorder, apply), connections (file, SimpleFIN claim, Direct Connect, credentials write-only), file import with OFX detection and CSV mapping/preview, Amazon order matching. |
 | `MemorizedList` | Ctrl+T: every memorized transaction with its schedule, due ones first; Enter Now (`GET /memorized/:id/use` → hand-off to its form), edit schedule, delete. |
-| `Attachments` | The inbox and one record's files; Add files, Take a photo (`<input capture="environment">`), image thumbnails, attach to a transaction (search by payee/memo/number), detach, delete, open the record. Reached from the paperclip on any saved form. |
+| `Attachments` | Inbox and Attached tabs (the latter from `GET /attachments?all=true`, showing what each document is attached to with a way into the transaction) and one record's files; Add files, Take a photo (`<input capture="environment">`), image thumbnails, attach to a transaction (search by payee/memo/number), detach, delete. Reached from the paperclip on any saved form. |
 | `MergeWindow` | Names / accounts / items: pick what disappears and what it folds into; confirm; `POST /merge`. |
 | `Company` | Company information with an edit dialog (`PUT /info`, incl. the main preferences), Set Closing Date (`PUT /closing-date`), the administration grid (admins), this device's preferences. |
 | `MyAccount` | Passkeys (rename, remove), device keys (revoke), where I'm signed in (sign another device out), Add another device (an `add_device` link with QR), Add a passkey here (mints a link and follows it). |
@@ -156,7 +164,7 @@ also invalidates everything derived from transactions), `user`/`enrolment`,
 | `EnrollmentsWindow` | Outstanding links (purpose, role, who for, expiry, revoke) and `MintLinkModal`: new user (role, suggested name, company access, TTL) or add device (whose); the minted link shown once as text + `QRCodeSVG`. |
 | `ServerWindow` | General (public URLs, feed auto-sync, Cloudflare Access), Updates (status, check, install with/without restart, policy), Tunnel (state, logs, token write-only, hostname, cloudflared), Backups (schedule, destinations folder/S3, encryption passphrase/age/none, retention, per-company status), Secrets (list, add, replace, delete; `in_use` refused). `PUT /server` sends the document whole; 400 `invalid` lists `detail.problems`. |
 | `BackupsWindow` | This company's backups in every destination, Back up now, Verify (checksum; contents with the passphrase/identities), Restore as a new company, Export company file. |
-| `ImportWindow` | QuickBooks import: Sync (now / sweep deletions / full), long-polled progress, the last `SyncReport` (per-entity counts, issues, mismatches, gaps, unmapped fields, created lists); Connection (bridge URL + write-only key, Web Connector user/password/file mode/.qwc download, SDK note, pause, schedule); Parity (`ParityReport`: QBD beside ours, differences first). |
+| `ImportWindow` | QuickBooks import on one `ImportStatus` document (`GET /import/qbd`, long-polled with `?wait=` while a job runs): Sync (now / sweep deletions / full; the running job with progress, or "waiting for the Web Connector"), the last `SyncReport` (per-entity counts, issues, mismatches, gaps, unmapped fields, created lists); Connection (the generated `ImportSettings`: bridge URL + write-only key + delay, Web Connector user name / schedule / app URL / password (set or generated once) / .qwc download, SDK file mode, company file), `400 invalid` listing `detail.problems`; Parity (`GET …/parity`: the report, QBD beside ours, differences first; a running comparison polls). |
 | Shell | Desktop: menu bar with shortcut hints, icon rail, window tabs with unsaved dots, palette button, live indicator, fixture badge, theme, user menu (My Account, Sign out). Phone: header with Back/search, stacked windows, bottom tabs with "+" create sheet and More sheet (incl. My Account). |
 | `CommandPalette` | Ctrl+K: forms, reports, accounts, names, items, open windows; QuickFill ranking; grouped; admin items only for admins. |
 | `ShortcutOverlay` | `?`/F1: every key on this platform by scope, the ones live in this window highlighted, plus field keys; keymap switch. |
@@ -273,13 +281,23 @@ change events, and:
   (write-only, `in_use` on delete), an available update, the tunnel (connects
   when a token is set and it's turned on), five backups (run / verify / restore
   / export), two inbox attachments (real blobs; `attachmentUrl` is an object
-  URL), and the QuickBooks import: settings with the write-only bridge key, a
-  sync that runs for ~2 s through the phases (emitting progress, then
-  `finished`), a plausible `SyncReport`, a parity report built from the real
-  fixture balances with two accounts off, the `.qwc` file and the Web Connector
-  password.
+  URL; `?all=true` lists everything), and the QuickBooks import as the server
+  does it: one `ImportStatus`, settings on the generated `ImportSettings` (the
+  `.qwc` ids can't change, the bridge key becomes a `secret:` reference,
+  `problems()` mirrored as a 400), one job at a time (409 `running`), a sync
+  that runs for ~2 s through the phases (over the Web Connector it first
+  "waits for the poll"), `?wait=` long-polls that resolve when the job ends,
+  a plausible `SyncReport`, a parity job that lands a report built from the
+  real fixture balances with two accounts off, the `.qwc` file and the Web
+  Connector password (generated and returned once, or chosen and 204).
+- **Name balances** (`GET /balances/names`): from open items exactly as
+  `lb_store::balances::name_balances` does it — charges count what is still
+  owed, credit memos / vendor credits / unapplied payments count against, jobs
+  roll up into `*_total`, names with nothing open are absent.
 - Merge really moves every reference (transactions, postings, parents, defaults)
   and removes the duplicate.
+- The closing date refuses with 423 `closed_period` and `detail.closing_date`,
+  as the server does.
 
 `?fixtures=stress` adds 5,000 vendors and a 100,000-line "Stress Test Checking"
 register. Console handle: `__librebooks.simulateRemoteEdit(txnId)`,
@@ -290,16 +308,26 @@ register. Console handle: `__librebooks.simulateRemoteEdit(txnId)`,
 - **ts-rs exports `u64`/`i64` as `bigint`, JSON carries numbers.** Fixed on the
   Rust side with `#[ts(type = "number")]` on every such field (`edit_seq`
   everywhere, `AttachmentMeta.size`, `BridgeSettings.delay_ms`,
-  `FeedRule.priority`); `api/json.ts` no longer revives BigInt and no generated
-  type says `bigint`. `asNumber()` stays as a harmless guard.
-- **Local stand-ins** (in `api/types.ts`) to swap when generated: `Session`,
-  `SaveOutcome`/`PreviewOutcome`/`RegisterResponse`, `AuditEntry`, the reconcile
-  envelopes, the server-ops shapes (`ServerSettings`, `ServerView`, `UpdateView`,
-  `TunnelView`, backups), `MintedEnrolmentLink` (the generated `MintedEnrolment`
-  lacks `url`), `UserDetail`, and the QuickBooks import shapes `ImportSettings`,
-  `QbdTransport`, `BridgeSettings`, `QbwcSettings`, `FileMode`,
-  `QbdImportStatus`, `QbdSyncOptions`, `QbwcPassword` (the generated ones land
-  with the server merge; delete the local block and fix what the compiler flags).
+  `FeedRule.priority`); `api/json.ts` no longer revives BigInt, no generated
+  type says `bigint`, and the `asNumber()` guard is gone (phase C).
+- **Local stand-ins** (in `api/types.ts`) are only shapes the server does not
+  export: `Session`, `SaveOutcome`/`PreviewOutcome`/`RegisterResponse`,
+  `AuditEntry`, the reconcile envelopes (`ReconcileOverview`, `StartReconcile`,
+  `ReconciliationView`), the server-ops shapes (`ServerSettings`, `ServerView`,
+  `UpdateView`, `TunnelView`, backups), `MintedEnrolmentLink` (the generated
+  `MintedEnrolment` lacks `url`), `UserDetail`, and the QuickBooks import
+  envelopes `ImportStatus`, `RunningJob`, `ParityStatus`, `QbdSyncOptions`,
+  `QbdParityOptions` (lb-server structs without ts-rs). Everything lb-qbd
+  exports (`ImportSettings`, `QbdTransport`, `BridgeSettings`, `QbwcSettings`,
+  `SdkSettings`, `FileMode`), `NameBalance`, `StatementCharge` and
+  `RegisterLine.downloaded` are the generated ones since phase C.
+- **The generated `ImportSettings` is not what phase B guessed**: no
+  `pause_ms`/`auto_sync`/`every` (the bridge has `delay_ms`; the Web Connector
+  schedules itself through `qbwc.run_every_minutes` in the `.qwc`), the key is
+  `bridge.key_ref` (a `secret:` reference, set through the write-only
+  `bridge_key` beside the settings) and `bridge_key_set`/`qbwc_password_set`
+  live on `ImportStatus`, not the settings. `GET /import/qbd` returns the whole
+  `ImportStatus`; the UI reads one query for the three tabs.
 - **`/session` shape** assumed from the coordinator: `{ user: {id, display_name,
   role, kind}, companies, sign_in }`, with `sign_in` meaning "this server uses
   sign-in" (Sign out shown only then). master's `system::session` doesn't send
@@ -321,8 +349,11 @@ register. Console handle: `__librebooks.simulateRemoteEdit(txnId)`,
   string. Notifications render in their own corner, outside any window's test id.
 - A report drilled from a row with monthly columns must drill the row, not the
   first cell's month (`accountTree` has a row-level drill).
-- Per-name balances: the API has no endpoint; the centres sum `open_balance` from
-  `GET /txns?types=…&open_only=true`. A `GET /balances/names` would be cheaper.
+- Per-name balances come from `GET /balances/names` (`NameBalance`: positive =
+  owed; `receivable`/`payable` are the name's own, `*_total` include its jobs;
+  names with nothing open are absent). Its query key sits under `balancesAll`,
+  so every transaction change refreshes it with the account balances. The
+  centres no longer sum open transactions client-side.
 - Windows file-name casing: `payBills.ts` beside `PayBills.tsx` clashed on a
   case-insensitive checkout; the model is `billPayments.ts`.
 - The worktree guard here rejects shell loops and `$(…)`/`sh -c` around git; run
@@ -365,10 +396,25 @@ Phase B (commits on `worktree-agent-af93b28647e2ebef7`):
 - [x] `bun run check` green (233 tests); Playwright 40/40 on desktop and 375px.
 - [x] This document.
 
+Phase C (commits on `worktree-agent-a9571472f4dda8acb`, 2026-10-20):
+
+- [x] Generated types in place of the local stand-ins: lb-qbd's `ImportSettings`
+      family, `NameBalance`, `StatementCharge`; `asNumber()` removed; the import
+      client/fixture/window rebuilt on the server's `ImportStatus` envelope.
+- [x] `GET /balances/names` in the client, HTTP, fixture (with tests: roll-up,
+      unapplied payment as a credit, void), hooks, keys; the centres show Balance
+      and Balance Total.
+- [x] Attachments: the Attached tab on `GET /attachments?all=true`; fixture `all`.
+- [x] Fixture closing-date refusal is 423 `closed_period` with `detail.closing_date`.
+- [x] `bun run check` green (235 tests); Playwright 41/41 (new: the Customer
+      Center's balance columns; the Attached tab in the attachments test).
+- [x] This document.
+
 ## What's left (next phases)
 
-1. **Swap the stand-ins** for generated types once the server merge lands
-   (see Findings); re-run `check` and fix what the compiler flags.
+1. **Stand-ins without a generated twin** (see Findings) stay until the server
+   exports them; `MintedEnrolment` would need `url` to replace
+   `MintedEnrolmentLink`.
 2. **Lists**: item edit form and the other list editors (terms, classes, payment
    methods, sales tax codes) — the list windows are read-only beyond quick add.
 3. **Forms not built**: Pay Employees (payroll; out of scope for now), Statement
@@ -385,43 +431,49 @@ Phase B (commits on `worktree-agent-af93b28647e2ebef7`):
 7. **Polish**: code-split screens (main chunk ~300 KB gzip), Alt+letter menu
    mnemonics (conflicts with browser menus need care), ESLint (the code carries
    `react-hooks` disable comments in anticipation), the Home page's admin
-   shortcuts, an "Attached" tab listing everything attached (needs a server
-   query).
+   shortcuts, a filter box on the Attached tab once a company has many
+   documents.
+8. **Import options the UI doesn't offer yet**: `POST /import/qbd/sync` takes
+   `reimport`, `txn_limit`, `txn_from`/`txn_to`, `apply_credits`, `entities`;
+   `POST …/parity` takes `as_of` and `trial_balance`. The client sends them;
+   the window only has Sync / sweep / full and Compare now.
 
 ## For the server
 
 Things the UI wanted that the API doesn't do (or does differently), recorded
 rather than worked around twice:
 
-- `GET /open` is documented without `entity_id`; the UI sends `entity_id` and
-  `kind`. Pay Bills uses `GET /txns?types=Bill&open_only=true` instead because
-  bills are per vendor only.
+Closed by the server pass of 2026-10-20 and taken up in phase C: `GET
+/balances/names`, `GET /attachments?all=true`, `?token=` on `GET
+/attachments/:id`, `?wait=` on `GET /import/qbd/parity`, `GET /open` with
+`entity_id`/`kind`, `#[ts(type = "number")]` on the `u64`/`i64` fields,
+`RegisterLine.downloaded` and the lb-qbd types in the generated files, 423
+`closed_period` with `detail.closing_date`.
+
+Still open:
+
 - `GET /open` returns `TxnSummary[]`; the UI reads `open_balance` from it and
   treats credits/unapplied payments as negative open items.
-- `GET /balances/names` (per-name balances) would replace the centres summing
-  open transactions.
-- ts-rs `u64`/`i64` fields come out as `bigint` (`AttachmentMeta.size`,
-  `FeedConnection.edit_seq`, `FeedRule.priority`); `#[ts(type = "number")]`
-  would make the generated types match the JSON.
-- `RegisterLine.downloaded` and the QuickBooks import types are on master but
-  not in this worktree's generated files; the UI builds against local copies.
 - `POST /auth/enrollments` returns `{id, token, purpose, expires_at, url}`; the
   generated `MintedEnrolment` lacks `url`. The UI's `MintedEnrolmentLink` adds it.
-- `GET /attachments/:id` needs the session cookie; the desktop app's bearer
-  token can't ride on an `<img src>`. The UI appends `?token=` as it does for
-  `/events` — the server should accept it there too (it doesn't yet).
 - `PATCH /auth/passkeys/:id` and the revoke routes are assumed to answer 204
   (the UI refetches rather than reading a body).
-- `GET /import/qbd/status?wait=N` is long-polled while a sync runs; the UI
-  assumes it returns as soon as progress changes. `POST /import/qbd/parity` is
-  202 and the report is fetched afterwards; a `wait` on `GET …/parity` would
-  let the UI block instead of polling.
-- No route lists *all* attachments (attached and not); only the inbox or one
-  record's. An "Attached" tab needs one.
+- `ImportStatus`, `RunningJob`, `JobKind`, `SyncBody`, `ParityBody` and the
+  `GET …/parity` envelope are lb-server structs without `#[derive(TS)]`; the UI
+  keeps copies in `api/types.ts` (`ImportStatus`, `RunningJob`, `ParityStatus`,
+  `QbdSyncOptions`, `QbdParityOptions`). Exporting them would close the last
+  import stand-ins.
+- The import emits no change events (`kind: "import"`): the UI long-polls
+  `GET /import/qbd/status?wait=` while a job runs and shows the status a write
+  returns. The fixture emits `import` events anyway (`finished` invalidates
+  everything derived from transactions), so an event-driven server would slot in.
+- `GET /import/qbd/status?wait=N` returns when the job *finishes* (or `wait`
+  runs out), not when progress changes; the UI re-asks on return, so the
+  progress bar moves at `wait` granularity on the real server (the fixture's
+  jobs are short enough not to show it). A "return on progress change" would
+  make it live.
 - Restoring a backup creates a company; `GET /session` must include it for the
   picker to show it (the UI invalidates the session query).
-- The closing date error is assumed to be `closed_period` with
-  `detail.closing_date`; the fixture sends 409.
 
 ## Open questions for the user
 
