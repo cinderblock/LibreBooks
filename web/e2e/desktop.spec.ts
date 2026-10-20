@@ -134,6 +134,63 @@ test('create an invoice: the customer brings terms, tax follows the lines, the s
   await expect(page.getByText(/Invoice \d+ for \$198\.41 saved/)).toBeVisible();
 });
 
+test('receive a payment (auto-applied oldest first), deposit it, and balance a journal entry', async ({ page }) => {
+  await start(page, '/c/00000000-0000-4000-8000-00000000c0de/forms/receive-payment/new');
+  // A customer with an open invoice, from the books themselves.
+  const customer = await page.evaluate(async () => {
+    const lb = (window as unknown as { __librebooks: { txns(co: string, q: object): Promise<Array<{ entity_name: string | null; open_balance: number | null }>> } }).__librebooks;
+    const open = await lb.txns('00000000-0000-4000-8000-00000000c0de', { types: ['Invoice'], open_only: true });
+    return open[0]!.entity_name!.split(':')[0]!;
+  });
+  const form = page.getByTestId('form-receive-payment');
+  const from = form.getByRole('combobox', { name: 'Received from' });
+  await from.pressSequentially(customer);
+  await page.keyboard.press('Tab');
+  const items = form.getByRole('table', { name: 'Open items' });
+  await expect(items.getByRole('row')).not.toHaveCount(1);
+  const amount = form.getByRole('textbox', { name: 'Amount', exact: true });
+  await amount.fill('100');
+  await page.keyboard.press('Tab');
+  // Auto-apply: the oldest open invoice took the 100.00.
+  await expect(items.getByRole('textbox', { name: /^Payment for/ }).first()).toHaveValue('100.00');
+  await expect(form.getByTestId('payment-totals').getByLabel('Unapplied amount')).toHaveText('0.00');
+  await form.getByRole('button', { name: /Save & Close/ }).click();
+  await expect(page.getByText(/Payment of \$100\.00 saved/)).toBeVisible();
+
+  // Make Deposits offers what's waiting in Undeposited Funds; our 100.00 is there.
+  // (In-app navigation: a page load would reset the in-memory fixture books.)
+  await page.getByRole('menubar').getByText('Banking', { exact: true }).click();
+  await page.getByRole('menuitem', { name: /Make Deposits/ }).click();
+  const dialog = page.getByRole('dialog', { name: 'Payments to Deposit' });
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole('button', { name: 'OK' }).click();
+  const deposit = page.getByTestId('form-deposit');
+  await expect(deposit.getByTestId('deposit-totals').getByLabel('Deposit total')).not.toHaveText('0.00');
+  await deposit.getByRole('button', { name: /Save & Close/ }).click();
+  await expect(page.getByText(/Deposit of \$[\d,]+\.\d\d saved/)).toBeVisible();
+
+  // A journal entry prefills the balancing line.
+  await page.getByRole('menubar').getByText('Company', { exact: true }).click();
+  await page.getByRole('menuitem', { name: /Make General Journal Entries/ }).click();
+  const journal = page.getByTestId('form-journal');
+  const acct = journal.getByRole('combobox', { name: 'Account, line 1' });
+  await acct.click();
+  await acct.pressSequentially('Office Sup');
+  await page.keyboard.press('Tab');
+  await journal.getByRole('textbox', { name: 'Debit, line 1' }).fill('25');
+  await page.keyboard.press('Tab');
+  await page.keyboard.press('Tab');
+  await journal.getByRole('textbox', { name: 'Memo, line 1' }).fill('Supplies');
+  const acct2 = journal.getByRole('combobox', { name: 'Account, line 2' });
+  await acct2.click();
+  await expect(journal.getByRole('textbox', { name: 'Credit, line 2' })).toHaveValue('25.00');
+  await expect(journal.getByTestId('journal-difference')).toHaveText('Balanced');
+  await acct2.pressSequentially('Checking');
+  await page.keyboard.press('Tab');
+  await journal.getByRole('button', { name: /Save & Close/ }).click();
+  await expect(page.getByText(/Journal entry .*for \$25\.00 saved/)).toBeVisible();
+});
+
 test('saving an empty check shows the problem inline', async ({ page }) => {
   await start(page, '/c/00000000-0000-4000-8000-00000000c0de/checks/new');
   const form = page.getByTestId('write-checks');

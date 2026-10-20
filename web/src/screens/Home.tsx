@@ -53,9 +53,9 @@ export function Home() {
       <SimpleGrid cols={{ base: 3, sm: 4, lg: 8 }} spacing="xs">
         <Action icon={<IconChecks size={22} />} label="Write Checks" path={paths.newCheck()} command="form.writeChecks" />
         <Action icon={<IconFileInvoice size={22} />} label="Invoice" path={paths.form('invoice')} command="form.invoice" />
-        <Action icon={<IconCash size={22} />} label="Receive Payment" path={paths.form('receive-payment')} todo />
+        <Action icon={<IconCash size={22} />} label="Receive Payment" path={paths.form('receive-payment')} command="form.receivePayment" />
         <Action icon={<IconReceipt size={22} />} label="Enter Bills" path={paths.form('bill')} command="form.bill" />
-        <Action icon={<IconBuildingBank size={22} />} label="Deposit" path={paths.form('deposit')} todo />
+        <Action icon={<IconBuildingBank size={22} />} label="Deposit" path={paths.form('deposit')} command="form.deposit" />
         <Action icon={<IconCreditCard size={22} />} label="Card Charge" path={paths.form('cc-charge')} command="form.ccCharge" />
         <Action icon={<IconListTree size={22} />} label="Accounts" path={paths.accounts()} command="nav.chartOfAccounts" />
         <Action icon={<IconReportMoney size={22} />} label="Reports" path={paths.reports()} />

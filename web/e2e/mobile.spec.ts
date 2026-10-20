@@ -64,6 +64,20 @@ test('an invoice at 375px: customer, item cards and the totals fit', async ({ pa
   await page.screenshot({ path: test.info().outputPath('invoice-375.png') });
 });
 
+test('a journal entry and a transfer at 375px', async ({ page }) => {
+  await start(page, `${CO}/forms/journal/new`);
+  const journal = page.getByTestId('form-journal');
+  await expect(journal.getByTestId('journal-difference')).toHaveText('Balanced');
+  await expect(journal.getByText('Line 1')).toBeVisible();
+  await expectNoSideways(page);
+  await page.goto(`${CO}/forms/transfer/new?fixtures=1&latency=0`);
+  const transfer = page.getByTestId('form-transfer');
+  await expect(transfer.getByRole('combobox', { name: 'Transfer from' })).toBeVisible();
+  await expect(transfer.getByRole('textbox', { name: 'Transfer amount' })).toBeVisible();
+  await expectNoSideways(page);
+  await page.screenshot({ path: test.info().outputPath('transfer-375.png') });
+});
+
 test('banking → a register as a tappable list', async ({ page }) => {
   await start(page);
   await page.getByRole('navigation', { name: 'Main' }).getByText('Banking', { exact: true }).tap();

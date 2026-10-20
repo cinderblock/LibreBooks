@@ -81,6 +81,15 @@
   border-top: 1px solid var(--mantine-color-text);
 }
 
+/* A table row that selects on click (Pay Bills' detail panel). */
+.selectable {
+  cursor: pointer;
+}
+
+.selectable[data-selected] {
+  background: var(--mantine-primary-color-light);
+}
+
 .balanced {
   color: var(--mantine-color-teal-7);
 }
