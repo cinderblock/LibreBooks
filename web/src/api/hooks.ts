@@ -1,6 +1,7 @@
 // TanStack Query hooks, one per resource. Screens use these, never the client
 // directly, so caching, invalidation and the SSE refresh are uniform.
 
+import { useDebouncedValue } from '@mantine/hooks';
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useMemo } from 'react';
 import type { TxnQuery } from './client';
@@ -212,6 +213,33 @@ export function useMemorizedDue() {
   const api = useApi();
   const co = useCompanyId();
   return useQuery({ queryKey: qk.memorizedDue(co), queryFn: () => api.memorizedDue(co), staleTime: 60_000 });
+}
+
+export function useSalesTaxCodes() {
+  return useList('sales-tax-codes', { include_inactive: true });
+}
+export function useSalesReps() {
+  return useList('sales-reps');
+}
+
+/**
+ * `POST /txns/preview` for a form as it stands: the server's postings, total
+ * and sales tax (the truth for totals) without saving. Debounced, so typing
+ * doesn't flood the server; keyed by the transaction's content.
+ */
+export function useTxnPreview(txn: Txn | null, enabled = true) {
+  const api = useApi();
+  const co = useCompanyId();
+  const [debounced] = useDebouncedValue(txn, 400);
+  const key = useMemo(() => (debounced ? JSON.stringify([debounced.txn_type, debounced.entity_id, debounced.account_id, debounced.sales_tax_item_id, debounced.customer_tax_code_id, debounced.lines, debounced.applications, debounced.amount]) : ''), [debounced]);
+  return useQuery({
+    queryKey: ['c', co, 'preview', key],
+    queryFn: () => api.previewTxn(co, debounced!),
+    enabled: enabled && !!debounced && debounced.lines.some((l) => l.kind !== 'Text' && (l.amount !== 0 || l.item_id || l.account_id)),
+    staleTime: 60_000,
+    retry: false,
+    placeholderData: keepPreviousData,
+  });
 }
 
 /** Create (edit_seq 0) or update a transaction; refreshes everything it touches. */

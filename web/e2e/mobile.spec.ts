@@ -54,6 +54,16 @@ test('the + sheet starts a bill; the header stacks and the lines are cards', asy
   await page.screenshot({ path: test.info().outputPath('bill-375.png') });
 });
 
+test('an invoice at 375px: customer, item cards and the totals fit', async ({ page }) => {
+  await start(page, `${CO}/forms/invoice/new`);
+  const form = page.getByTestId('form-invoice');
+  await expect(form.getByRole('combobox', { name: 'Customer:Job' })).toBeVisible();
+  await expect(form.getByText('Line 1')).toBeVisible();
+  await expect(form.getByTestId('sales-totals').getByLabel('Total')).toHaveText('0.00');
+  await expectNoSideways(page);
+  await page.screenshot({ path: test.info().outputPath('invoice-375.png') });
+});
+
 test('banking → a register as a tappable list', async ({ page }) => {
   await start(page);
   await page.getByRole('navigation', { name: 'Main' }).getByText('Banking', { exact: true }).tap();

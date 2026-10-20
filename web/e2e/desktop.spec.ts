@@ -104,6 +104,36 @@ test('a credit card charge flips to a credit; a purchase order says it posts not
   await expect(po.getByRole('tab', { name: /Expenses/ })).toHaveCount(0);
 });
 
+test('create an invoice: the customer brings terms, tax follows the lines, the server confirms the total', async ({ page }) => {
+  await start(page);
+  await page.keyboard.press('Control+I');
+  const form = page.getByTestId('form-invoice');
+  await expect(form).toBeVisible();
+  const customer = form.getByRole('combobox', { name: 'Customer:Job' });
+  await expect(customer).toBeFocused();
+  await customer.pressSequentially('Acme');
+  await expect(customer).toHaveValue('Acme Corp');
+  await page.keyboard.press('Tab');
+  await expect(form.getByRole('combobox', { name: 'Terms' })).toHaveValue('Net 30');
+  await expect(form.getByRole('textbox', { name: 'Due date' })).not.toHaveValue('');
+  const item = form.getByRole('combobox', { name: 'Item, line 1' });
+  await item.click();
+  await item.pressSequentially('Walnut');
+  await page.keyboard.press('Tab');
+  await expect(form.getByRole('textbox', { name: 'Description, line 1' })).toHaveValue(/walnut/i);
+  const qty = form.getByRole('textbox', { name: 'Qty, line 1' });
+  await qty.fill('10');
+  await page.keyboard.press('Tab');
+  await expect(form.getByRole('textbox', { name: 'Amount, line 1' })).toHaveValue('185.00');
+  // Walnut is taxable at 7.25%: 13.41 tax, 198.41 total.
+  const totals = form.getByTestId('sales-totals');
+  await expect(totals.getByLabel('Total')).toHaveText('198.41');
+  await form.getByRole('checkbox', { name: 'Show postings' }).check();
+  await expect(form.getByRole('cell', { name: 'Accounts Receivable' })).toBeVisible();
+  await form.getByRole('button', { name: /Save & Close/ }).click();
+  await expect(page.getByText(/Invoice \d+ for \$198\.41 saved/)).toBeVisible();
+});
+
 test('saving an empty check shows the problem inline', async ({ page }) => {
   await start(page, '/c/00000000-0000-4000-8000-00000000c0de/checks/new');
   const form = page.getByTestId('write-checks');

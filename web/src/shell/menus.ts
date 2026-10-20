@@ -45,7 +45,7 @@ export const FORM_LABELS: Record<string, string> = {
 };
 
 /** Slugs with a real form; the rest open a placeholder naming them. */
-const BUILT_FORMS = new Set(['bill', 'vendor-credit', 'purchase-order', 'receive-items', 'cc-charge', 'cc-credit']);
+const BUILT_FORMS = new Set(['bill', 'vendor-credit', 'purchase-order', 'receive-items', 'cc-charge', 'cc-credit', 'invoice', 'sales-receipt', 'credit-memo', 'estimate']);
 
 const form = (key: keyof typeof FORM_LABELS & string, extra: Partial<MenuItem> = {}): MenuItem => ({
   label: FORM_LABELS[key]!,

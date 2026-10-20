@@ -103,7 +103,7 @@ export function MobileShell({ live, onShortcuts }: { live: LiveStatus; onShortcu
       <Drawer opened={plus} onClose={() => setPlus(false)} position="bottom" size="auto" title="Create" radius="md">
         <div className={classes.sheetGrid}>
           <SheetItem icon={<IconChecks size={26} />} label="Write Check" onClick={() => go(paths.newCheck())} />
-          <SheetItem icon={<IconFileInvoice size={26} />} label="Invoice" onClick={() => go(paths.form('invoice'))} todo />
+          <SheetItem icon={<IconFileInvoice size={26} />} label="Invoice" onClick={() => go(paths.form('invoice'))} />
           <SheetItem icon={<IconCash size={26} />} label="Receive Payment" onClick={() => go(paths.form('receive-payment'))} todo />
           <SheetItem icon={<IconReceipt size={26} />} label="Enter Bill" onClick={() => go(paths.form('bill'))} />
           <SheetItem icon={<IconBuildingBank size={26} />} label="Deposit" onClick={() => go(paths.form('deposit'))} todo />

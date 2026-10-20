@@ -52,7 +52,7 @@ export function Home() {
       {!mobile && <Title order={3}>{info?.name ?? 'Home'}</Title>}
       <SimpleGrid cols={{ base: 3, sm: 4, lg: 8 }} spacing="xs">
         <Action icon={<IconChecks size={22} />} label="Write Checks" path={paths.newCheck()} command="form.writeChecks" />
-        <Action icon={<IconFileInvoice size={22} />} label="Invoice" path={paths.form('invoice')} command="form.invoice" todo />
+        <Action icon={<IconFileInvoice size={22} />} label="Invoice" path={paths.form('invoice')} command="form.invoice" />
         <Action icon={<IconCash size={22} />} label="Receive Payment" path={paths.form('receive-payment')} todo />
         <Action icon={<IconReceipt size={22} />} label="Enter Bills" path={paths.form('bill')} command="form.bill" />
         <Action icon={<IconBuildingBank size={22} />} label="Deposit" path={paths.form('deposit')} todo />

@@ -7,6 +7,8 @@ import type { ReactNode } from 'react';
 import type { Txn, TxnType } from '~/api/types';
 import { PURCHASE_FORM_SLUG, PurchaseForm } from './PurchaseForm';
 import type { PurchaseType } from './purchaseDraft';
+import { SalesForm } from './SalesForm';
+import type { SalesType } from './salesDraft';
 
 export interface FormDef {
   label: string;
@@ -22,6 +24,12 @@ const purchase = (type: PurchaseType, label: string): FormDef => ({
   render: (saved, initial) => <PurchaseForm type={type} saved={saved} initial={initial} />,
 });
 
+const sales = (type: SalesType, label: string): FormDef => ({
+  label,
+  types: [type],
+  render: (saved, initial) => <SalesForm type={type} saved={saved} initial={initial} />,
+});
+
 /** Slug → form. The Check form also answers at `/checks/new`. */
 export const FORMS: Record<string, FormDef> = {
   check: purchase('Check', 'Write Checks'),
@@ -31,6 +39,10 @@ export const FORMS: Record<string, FormDef> = {
   'cc-credit': purchase('CreditCardCredit', 'Enter Credit Card Credits'),
   'receive-items': purchase('ItemReceipt', 'Receive Items'),
   'purchase-order': purchase('PurchaseOrder', 'Create Purchase Orders'),
+  invoice: sales('Invoice', 'Create Invoices'),
+  'sales-receipt': sales('SalesReceipt', 'Enter Sales Receipts'),
+  'credit-memo': sales('CreditMemo', 'Create Credit Memos/Refunds'),
+  estimate: sales('Estimate', 'Create Estimates'),
 };
 
 /** The slug whose form edits a transaction of this type, if one exists. */
