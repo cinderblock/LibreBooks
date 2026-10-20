@@ -195,7 +195,7 @@ Types `ImportSettings`, `QbdTransport`, `SyncReport`, `ParityReport`, `ImportSta
 | `GET /import/qbd/status?wait=N` | → `ImportStatus`; with `wait`, returns as soon as the job finishes **or reports progress** (else after N s, max 120) |
 | `POST /import/qbd/parity` | `{ as_of?, trial_balance? }` → 202 `ImportStatus` (same 409/400 rules) |
 | `GET /import/qbd/parity?wait=N` | → `ParityStatus { running, job: RunningJob \| null, report: ParityReport \| null, error }` |
-| events | A job emits `change` events with `kind: "import"`, `id: "sync" \| "parity"`, `action: started \| progress \| finished \| failed` on `GET /events`; the imported records themselves arrive as their own change events while it runs. |
+| events | A job emits `change` events with `kind: "import"`, `id: "sync" \| "parity"`, `action: started \| progress \| finished \| failed` on `GET /events`; saving the settings or the Web Connector password emits `id: "settings", action: updated`; the imported records themselves arrive as their own change events while it runs. |
 | `GET /import/qbd/qbwc.qwc` | → `application/xml` download `librebooks-<slug>.qwc` for the QuickBooks Web Connector (`AppURL` = the company's `qbwc.app_url`, else the server's first public URL, else the tunnel hostname, else the request's origin, + `/qbwc`; `IsReadOnly` true). 400 unless the URL is `https://` or `http://localhost`. |
 | `POST /import/qbd/qbwc/password` | `{ value }` (≥ 8 characters) → 204, or no body → `{ password }`: a generated one, shown this once. Saved as the secret `qbd.<company>.qbwc-password`. |
 

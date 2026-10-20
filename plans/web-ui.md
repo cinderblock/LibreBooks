@@ -499,6 +499,7 @@ Still open:
   jobs do), so another tab's Connection panel stays stale until it refetches.
   The fixture matches; an `import` event with `id: "settings"` would let the
   UI refresh it.
+  Closed since (`a3c075a`): both emit `import` / `settings` / `updated`.
 - Restoring a backup creates a company; `GET /session` must include it for the
   picker to show it (the UI invalidates the session query).
 

@@ -22,7 +22,18 @@ use super::blocking;
 use crate::auth::{Client, Principal, Role};
 use crate::error::{ApiError, ApiResult};
 use crate::import::{self, ImportStatus, ParityBody, ParityStatus, SyncBody};
-use crate::state::AppState;
+use crate::state::{AppState, ChangeEvent};
+
+/// Tell open windows the import settings (or a secret's presence) changed.
+fn settings_changed(s: &AppState, company: CompanyId) {
+    // No subscribers is fine.
+    let _ = s.events.send(ChangeEvent {
+        company,
+        kind: "import",
+        id: "settings".to_owned(),
+        action: "updated",
+    });
+}
 
 /// The company-scoped routes.
 pub fn routes() -> Router<AppState> {
@@ -155,6 +166,7 @@ async fn put_settings(
     }
     let (b, to_save) = (books.clone(), settings.clone());
     blocking(move || Ok(import::save_settings(&b, &to_save))).await??;
+    settings_changed(&s, company);
     Ok(Json(status_of(&s, company, &books).await?))
 }
 
@@ -279,6 +291,7 @@ async fn set_password(
     let name = import::qbwc_password_name(company);
     let to_store = password.clone();
     tokio::task::spawn_blocking(move || store.set(&name, &to_store)).await??;
+    settings_changed(&s, company);
     if generated {
         Ok(Json(json!({ "password": password })).into_response())
     } else {

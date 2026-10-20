@@ -210,9 +210,9 @@ Phases are ordered; each ends usable. **Current step is marked ▶.**
   from `/balances/names`, the Attached tab, 423 in the fixture; 235 web tests,
   41 Playwright). Import API (`2f8c1e1`): its shapes export to TS, jobs emit
   `import` events, the status long-poll returns on progress; CI now lints and
-  tests the desktop app on both platforms (`498401b`). ▶ Running: a web agent
-  swapping the last import type copies for the generated ones and making the
-  Import window event-driven. Next with the user: point
+  tests the desktop app on both platforms (`498401b`). Merged (`eee87c4`): the
+  last import type copies swapped for generated ones, the Import window driven
+  by `import` events (236 web tests, 41 Playwright). ▶ Next with the user: point
   QuickBooks' Web Connector on cad-3 at this server over HTTPS (steps in
   `plans/qbd-import.md`), run a sync, and see whether the 14 bridge gaps close.
 - Phase 1 — Ledger core
