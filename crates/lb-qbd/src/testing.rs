@@ -2,7 +2,8 @@
 //! serves them the way the QB Bridge does (lists without lines, `modified_after`
 //! inclusive, `active` filtering, the typed item lists), so the sync engine and
 //! parity check run end to end without a real QuickBooks. Used by this crate's
-//! tests and by the crates above it.
+//! tests and by the crates above it. [`FakeQuickBooks`] serves the same fixtures
+//! as qbXML, for the Web Connector and SDK transports.
 
 use std::collections::{BTreeMap, HashMap};
 use std::future::Future;
@@ -12,8 +13,12 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde_json::Value;
 
-use crate::client::{Active, BridgeError, ListQuery, QbdSource, ReportQuery};
+use crate::client::{Active, ListQuery, QbdError, QbdSource, ReportQuery};
 use crate::entity::QbdEntity;
+
+pub mod fake;
+
+pub use fake::{FakeQuickBooks, item_ret_element, record_xml};
 
 /// Fixture-only marker on `Item` records naming their qbXML type
 /// (`Service`, `NonInventory`, `Inventory`), so the typed item lists can be
@@ -45,7 +50,7 @@ pub struct FixtureSource {
     gets: Mutex<Vec<(QbdEntity, String)>>,
 }
 
-fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+pub(crate) fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     m.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
@@ -173,8 +178,8 @@ impl FixtureSource {
         lock(&self.gets).clear();
     }
 
-    fn not_found(path: String) -> BridgeError {
-        BridgeError::Refused {
+    fn not_found(path: String) -> QbdError {
+        QbdError::Refused {
             path,
             status: 404,
             code: Some("NOT_FOUND".into()),
@@ -184,6 +189,50 @@ impl FixtureSource {
 
     /// The list a bridge request would return (no lines), synchronously.
     pub fn list_now(&self, entity: QbdEntity, q: &ListQuery) -> Vec<Value> {
+        self.list_records(entity, q, false)
+    }
+
+    /// One record as `get` serves it, synchronously; `with_detail` false leaves
+    /// the lines out (a qbXML query without `IncludeLineItems`).
+    pub fn get_now(&self, entity: QbdEntity, id: &str, with_detail: bool) -> Option<Value> {
+        let all = lock(&self.records);
+        all.get(&entity)
+            .and_then(|rows| rows.iter().find(|r| id_of(r) == Some(id)))
+            .map(|r| strip(entity, r, !with_detail))
+    }
+
+    pub fn company_now(&self) -> Value {
+        lock(&self.company).clone()
+    }
+
+    pub fn preferences_now(&self) -> Value {
+        lock(&self.preferences).clone()
+    }
+
+    pub fn report_now(&self, slug: &str) -> Option<Value> {
+        lock(&self.reports).get(slug).cloned()
+    }
+
+    /// The list, with or without the detail keys the bridge's rows leave out.
+    pub fn list_records(&self, entity: QbdEntity, q: &ListQuery, with_detail: bool) -> Vec<Value> {
+        self.select(entity, q)
+            .iter()
+            .map(|r| strip(entity, r, !with_detail))
+            .collect()
+    }
+
+    /// One record exactly as stored (fixture markers included), for the fake
+    /// QuickBooks, which needs the item type marker to name the element.
+    pub fn get_raw(&self, entity: QbdEntity, id: &str) -> Option<Value> {
+        let all = lock(&self.records);
+        all.get(&entity)
+            .and_then(|rows| rows.iter().find(|r| id_of(r) == Some(id)))
+            .cloned()
+    }
+
+    /// The records a query selects, exactly as stored (fixture markers
+    /// included), counting one request.
+    pub fn select(&self, entity: QbdEntity, q: &ListQuery) -> Vec<Value> {
         self.requests.fetch_add(1, Ordering::Relaxed);
         let typed = match entity {
             QbdEntity::ItemService => Some("Service"),
@@ -239,7 +288,7 @@ impl FixtureSource {
                     _ => {}
                 }
             }
-            out.push(strip(entity, &r, true));
+            out.push(r);
             if q.limit.is_some_and(|l| out.len() >= l) {
                 break;
             }
@@ -255,7 +304,7 @@ impl QbdSource for FixtureSource {
         &self,
         entity: QbdEntity,
         q: &ListQuery,
-    ) -> impl Future<Output = Result<Vec<Value>, BridgeError>> + Send {
+    ) -> impl Future<Output = Result<Vec<Value>, QbdError>> + Send {
         std::future::ready(Ok(self.list_now(entity, q)))
     }
 
@@ -263,7 +312,7 @@ impl QbdSource for FixtureSource {
         &self,
         entity: QbdEntity,
         id: &str,
-    ) -> impl Future<Output = Result<Value, BridgeError>> + Send {
+    ) -> impl Future<Output = Result<Value, QbdError>> + Send {
         self.requests.fetch_add(1, Ordering::Relaxed);
         lock(&self.gets).push((entity, id.to_owned()));
         let all = lock(&self.records);
@@ -275,12 +324,12 @@ impl QbdSource for FixtureSource {
         )
     }
 
-    fn company(&self) -> impl Future<Output = Result<Value, BridgeError>> + Send {
+    fn company(&self) -> impl Future<Output = Result<Value, QbdError>> + Send {
         self.requests.fetch_add(1, Ordering::Relaxed);
         std::future::ready(Ok(lock(&self.company).clone()))
     }
 
-    fn preferences(&self) -> impl Future<Output = Result<Value, BridgeError>> + Send {
+    fn preferences(&self) -> impl Future<Output = Result<Value, QbdError>> + Send {
         self.requests.fetch_add(1, Ordering::Relaxed);
         std::future::ready(Ok(lock(&self.preferences).clone()))
     }
@@ -289,7 +338,7 @@ impl QbdSource for FixtureSource {
         &self,
         slug: &str,
         _q: &ReportQuery,
-    ) -> impl Future<Output = Result<Value, BridgeError>> + Send {
+    ) -> impl Future<Output = Result<Value, QbdError>> + Send {
         self.requests.fetch_add(1, Ordering::Relaxed);
         std::future::ready(
             lock(&self.reports)

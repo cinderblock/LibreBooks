@@ -238,6 +238,48 @@ Everything a transaction carries that isn't listed here goes into `Txn.extra` /
 | `CompanyRet` | `CompanyInfo` (name, legal name, addresses, phone, email, website, EIN, fiscal/tax year start, tax form) | |
 | `PreferencesRet` | `Preferences` (account numbers, class tracking, JE numbering, estimates, progress invoicing, multi-currency, inventory, auto-apply, report basis, sales tax on/cash) | |
 
+## Transports (2026-10-20, worktree `agent-a4dda2723616ac2bb`)
+
+Three ways to read QuickBooks Desktop, all feeding the one `QbdSource` →
+normaliser → `sync`/`parity` pipeline. Design decisions (don't re-ask):
+
+- **One qbXML source for two transports.** `qbxml::request` builds `…QueryRq`
+  documents from the same `ListQuery`/`ReportQuery` the bridge client takes;
+  `source::QbxmlSource<T: QbxmlTransport>` implements `QbdSource` over any
+  "send a qbXML document, get the response" transport: the Web Connector queue
+  (`qbwc::Queue`) and the SDK's COM session (`sdk`, Windows only). Lists of
+  transactions ask for `IncludeLineItems`/`IncludeLinkedTxns`, so one page
+  replaces hundreds of bridge GETs; `get` is served from that cache.
+- **Read-only at one choke point.** `QbxmlSource::exchange` refuses any
+  document whose `QBXMLMsgsRq` children aren't `…QueryRq` (`request::check_read_only`),
+  and a source-scan test keeps `Add`/`Mod`/`Del`/`Void` request names out of the
+  crate. The `.qwc` also sets `IsReadOnly`, so QuickBooks grants read-only access.
+- **`BridgeError` is now `QbdError`** with qbXML status errors (`Qbxml`),
+  transport session failures (`Session`) and `Unsupported` added; the trait is
+  unchanged otherwise.
+- **QBWC inverts the flow** (QuickBooks polls us). The sync runs as a server task
+  against a `QueuedSource`; each `list`/`get` enqueues one document and awaits a
+  oneshot. The SOAP handler (`/qbwc`, no cookie auth, outside `/api/v1` and
+  outside the Cloudflare Access check, since the Web Connector can't sign in)
+  pops requests in `sendRequestXML` and completes them in `receiveResponseXML`.
+  Idle rules: `sendRequestXML` waits up to `poll_wait` for the engine's next
+  request; if the engine is busy locally it sends a `HostQueryRq` heartbeat; if
+  the engine finished, it returns `""` (and `getLastError` says `NoOp`).
+  `receiveResponseXML` waits briefly for the next request or the finish, so the
+  normal ending is `100` → `closeConnection`. A queued request the Web Connector
+  doesn't collect within `wait_for_poll` (default 30 min) closes the queue and
+  the sync aborts cleanly (`SyncReport.aborted`). Only one job (sync or parity)
+  per company at a time; `authenticate` answers `none` when nothing is queued.
+- **Credentials.** The QBWC password is a secret `qbd.<company id>.qbwc-password`
+  (set or generated through `POST …/qbwc/password`, compared in constant time,
+  never returned after generation). The bridge key is `secret:qbd.<company id>.bridge-key`.
+  Per-company settings (`qbd.import` JSON in the company file) hold the
+  transport, bridge URL, QBWC user name, app URL, schedule and the company file
+  path for QBWC/SDK.
+- **Parity is a job too** (`POST …/parity`, read with `GET …/parity`), because
+  over QBWC it can only run when QuickBooks polls. `GET …/status|parity?wait=N`
+  long-polls up to N seconds so a bridge run can be read in one call.
+
 ## Web Connector (QBWC) transport sketch
 
 The QuickBooks Web Connector ships free with QBD and polls a SOAP web service;

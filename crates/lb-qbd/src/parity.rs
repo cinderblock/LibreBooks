@@ -30,7 +30,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use ts_rs::TS;
 
-use crate::client::{Basis, BridgeError, ListQuery, QbdSource, ReportQuery};
+use crate::client::{Basis, ListQuery, QbdError, QbdSource, ReportQuery};
 use crate::entity::QbdEntity;
 use crate::sync::bound_source;
 
@@ -118,7 +118,7 @@ pub struct ParityReport {
 #[derive(Debug, thiserror::Error)]
 pub enum ParityError {
     #[error(transparent)]
-    Bridge(#[from] BridgeError),
+    Bridge(#[from] QbdError),
     #[error(transparent)]
     Store(#[from] StoreError),
     #[error("these books haven't been synced with QuickBooks yet")]

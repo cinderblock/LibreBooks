@@ -18,6 +18,8 @@
 
 pub mod lists;
 pub mod record;
+pub mod report;
+pub mod request;
 pub mod txns;
 pub mod xml;
 

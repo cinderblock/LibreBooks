@@ -9,6 +9,15 @@
 //! them only on the `…Rs` envelopes: `statusCode`, `iteratorID`…) become `@name`
 //! keys. Text is kept exactly, trailing spaces included (QBD stores names and
 //! address lines with them).
+//!
+//! One exception to the grouping: a report's `ReportData` holds `DataRow`,
+//! `TextRow`, `SubtotalRow` and `TotalRow` elements whose order *is* the report,
+//! so it becomes an ordered array of rows (`{"#row": "DataRow", …}`) instead;
+//! [`super::report`] turns that into the bridge's report shape.
+//!
+//! The other direction, [`to_xml`], renders the same JSON back into qbXML. The
+//! tests' fake QuickBooks answers with it, so the fixtures stay the single source
+//! of truth for both transports.
 
 use std::collections::BTreeMap;
 
@@ -27,16 +36,31 @@ pub enum XmlError {
     Missing(&'static str),
 }
 
+/// The key an ordered `ReportData` row keeps its element name under.
+pub const ROW_KEY: &str = "#row";
+
+/// A parsed element. `pub(crate)` so the Web Connector's SOAP reader and the
+/// read-only check can walk a document without converting it.
 #[derive(Debug, Default)]
-struct Node {
-    name: String,
-    attrs: Vec<(String, String)>,
-    children: Vec<Node>,
-    text: String,
+pub(crate) struct Node {
+    pub(crate) name: String,
+    pub(crate) attrs: Vec<(String, String)>,
+    pub(crate) children: Vec<Node>,
+    pub(crate) text: String,
 }
 
 impl Node {
-    fn into_value(self) -> Value {
+    /// The element name without its namespace prefix (`soap:Body` → `Body`).
+    pub(crate) fn local_name(&self) -> &str {
+        self.name.rsplit(':').next().unwrap_or(&self.name)
+    }
+
+    /// The first child with this local name.
+    pub(crate) fn child(&self, local: &str) -> Option<&Node> {
+        self.children.iter().find(|c| c.local_name() == local)
+    }
+
+    pub(crate) fn into_value(self) -> Value {
         if self.children.is_empty() && self.attrs.is_empty() {
             return Value::String(self.text);
         }
@@ -49,6 +73,21 @@ impl Node {
                 map.insert("#text".into(), Value::String(self.text));
             }
             return Value::Object(map);
+        }
+        if self.name == "ReportData" {
+            let rows: Vec<Value> = self
+                .children
+                .into_iter()
+                .map(|c| {
+                    let name = c.name.clone();
+                    let mut v = c.into_value();
+                    if let Value::Object(m) = &mut v {
+                        m.insert(ROW_KEY.into(), Value::String(name));
+                    }
+                    v
+                })
+                .collect();
+            return Value::Array(rows);
         }
         // Group repeated children; qbXML has no mixed content, so text between
         // child elements is only indentation.
@@ -69,7 +108,7 @@ impl Node {
     }
 }
 
-fn parse_tree(xml: &str) -> Result<Node, XmlError> {
+pub(crate) fn parse_tree(xml: &str) -> Result<Node, XmlError> {
     let mut reader = Reader::from_str(xml);
     let mut stack: Vec<Node> = Vec::new();
     let mut root: Option<Node> = None;
@@ -177,6 +216,19 @@ pub struct QueryResponse {
     pub records: Vec<(String, Value)>,
 }
 
+impl QueryResponse {
+    /// Success, or "no records matched" (status 1), which isn't an error.
+    pub fn is_ok(&self) -> bool {
+        self.status_code == 0 || self.status_code == 1 || self.status_severity == "Info"
+    }
+
+    /// QuickBooks' warning statuses (`statusSeverity="Warn"`), which still
+    /// carry records (e.g. 500 "nothing more to return", 530 on an iterator).
+    pub fn is_warning(&self) -> bool {
+        self.status_severity == "Warn"
+    }
+}
+
 /// Read a qbXML response (`<QBXML><QBXMLMsgsRs>…`) into its `…Rs` elements.
 pub fn parse_response(xml: &str) -> Result<Vec<QueryResponse>, XmlError> {
     let root = parse_tree(xml)?;
@@ -214,10 +266,129 @@ pub fn parse_response(xml: &str) -> Result<Vec<QueryResponse>, XmlError> {
     Ok(out)
 }
 
+/// Render a JSON value in the bridge's shape back into qbXML elements named
+/// `name`: a string becomes a text element, an object an element with `@attr`
+/// keys as attributes and the rest as children (in key order), an array one
+/// element per item, and an array under [`ROW_KEY`]-tagged rows (what
+/// `ReportData` parses to) its rows in order. Null and the fixtures' private
+/// `__…` keys render nothing.
+pub fn to_xml(name: &str, value: &Value, out: &mut String) {
+    use quick_xml::escape::escape;
+    match value {
+        Value::Null => {}
+        Value::Array(items) => {
+            if name == "ReportData" {
+                out.push_str("<ReportData>");
+                for row in items {
+                    if let Value::Object(m) = row {
+                        let row_name = m
+                            .get(ROW_KEY)
+                            .and_then(Value::as_str)
+                            .unwrap_or("DataRow")
+                            .to_owned();
+                        let mut m = m.clone();
+                        m.remove(ROW_KEY);
+                        to_xml(&row_name, &Value::Object(m), out);
+                    }
+                }
+                out.push_str("</ReportData>");
+            } else {
+                for item in items {
+                    to_xml(name, item, out);
+                }
+            }
+        }
+        Value::Object(m) => {
+            out.push('<');
+            out.push_str(name);
+            for (k, v) in m {
+                if let Some(attr) = k.strip_prefix('@') {
+                    out.push(' ');
+                    out.push_str(attr);
+                    out.push_str("=\"");
+                    out.push_str(&escape(scalar(v).as_str()));
+                    out.push('"');
+                }
+            }
+            out.push('>');
+            for (k, v) in m {
+                if k.starts_with('@') || k.starts_with("__") {
+                    continue;
+                }
+                if k == "#text" {
+                    out.push_str(&escape(scalar(v).as_str()));
+                } else {
+                    to_xml(k, v, out);
+                }
+            }
+            out.push_str("</");
+            out.push_str(name);
+            out.push('>');
+        }
+        other => {
+            out.push('<');
+            out.push_str(name);
+            out.push('>');
+            out.push_str(&escape(scalar(other).as_str()));
+            out.push_str("</");
+            out.push_str(name);
+            out.push('>');
+        }
+    }
+}
+
+fn scalar(v: &Value) -> String {
+    match v {
+        Value::String(s) => s.clone(),
+        Value::Null => String::new(),
+        other => other.to_string(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn report_rows_keep_their_order_and_round_trip() {
+        let xml = r#"<ReportRet><ReportTitle>Trial Balance</ReportTitle><ReportData>
+<TextRow rowNumber="1" value="Header"/>
+<DataRow rowNumber="2"><RowData rowType="account" value="Checking"/><ColData colID="1" value="Checking"/><ColData colID="2" value="9685.00"/></DataRow>
+<TotalRow rowNumber="3"><ColData colID="1" value="TOTAL"/></TotalRow>
+<DataRow rowNumber="4"><RowData rowType="account" value="Rent"/><ColData colID="2" value="1.00"/></DataRow>
+</ReportData></ReportRet>"#;
+        let v = to_json(xml).unwrap();
+        let rows = v["ReportRet"]["ReportData"].as_array().unwrap();
+        let kinds: Vec<&str> = rows.iter().map(|r| r[ROW_KEY].as_str().unwrap()).collect();
+        assert_eq!(kinds, ["TextRow", "DataRow", "TotalRow", "DataRow"]);
+        assert_eq!(rows[1]["ColData"][1]["@value"], "9685.00");
+        let mut out = String::new();
+        to_xml("ReportRet", &v["ReportRet"], &mut out);
+        assert_eq!(to_json(&out).unwrap(), v);
+    }
+
+    #[test]
+    fn json_renders_back_to_qbxml() {
+        let v = json!({
+            "TxnID": "1-1",
+            "Memo": "Smith & Sons <b>",
+            "ExpenseLineRet": [{"TxnLineID": "2-1"}, {"TxnLineID": "3-1"}],
+            "__item_type": "Service"
+        });
+        let mut out = String::new();
+        to_xml("CheckRet", &v, &mut out);
+        assert_eq!(
+            out,
+            "<CheckRet><ExpenseLineRet><TxnLineID>2-1</TxnLineID></ExpenseLineRet><ExpenseLineRet><TxnLineID>3-1</TxnLineID></ExpenseLineRet><Memo>Smith &amp; Sons &lt;b&gt;</Memo><TxnID>1-1</TxnID></CheckRet>"
+        );
+        let back = to_json(&out).unwrap();
+        assert_eq!(back["CheckRet"]["Memo"], "Smith & Sons <b>");
+        assert_eq!(
+            back["CheckRet"]["ExpenseLineRet"].as_array().unwrap().len(),
+            2
+        );
+    }
 
     #[test]
     fn one_child_is_an_object_and_several_an_array() {
