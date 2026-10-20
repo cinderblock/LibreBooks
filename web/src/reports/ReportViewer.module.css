@@ -1,0 +1,130 @@
+.root {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.titleBlock {
+  text-align: center;
+  padding: var(--mantine-spacing-sm) 0;
+}
+
+.scroll {
+  flex: 1;
+  min-height: 200px;
+  overflow: auto;
+  outline: none;
+  border-top: 1px solid var(--mantine-color-default-border);
+  font-size: var(--mantine-font-size-sm);
+}
+
+.scroll:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--mantine-primary-color-filled);
+}
+
+/* At least every column's minimum; wider reports scroll inside the grid. */
+.inner {
+  min-width: min-content;
+  width: 100%;
+}
+
+.row {
+  display: grid;
+  align-items: center;
+  column-gap: 8px;
+  padding-right: 12px;
+  white-space: nowrap;
+}
+
+.row > * {
+  min-width: 0;
+}
+
+.head {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  height: 28px;
+  background: var(--mantine-color-body);
+  border-bottom: 2px solid var(--mantine-color-default-border);
+  font-weight: 700;
+  font-size: var(--mantine-font-size-xs);
+}
+
+.sticky {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  background: var(--mantine-color-body);
+  height: 100%;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.head .sticky {
+  z-index: 4;
+}
+
+.label {
+  overflow: hidden;
+}
+
+.row[data-selected],
+.row[data-selected] .sticky {
+  background: var(--mantine-primary-color-light);
+}
+
+.row[data-drill] {
+  cursor: zoom-in;
+}
+
+.row[data-kind='section'] {
+  font-weight: 600;
+}
+
+.row[data-kind='section'][data-collapsed] {
+  font-weight: 600;
+}
+
+.row[data-kind='subtotal'] .num {
+  border-top: 1px solid var(--mantine-color-text);
+}
+
+.row[data-kind='subtotal'] {
+  font-weight: 600;
+}
+
+.row[data-kind='total'] {
+  font-weight: 700;
+}
+
+.row[data-kind='total'] .num {
+  border-top: 1px solid var(--mantine-color-text);
+  border-bottom: 3px double var(--mantine-color-text);
+}
+
+.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.num[data-negative] {
+  color: var(--mantine-color-red-7);
+}
+
+.ellipsis {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  flex: 0 0 16px;
+  color: var(--mantine-color-dimmed);
+}

@@ -1,0 +1,50 @@
+/* App-wide styles that aren't any one component's. */
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  overscroll-behavior: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Text inputs inside grid cells (TextInput variant="unstyled"). */
+.lb-cell-text {
+  height: 30px;
+  min-height: 30px;
+  padding-inline: 6px !important;
+  width: 100%;
+}
+
+.lb-cell-text:focus {
+  outline: 2px solid var(--mantine-primary-color-filled);
+  outline-offset: -2px;
+  background: var(--mantine-color-body);
+}
+
+.lb-cell-text[aria-invalid='true'] {
+  outline: 2px solid var(--mantine-color-error);
+  outline-offset: -2px;
+}
+
+.lb-num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Non-blocking warnings shown as an input's description (date far in the past). */
+.lb-warning {
+  color: var(--mantine-color-orange-7);
+}
+
+/* Phones: 16px inputs so iOS doesn't zoom the page on focus. */
+@media (max-width: 48em) and (pointer: coarse) {
+  input,
+  textarea,
+  select {
+    font-size: 16px !important;
+  }
+}
