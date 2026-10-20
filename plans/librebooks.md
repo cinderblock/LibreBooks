@@ -182,8 +182,10 @@ Phases are ordered; each ends usable. **Current step is marked ▶.**
   (`51d6943`), lb-backup/lb-update/lb-tunnel (`bc44451`). Still running: lb-qbd,
   web UI phase A (fixture mode), desktop (Tauri), and a server-ops integration
   agent (secret store, settings, backups/update/tunnel/feeds routes and CLI).
-  ▶ Parent session: merge each, wire QBD import into server + CLI, then the
-  first read-only import of the real company (with the user).
+  Merged since: lb-qbd (`a0a7559`), web UI (`web UI foundation`), desktop
+  (`5951bd2`). ▶ Still running: server-ops integration agent (resumed after a
+  usage-limit cut-off). Next: rerun the import with the two fixes, wire QBD
+  import routes into the server, web UI phase B (the other forms).
 - Phase 1 — Ledger core
   - Domain types, chart of accounts (all QBD account types), names (customers +
     jobs, vendors, employees, other names), items (all QBD item types), classes,
@@ -286,6 +288,19 @@ Phases are ordered; each ends usable. **Current step is marked ▶.**
   use device keys. People enrol once per hostname they use (details in
   `plans/auth.md`).
 
+- **First full import of the real company (2026-10-19, 42 min, ~8,100 GETs):**
+  12,900 transactions, 2 failures, 143/159 accounts match QBD to the cent.
+  Every account that is off sits behind a bridge gap (card charges, transfers,
+  statement charges) except two the import itself explained: payments QBD
+  applied to a *check* in A/R (fixed: checks/deposits/card charges in A/R or
+  A/P are open items, `9f68491`), and 55 invoices QBD settled with credit memos
+  the bridge never links (fixed: targeted auto-apply during import). Report
+  JSON under `%LOCALAPPDATA%\LibreBooks-dogfood\imports\`; never commit it.
+- **Blanket auto-apply is wrong for an import:** a credit QBD left unapplied
+  (because it paid a statement charge we can't see) got applied to an open
+  invoice, creating a new mismatch. The import applies only to charges QBD
+  shows more settled than ours, by the shortfall. The fixture test caught it.
+
 ## Progress log
 
 - [x] Survey environment, sibling projects, QB bridge shape.
@@ -298,9 +313,11 @@ Phases are ordered; each ends usable. **Current step is marked ▶.**
       purchases, JE lines in A/R-A/P as open items: still to do.
 - [x] Phase 2: server API (`84edc4c`), auth integration (`49063f0`), reports API
       (`c33ee6c`). Feeds/backup/update/tunnel routes: server-ops agent running.
-- [ ] Phase 3: QBD read-only import + parity (agent running).
-- [ ] Phase 4: web UI (phase A agent running; forms, reports UI, auth screens next).
-- [ ] Phase 5: desktop (agent running).
+- [x] Phase 3: QBD read-only import + parity (`a0a7559`, `b580484`); first
+      full import done, 143/159 accounts match; rerun with fixes pending.
+- [~] Phase 4: web UI foundation merged (`web UI`, 157 tests, Playwright);
+      other forms, reports catalog UI, admin screens, register editing next.
+- [x] Phase 5: desktop merged (`5951bd2`): local + thin-client modes, NSIS built.
 - [x] Phase 6 libraries: backups, self-update, tunnel (merged); server wiring running.
 - [x] Phase 7 library: feeds (merged); routes running.
 - [ ] Phase 8: parity tail.
