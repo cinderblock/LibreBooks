@@ -14,6 +14,7 @@ lb-store.workspace = true
 lb-server.workspace = true
 lb-auth.workspace = true
 lb-qbd.workspace = true
+jiff.workspace = true
 lb-backup.workspace = true
 lb-update.workspace = true
 anyhow.workspace = true

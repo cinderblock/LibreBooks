@@ -3,6 +3,8 @@
 //! Later subcommands (backups, QuickBooks import, updates) arrive as their
 //! crates do; see `plans/librebooks.md`.
 
+mod import;
+
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 
@@ -76,6 +78,11 @@ enum Command {
         )]
         public_url: String,
     },
+    /// Import from another system (QuickBooks Desktop), read-only.
+    Import {
+        #[command(subcommand)]
+        command: import::ImportCommand,
+    },
     /// Company files.
     Company {
         #[command(subcommand)]
@@ -134,6 +141,7 @@ fn main() -> Result<()> {
             public_url,
         } => enroll(&data_dir, &role, name, minutes, &public_url),
         Command::Company { command } => company(&data_dir, command),
+        Command::Import { command } => import::run(&data_dir, command),
         Command::Check { file } => check(&file),
     }
 }

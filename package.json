@@ -13,6 +13,6 @@
     "typecheck": "bun run --cwd web typecheck",
     "test": "bun run --cwd web test",
     "test:e2e": "bun run --cwd web test:e2e",
-    "gen:types": "cargo test -p lb-core -p lb-store -p lb-reports -p lb-auth -p lb-feeds export_bindings"
+    "gen:types": "cargo test -p lb-core -p lb-store -p lb-reports -p lb-auth -p lb-feeds -p lb-qbd export_bindings"
   }
 }
