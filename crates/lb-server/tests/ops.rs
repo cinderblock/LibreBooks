@@ -262,12 +262,11 @@ async fn back_up_list_verify_restore_and_export() {
     assert!(st.is_client_error(), "{st} {v}");
     let after = s.call("GET", "/api/v1/companies", None).await.1;
     assert_eq!(before, after);
-    assert!(
-        std::fs::read_dir(s.state.ops.data_dir().join(".restore"))
-            .map(|d| d.count() == 0)
-            .unwrap_or(true),
-        "the working folder is left empty"
-    );
+    let left = match std::fs::read_dir(s.state.ops.data_dir().join(".restore")) {
+        Ok(d) => d.count(),
+        Err(_) => 0,
+    };
+    assert_eq!(left, 0, "the working folder is left empty");
 }
 
 #[tokio::test]
