@@ -165,6 +165,9 @@ pub fn save(w: &mut Writer<'_>, mut txn: Txn) -> Result<SaveOutcome> {
         };
         txn.ar_ap_account_id = Some(accounts::ensure_role(w, role)?);
     }
+    if txn.txn_type == TxnType::JournalEntry {
+        txn.ar_ap_account_id = journal_ar_ap(&w.tx, &posted.postings)?;
+    }
     if txn.txn_type.is_posting() || txn.amount.is_zero() {
         txn.amount = posted.total;
     }
@@ -447,6 +450,21 @@ fn existing_cleared(
 /// A posting's identity across an edit: same account, same form line, same amount.
 type ClearedKey = (AccountId, Option<String>, i64);
 
+/// The one A/R or A/P account a journal entry posts to, if exactly one.
+fn journal_ar_ap(c: &Connection, postings: &[Posting]) -> Result<Option<AccountId>> {
+    let mut found: Option<AccountId> = None;
+    for p in postings {
+        let t = crate::accounts::get(c, p.account_id)?.account_type;
+        if t.requires_name() {
+            match found {
+                Some(a) if a != p.account_id => return Ok(None),
+                _ => found = Some(p.account_id),
+            }
+        }
+    }
+    Ok(found)
+}
+
 fn uses_ar_ap(t: TxnType) -> bool {
     matches!(
         t,
@@ -621,6 +639,23 @@ pub fn refresh_open_balance(c: &Connection, id: TxnId) -> Result<()> {
                     sum("SELECT SUM(credit_amount) FROM application WHERE credit_txn_id = ?1")?;
                 Some(txn.amount.minor() - applied - used)
             }
+            // A journal entry in A/R or A/P is an open item, as in QBD: owed
+            // (a debit to A/R, a credit to A/P) or, when negative, a credit.
+            TxnType::JournalEntry => match txn.ar_ap_account_id {
+                Some(acct) => {
+                    let t = crate::accounts::get(c, acct)?.account_type;
+                    let posted: i64 = c.query_row(
+                        "SELECT COALESCE(SUM(amount), 0) FROM posting WHERE txn_id = ?1 AND account_id = ?2",
+                        params![sid, acct.to_string()],
+                        |r| r.get(0),
+                    )?;
+                    let paid = sum(
+                        "SELECT SUM(amount + discount + credit_amount) FROM application WHERE target_txn_id = ?1",
+                    )?;
+                    Some(t.natural(Money(posted)).minor() - paid)
+                }
+                None => None,
+            },
             _ => None,
         }
     };

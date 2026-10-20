@@ -559,3 +559,38 @@ fn find_by_text_amount_and_name() {
     });
     assert_eq!(latest[0].number.as_deref(), Some("3"));
 }
+
+#[test]
+fn a_journal_entry_in_ar_is_an_open_item_a_payment_can_pay() {
+    let b = books();
+    let s = setup(&b);
+    let ar = b
+        .read(|c| accounts::by_role(c, AccountRole::AccountsReceivable))
+        .unwrap()
+        .unwrap()
+        .id;
+    let mut je = Txn::new(TxnType::JournalEntry, date(2026, 10, 1));
+    je.lines
+        .push(TxnLine::journal(ar, Money(5_000)).with_entity(s.customer));
+    je.lines.push(TxnLine::journal(s.income, Money(-5_000)));
+    let je = b.write(&me(), |w| txns::save(w, je)).unwrap().txn;
+    assert_eq!(je.ar_ap_account_id, Some(ar));
+    let open = |id| {
+        b.read(|c| {
+            Ok(txns::query(c, &txns::TxnFilter::default())?
+                .into_iter()
+                .find(|t| t.id == id)
+                .unwrap()
+                .open_balance)
+        })
+        .unwrap()
+    };
+    assert_eq!(open(je.id), Some(Money(5_000)));
+    let mut pmt = Txn::new(TxnType::ReceivePayment, date(2026, 10, 5));
+    pmt.entity_id = Some(s.customer);
+    pmt.amount = Money(5_000);
+    pmt.applications
+        .push(Application::cash(je.id, Money(5_000)));
+    b.write(&me(), |w| txns::save(w, pmt)).unwrap();
+    assert_eq!(open(je.id), Some(Money::ZERO));
+}
