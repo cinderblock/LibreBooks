@@ -2,7 +2,7 @@
 // works, with the ones the current window handles marked, plus the keys fields
 // handle themselves (date keys, the calculator, QuickFill, grids).
 
-import { Badge, Group, Kbd, Modal, SegmentedControl, SimpleGrid, Stack, Table, Text, Title } from '@mantine/core';
+import { Badge, Group, Kbd, Modal, SegmentedControl, SimpleGrid, Stack, Table, Text } from '@mantine/core';
 import { COMMAND_IDS, COMMANDS, FIELD_KEYS, SCOPE_LABEL, type Scope } from '~/keyboard/commands';
 import { useKeyboard, useShortcutCatalog } from '~/keyboard/KeyboardProvider';
 
@@ -12,8 +12,9 @@ export function ShortcutOverlay({ opened, onClose }: { opened: boolean; onClose(
   const { registry, format, platform } = useShortcutCatalog();
   const { setPlatform } = useKeyboard();
   const active = new Set(registry.activeCommands().map((a) => a.command));
+  // A plain string title: Modal's title is already an <h2>, and a <Title> inside it nests headings (React warns).
   return (
-    <Modal opened={opened} onClose={onClose} title={<Title order={4}>Keyboard shortcuts</Title>} size="xl">
+    <Modal opened={opened} onClose={onClose} title="Keyboard shortcuts" size="xl">
       <Group justify="space-between" mb="sm">
         <Text size="sm" c="dimmed">
           Highlighted keys work in the current window. QuickBooks Desktop users: the keys are the ones you know
