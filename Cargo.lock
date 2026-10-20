@@ -3651,6 +3651,7 @@ dependencies = [
  "lb-qbd",
  "lb-server",
  "lb-store",
+ "lb-tunnel",
  "lb-update",
  "serde_json",
  "tokio",

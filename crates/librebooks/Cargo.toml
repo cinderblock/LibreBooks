@@ -17,6 +17,7 @@ lb-qbd.workspace = true
 jiff.workspace = true
 lb-backup.workspace = true
 lb-update.workspace = true
+lb-tunnel.workspace = true
 anyhow.workspace = true
 clap.workspace = true
 tokio.workspace = true
