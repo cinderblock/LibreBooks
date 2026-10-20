@@ -1,0 +1,260 @@
+name: Release
+
+# Pushing a tag like v1.2.3 builds everything and publishes a GitHub release:
+#
+# - the headless server for Linux (x86_64, aarch64; static musl), Windows and
+#   macOS, as librebooks-<tag>-<target>.<tar.gz|zip> (the contract lb-update
+#   reads; see plans/self-update.md), with the web UI embedded;
+# - the desktop app's installers (Windows NSIS/MSI, Linux AppImage/deb/rpm) and
+#   the Tauri updater's latest.json;
+# - SHA256SUMS over every asset, signed with minisign (trusted comment
+#   "librebooks <tag>"): the self-updater trusts nothing else;
+# - a multi-arch container image at ghcr.io/<owner>/librebooks:<tag>.
+#
+# The release is created as a draft and published only when every job has
+# succeeded and the sums are signed. Without the MINISIGN_SECRET_KEY secret the
+# publish job fails rather than ship a release the updater can't verify.
+#
+# Run by hand with an existing tag to rebuild or repair a release; it checks out
+# the tag, so binaries are always built from exactly the tagged source.
+
+on:
+  push:
+    tags: ["v[0-9]+.[0-9]+.[0-9]+*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to build and publish, e.g. v0.2.0"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  packages: write
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+  TAG: ${{ inputs.tag || github.ref_name }}
+
+jobs:
+  web:
+    name: Web UI
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.TAG }}
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install --frozen-lockfile
+      - run: bun run --cwd web build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: web-dist
+          path: web/dist
+          if-no-files-found: error
+
+  draft:
+    name: Draft release
+    runs-on: ubuntu-latest
+    outputs:
+      release_id: ${{ steps.draft.outputs.id }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.TAG }}
+      - name: Tag matches the workspace version
+        run: |
+          ver="$(grep -m1 '^version = ' Cargo.toml | cut -d'"' -f2)"
+          [ "${TAG#v}" = "$ver" ] || { echo "::error::tag $TAG does not match workspace version $ver"; exit 1; }
+      - name: Create (or reuse) the draft
+        id: draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" --draft --title "LibreBooks $TAG" --generate-notes --verify-tag
+          fi
+          id="$(gh api "repos/${{ github.repository }}/releases" --jq ".[] | select(.tag_name==\"$TAG\") | .id")"
+          echo "id=$id" >> "$GITHUB_OUTPUT"
+
+  server:
+    name: Server (${{ matrix.target }})
+    needs: [web, draft]
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, target: x86_64-unknown-linux-musl, archive: tar.gz, arch: amd64 }
+          - { os: ubuntu-24.04-arm, target: aarch64-unknown-linux-musl, archive: tar.gz, arch: arm64 }
+          - { os: windows-latest, target: x86_64-pc-windows-msvc, archive: zip, arch: "" }
+          - { os: macos-latest, target: aarch64-apple-darwin, archive: tar.gz, arch: "" }
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.TAG }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: web-dist
+          path: web/dist
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-${{ matrix.target }}
+      - name: musl toolchain
+        if: contains(matrix.target, 'musl')
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq musl-tools cmake
+      - name: Build
+        run: cargo build --release --locked --target ${{ matrix.target }} -p librebooks
+      - name: The binary reports the tag
+        shell: bash
+        run: |
+          got="$("target/${{ matrix.target }}/release/librebooks" --version)"
+          [ "$got" = "librebooks ${TAG#v}" ] || { echo "::error::the binary says '$got'"; exit 1; }
+      - name: Package
+        shell: bash
+        run: |
+          set -euo pipefail
+          name="librebooks-${TAG}-${{ matrix.target }}"
+          mkdir -p "dist/$name"
+          exe=librebooks
+          if [[ "${{ matrix.target }}" == *windows* ]]; then exe=librebooks.exe; fi
+          cp "target/${{ matrix.target }}/release/$exe" LICENSE README.md "dist/$name/"
+          cd dist
+          if [ "${{ matrix.archive }}" = zip ]; then 7z a -tzip "$name.zip" "$name" > /dev/null; else tar czf "$name.tar.gz" "$name"; fi
+          rm -r "$name"
+      - name: Upload to the draft
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$TAG" dist/* --clobber
+      - name: Keep the binary for the container image
+        if: matrix.arch != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: container-${{ matrix.arch }}
+          path: target/${{ matrix.target }}/release/librebooks
+
+  desktop:
+    name: Desktop (${{ matrix.os }})
+    needs: [web, draft]
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-22.04]
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.TAG }}
+      - name: Linux webview and bundling dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev patchelf rpm
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install --frozen-lockfile
+      - uses: actions/download-artifact@v4
+        with:
+          name: web-dist
+          path: web/dist
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-desktop-${{ matrix.os }}
+      - name: Tauri CLI
+        run: cargo install tauri-cli --version "^2" --locked
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          projectPath: desktop/src-tauri
+          releaseId: ${{ needs.draft.outputs.release_id }}
+          includeUpdaterJson: true
+          tauriScript: cargo tauri
+
+  container:
+    name: Container image
+    needs: server
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.TAG }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: container-amd64
+          path: dist/amd64
+      - uses: actions/download-artifact@v4
+        with:
+          name: container-arm64
+          path: dist/arm64
+      - run: chmod +x dist/*/librebooks
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - name: Image name and tags
+        id: img
+        run: |
+          name="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/librebooks"
+          channel=latest
+          if [[ "$TAG" == *-* ]]; then channel=prerelease; fi
+          { echo "tags<<END"; echo "$name:$TAG"; echo "$name:$channel"; echo "END"; } >> "$GITHUB_OUTPUT"
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.img.outputs.tags }}
+
+  publish:
+    name: Sign and publish
+    needs: [server, desktop, container, draft]
+    runs-on: ubuntu-latest
+    steps:
+      - name: minisign
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq minisign
+      - name: Sum every asset of the draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir assets
+          cd assets
+          gh release download "$TAG" --repo "${{ github.repository }}"
+          rm -f SHA256SUMS SHA256SUMS.minisig
+          sha256sum * > ../SHA256SUMS
+          cat ../SHA256SUMS
+      - name: Sign the sums
+        env:
+          MINISIGN_SECRET_KEY: ${{ secrets.MINISIGN_SECRET_KEY }}
+        run: |
+          if [ -z "$MINISIGN_SECRET_KEY" ]; then
+            echo "::error::MINISIGN_SECRET_KEY is not set; see plans/self-update.md"
+            exit 1
+          fi
+          printf '%s\n' "$MINISIGN_SECRET_KEY" > "$RUNNER_TEMP/minisign.key"
+          minisign -S -s "$RUNNER_TEMP/minisign.key" -m SHA256SUMS -t "librebooks $TAG" -x SHA256SUMS.minisig < /dev/null
+          rm "$RUNNER_TEMP/minisign.key"
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "$TAG" SHA256SUMS SHA256SUMS.minisig --clobber --repo "${{ github.repository }}"
+          if [[ "$TAG" == *-* ]]; then
+            gh release edit "$TAG" --draft=false --prerelease --repo "${{ github.repository }}"
+          else
+            gh release edit "$TAG" --draft=false --repo "${{ github.repository }}"
+          fi
