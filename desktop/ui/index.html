@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
+    <link rel="icon" href="icon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="settings.css" />
+    <title>LibreBooks Settings</title>
+  </head>
+  <body>
+    <header>
+      <img src="icon.svg" alt="" width="40" height="40" />
+      <div>
+        <h1 id="title">LibreBooks Settings</h1>
+        <p id="subtitle" class="dim">Version <span id="version"></span></p>
+      </div>
+    </header>
+
+    <div id="banner" class="banner" role="alert" hidden></div>
+
+    <form id="form" autocomplete="off">
+      <section>
+        <h2>Where are your books?</h2>
+
+        <label class="choice">
+          <input type="radio" name="mode" value="local" />
+          <span>
+            <strong>On this computer</strong>
+            <span class="dim">LibreBooks keeps the company files here.</span>
+          </span>
+        </label>
+        <div class="detail" data-mode="local">
+          <label for="data-dir">Company files folder</label>
+          <div class="row">
+            <input id="data-dir" type="text" readonly />
+            <button type="button" id="browse">Browse…</button>
+            <button type="button" id="open-folder">Open</button>
+          </div>
+          <p class="dim">
+            <button type="button" class="link" id="default-folder">Use the default folder</button>
+            (<span id="default-dir"></span>), shared with the <code>librebooks</code> command.
+          </p>
+        </div>
+
+        <label class="choice">
+          <input type="radio" name="mode" value="remote" />
+          <span>
+            <strong>On a LibreBooks server</strong>
+            <span class="dim">This computer connects to books kept elsewhere and stores none itself.</span>
+          </span>
+        </label>
+        <div class="detail" data-mode="remote">
+          <label for="server-url">Server address</label>
+          <div class="row">
+            <input id="server-url" type="text" placeholder="books.example.com" spellcheck="false" />
+            <button type="button" id="test-server">Test</button>
+          </div>
+          <p id="server-result" class="dim" aria-live="polite"></p>
+          <label class="check">
+            <input id="allow-insecure" type="checkbox" />
+            Allow an unencrypted (<code>http://</code>) connection — only on a network you trust
+          </label>
+
+          <div id="enrolled" hidden>
+            <p>
+              This computer is connected as <strong id="enrolled-name"></strong>.
+              <button type="button" class="link" id="forget-device">Disconnect this computer</button>
+            </p>
+          </div>
+          <div id="enrol" hidden>
+            <p class="dim">
+              Ask the server's administrator for an enrolment link (it expires soon and works once),
+              then paste it here.
+            </p>
+            <label for="enrol-token">Enrolment link or token</label>
+            <input id="enrol-token" type="text" spellcheck="false" placeholder="https://books.example.com/enroll/lbe_…" />
+            <label for="device-name">Name for this computer</label>
+            <div class="row">
+              <input id="device-name" type="text" />
+              <button type="button" id="enrol-device">Connect this computer</button>
+            </div>
+            <p id="keychain-problem" class="warn" hidden></p>
+          </div>
+        </div>
+      </section>
+
+      <section data-mode="local">
+        <h2>Share with other devices</h2>
+        <label class="check">
+          <input id="network-enabled" type="checkbox" />
+          Let phones and other computers on the network use these books
+        </label>
+        <p id="network-unavailable" class="warn" hidden></p>
+        <div class="row narrow">
+          <span>
+            <label for="network-bind">Address</label>
+            <input id="network-bind" type="text" spellcheck="false" />
+          </span>
+          <span>
+            <label for="network-port">Port</label>
+            <input id="network-port" type="number" min="1" max="65535" />
+          </span>
+        </div>
+      </section>
+
+      <section>
+        <h2>Updates</h2>
+        <label class="check">
+          <input id="check-updates" type="checkbox" />
+          Check for updates automatically
+        </label>
+        <label class="check">
+          <input id="install-updates" type="checkbox" />
+          Install updates automatically when I quit LibreBooks
+        </label>
+        <div class="row">
+          <button type="button" id="check-now">Check now</button>
+          <button type="button" id="install-now" hidden>Install and restart</button>
+          <span id="update-result" class="dim" aria-live="polite"></span>
+        </div>
+      </section>
+    </form>
+
+    <footer>
+      <span id="footer-status" class="dim"></span>
+      <span class="spacer"></span>
+      <button type="button" id="cancel">Cancel</button>
+      <button type="submit" form="form" id="save" class="primary">Save</button>
+    </footer>
+
+    <script src="settings.js"></script>
+  </body>
+</html>

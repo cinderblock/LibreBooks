@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-enroll-device"
+description = "Enables the enroll_device command without any pre-configured scope."
+commands.allow = ["enroll_device"]
+
+[[permission]]
+identifier = "deny-enroll-device"
+description = "Denies the enroll_device command without any pre-configured scope."
+commands.deny = ["enroll_device"]

@@ -12,6 +12,7 @@ members = [
     "crates/lb-tunnel",
     "crates/lb-server",
     "crates/librebooks",
+    "desktop/src-tauri",
 ]
 # The Tauri app is its own workspace member once desktop/ exists; it is kept out of
 # the default build so a headless server build never compiles a webview.

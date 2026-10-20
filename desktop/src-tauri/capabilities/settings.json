@@ -1,0 +1,19 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "settings-window",
+  "description": "The desktop shell's own settings page (desktop/ui, served by Tauri): choose the mode, the company folder, the server, updates.",
+  "windows": ["settings"],
+  "permissions": [
+    "core:default",
+    "core:window:allow-close",
+    "allow-get-shell",
+    "allow-save-settings",
+    "allow-pick-folder",
+    "allow-open-data-folder",
+    "allow-test-server",
+    "allow-enroll-device",
+    "allow-forget-device",
+    "allow-check-for-updates",
+    "allow-install-update"
+  ]
+}

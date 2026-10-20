@@ -1,0 +1,79 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "LibreBooks",
+  "mainBinaryName": "LibreBooks",
+  "identifier": "org.librebooks.desktop",
+  "build": {
+    "frontendDist": "../ui",
+    "beforeBuildCommand": {
+      "script": "bun run build",
+      "cwd": "../../web"
+    }
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [],
+    "security": {
+      "csp": {
+        "default-src": "'self'",
+        "script-src": "'self'",
+        "style-src": "'self' 'unsafe-inline'",
+        "img-src": "'self' data:",
+        "connect-src": "ipc: http://ipc.localhost"
+      },
+      "freezePrototype": true
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis", "msi", "appimage", "deb", "rpm", "app", "dmg"],
+    "category": "Finance",
+    "shortDescription": "Open-source double-entry accounting",
+    "longDescription": "LibreBooks is open-source double-entry accounting, built to be a drop-in replacement for QuickBooks Desktop. Keep your books on this computer, share them with your phone and other computers, or connect to a LibreBooks server.",
+    "publisher": "LibreBooks",
+    "copyright": "Copyright (c) LibreBooks contributors. MIT License.",
+    "homepage": "https://github.com/cinderblock/LibreBooks",
+    "license": "MIT",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "createUpdaterArtifacts": false,
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser",
+        "displayLanguageSelector": false
+      },
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper",
+        "silent": true
+      }
+    },
+    "linux": {
+      "deb": {
+        "section": "office"
+      },
+      "rpm": {
+        "release": "1"
+      }
+    },
+    "macOS": {
+      "minimumSystemVersion": "11.0"
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "REPLACE_WITH_TAURI_UPDATER_PUBLIC_KEY",
+      "endpoints": [
+        "https://github.com/cinderblock/LibreBooks/releases/latest/download/latest.json"
+      ],
+      "requireSignedVersion": true,
+      "windows": {
+        "installMode": "passive"
+      }
+    }
+  }
+}
