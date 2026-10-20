@@ -322,8 +322,13 @@ fn test_updater(base: &str, exe: &Path) -> UpdaterOptions {
 }
 
 #[tokio::test]
-async fn a_build_without_a_release_key_says_so() {
-    let s = Server::open(OpsOptions::default());
+async fn a_server_without_an_updater_says_why() {
+    // Release builds carry a key now; a build without one would come here with
+    // the same reason, and the API has to say so instead of pretending.
+    let s = Server::open(OpsOptions {
+        updater: UpdaterChoice::Off("this build has no release signing key".into()),
+        ..OpsOptions::default()
+    });
     let (st, v) = s.call("GET", "/api/v1/server/update", None).await;
     assert_eq!(st, StatusCode::OK);
     assert_eq!(v["status"], Value::Null);

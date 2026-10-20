@@ -351,7 +351,10 @@ fn ambiguous_matches_wait_for_a_person() {
     .unwrap();
     assert_eq!(cands.len(), 0);
     let err = lb_feeds::write(&co.books, &me(), |w| matching::accept(w, ids[1], only)).unwrap_err();
-    assert!(err.to_string().contains("already matched to a download"), "{err}");
+    assert!(
+        err.to_string().contains("already matched to a download"),
+        "{err}"
+    );
 }
 
 #[test]
