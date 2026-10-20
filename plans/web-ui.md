@@ -22,7 +22,11 @@ Phase C (2026-10-20) took up what the server pass of the same day enabled: the
 generated QuickBooks import and `NameBalance` types replace the UI's local
 copies, the centres read `GET /balances/names`, Attachments gained the Attached
 tab on `GET /attachments?all=true`, and the fixture answers 423 for the closing
-date as the server does.
+date as the server does. A follow-up the same day took the server's generated
+import envelopes (`ImportStatus`, `RunningJob`, `JobKind`, `SyncBody`,
+`ParityBody`, `ParityStatus`) and made the Import window follow a job's
+`import` change events, with the status long-poll answering on every progress
+step.
 
 User requirements this meets: mobile first class from day one; QuickBooks-quality
 input (QBD keyboard shortcuts, QuickFill, date keys, the amount calculator);
@@ -34,8 +38,9 @@ Ctrl+W/T/N/Tab can't be captured).
 
 - Phase A was built on worktree branch `worktree-agent-ab818e840111ec792`,
   phase B on `worktree-agent-af93b28647e2ebef7` (both merged by the parent
-  session), phase C on `worktree-agent-a9571472f4dda8acb`. The parent merges
-  `master` in; the worktree never does.
+  session), phase C on `worktree-agent-a9571472f4dda8acb` and its import
+  follow-up on `worktree-agent-ab9ab2d43381969c5`. The parent merges `master`
+  in; the worktree never does.
 - Vite 8, React 19 (StrictMode), Mantine 9.7 (has `Menubar`), React Router 8.5
   (v7-style API from `react-router`), TanStack Query 5, TanStack Virtual 3,
   TypeScript 7 (`tsc`), Bun 1.4 (package manager + unit tests), Playwright 1.64,
@@ -128,9 +133,12 @@ Data flow: screens → hooks (`api/hooks.ts`) → `ApiClient`. Writes invalidate
 they touch; server change events (`/events?company=`) invalidate by `kind` and
 are re-published on an in-app bus so an open form can react to its own record
 changing. Known kinds: `txn`, the list kinds, `company`/`info`, `feed*`,
-`saved`/`memorized`, `attachment`, `backup`, `import` (a `finished` action
-also invalidates everything derived from transactions), `user`/`enrolment`,
-`server`. Unknown kinds invalidate the whole company (correct, heavier).
+`saved`/`memorized`, `attachment`, `backup`, `import` (a job's `started` /
+`progress` / `finished` / `failed` with `id` sync|parity: the import queries
+are invalidated without cancelling a long-poll in flight, and a sync's
+`finished` or `failed` also invalidates everything derived from transactions),
+`user`/`enrolment`, `server`. Unknown kinds invalidate the whole company
+(correct, heavier).
 
 ## Component inventory
 
@@ -164,7 +172,7 @@ also invalidates everything derived from transactions), `user`/`enrolment`,
 | `EnrollmentsWindow` | Outstanding links (purpose, role, who for, expiry, revoke) and `MintLinkModal`: new user (role, suggested name, company access, TTL) or add device (whose); the minted link shown once as text + `QRCodeSVG`. |
 | `ServerWindow` | General (public URLs, feed auto-sync, Cloudflare Access), Updates (status, check, install with/without restart, policy), Tunnel (state, logs, token write-only, hostname, cloudflared), Backups (schedule, destinations folder/S3, encryption passphrase/age/none, retention, per-company status), Secrets (list, add, replace, delete; `in_use` refused). `PUT /server` sends the document whole; 400 `invalid` lists `detail.problems`. |
 | `BackupsWindow` | This company's backups in every destination, Back up now, Verify (checksum; contents with the passphrase/identities), Restore as a new company, Export company file. |
-| `ImportWindow` | QuickBooks import on one `ImportStatus` document (`GET /import/qbd`, long-polled with `?wait=` while a job runs): Sync (now / sweep deletions / full; the running job with progress, or "waiting for the Web Connector"), the last `SyncReport` (per-entity counts, issues, mismatches, gaps, unmapped fields, created lists); Connection (the generated `ImportSettings`: bridge URL + write-only key + delay, Web Connector user name / schedule / app URL / password (set or generated once) / .qwc download, SDK file mode, company file), `400 invalid` listing `detail.problems`; Parity (`GET …/parity`: the report, QBD beside ours, differences first; a running comparison polls). |
+| `ImportWindow` | QuickBooks import on one generated `ImportStatus` document (`GET /import/qbd`; while a job runs, `…/status?wait=` is long-polled and answers on every progress step, so the bar is live; the job's `import` change events refetch it and, on a sync's `finished`/`failed`, the books, with a notification when a job ends): Sync (now / sweep deletions / full; the running job with progress, or "waiting for the Web Connector"), the last `SyncReport` (per-entity counts, issues, mismatches, gaps, unmapped fields, created lists); Connection (the generated `ImportSettings`: bridge URL + write-only key + delay, Web Connector user name / schedule / app URL / password (set or generated once) / .qwc download, SDK file mode, company file), `400 invalid` listing `detail.problems`; Parity (`GET …/parity`: the report, QBD beside ours, differences first; a running comparison polls). |
 | Shell | Desktop: menu bar with shortcut hints, icon rail, window tabs with unsaved dots, palette button, live indicator, fixture badge, theme, user menu (My Account, Sign out). Phone: header with Back/search, stacked windows, bottom tabs with "+" create sheet and More sheet (incl. My Account). |
 | `CommandPalette` | Ctrl+K: forms, reports, accounts, names, items, open windows; QuickFill ranking; grouped; admin items only for admins. |
 | `ShortcutOverlay` | `?`/F1: every key on this platform by scope, the ones live in this window highlighted, plus field keys; keymap switch. |
@@ -286,10 +294,14 @@ change events, and:
   `.qwc` ids can't change, the bridge key becomes a `secret:` reference,
   `problems()` mirrored as a 400), one job at a time (409 `running`), a sync
   that runs for ~2 s through the phases (over the Web Connector it first
-  "waits for the poll"), `?wait=` long-polls that resolve when the job ends,
-  a plausible `SyncReport`, a parity job that lands a report built from the
-  real fixture balances with two accounts off, the `.qwc` file and the Web
-  Connector password (generated and returned once, or chosen and 204).
+  "waits for the poll"), the server's `import` change events (`id` sync|parity;
+  `started`, `progress`, `finished`; settings writes emit nothing, as on the
+  server), `?wait=` long-polls that answer on each progress step and when the
+  job ends on the status route (`wait_for_change`) and only when it ends on the
+  parity route (`wait_for_idle`), a plausible `SyncReport`, a parity job that
+  lands a report built from the real fixture balances with two accounts off,
+  the `.qwc` file and the Web Connector password (generated and returned once,
+  or chosen and 204).
 - **Name balances** (`GET /balances/names`): from open items exactly as
   `lb_store::balances::name_balances` does it — charges count what is still
   owed, credit memos / vendor credits / unapplied payments count against, jobs
@@ -315,12 +327,15 @@ register. Console handle: `__librebooks.simulateRemoteEdit(txnId)`,
   `AuditEntry`, the reconcile envelopes (`ReconcileOverview`, `StartReconcile`,
   `ReconciliationView`), the server-ops shapes (`ServerSettings`, `ServerView`,
   `UpdateView`, `TunnelView`, backups), `MintedEnrolmentLink` (the generated
-  `MintedEnrolment` lacks `url`), `UserDetail`, and the QuickBooks import
-  envelopes `ImportStatus`, `RunningJob`, `ParityStatus`, `QbdSyncOptions`,
-  `QbdParityOptions` (lb-server structs without ts-rs). Everything lb-qbd
-  exports (`ImportSettings`, `QbdTransport`, `BridgeSettings`, `QbwcSettings`,
+  `MintedEnrolment` lacks `url`) and `UserDetail`. Everything lb-qbd exports
+  (`ImportSettings`, `QbdTransport`, `BridgeSettings`, `QbwcSettings`,
   `SdkSettings`, `FileMode`), `NameBalance`, `StatementCharge` and
-  `RegisterLine.downloaded` are the generated ones since phase C.
+  `RegisterLine.downloaded` are the generated ones since phase C, and the
+  server's import envelopes (`ImportStatus`, `RunningJob`, `JobKind`,
+  `SyncBody`, `ParityBody`, `ParityStatus`) since its follow-up. The two
+  request bodies are `#[serde(default)]` on the server, so the client's
+  `qbdSync`/`qbdParityRun` take a `Partial<SyncBody>`/`Partial<ParityBody>`
+  (`txn_limit` is `number | null`; dates and `started_at` are ISO strings).
 - **The generated `ImportSettings` is not what phase B guessed**: no
   `pause_ms`/`auto_sync`/`every` (the bridge has `delay_ms`; the Web Connector
   schedules itself through `qbwc.run_every_minutes` in the `.qwc`), the key is
@@ -410,6 +425,23 @@ Phase C (commits on `worktree-agent-a9571472f4dda8acb`, 2026-10-20):
       Center's balance columns; the Attached tab in the attachments test).
 - [x] This document.
 
+Phase C follow-up (commits on `worktree-agent-ab9ab2d43381969c5`, 2026-10-20):
+
+- [x] The server's generated import envelopes (`ImportStatus`, `RunningJob`,
+      `JobKind`, `SyncBody`, `ParityBody`, `ParityStatus`) re-exported from
+      `api/types.ts` in place of the local copies; `qbdSync`/`qbdParityRun`
+      take `Partial<SyncBody>`/`Partial<ParityBody>`.
+- [x] The Import window event-driven: `invalidateForEvent` refetches the import
+      queries on every `import` event without cancelling a long-poll in flight,
+      a sync's `finished`/`failed` invalidates the books, and the window shows a
+      notification when a job ends. The fixture emits the server's vocabulary
+      (`id` sync|parity; `started`/`progress`/`finished`) and its status
+      long-poll answers on progress, as the server's does.
+- [x] `bun run check` green (236 tests: `invalidateForEvent`'s import branch;
+      the fixture test asserts the event sequence and the progress-wake
+      long-poll); Playwright 41/41.
+- [x] This document.
+
 ## What's left (next phases)
 
 1. **Stand-ins without a generated twin** (see Findings) stay until the server
@@ -433,10 +465,10 @@ Phase C (commits on `worktree-agent-a9571472f4dda8acb`, 2026-10-20):
    `react-hooks` disable comments in anticipation), the Home page's admin
    shortcuts, a filter box on the Attached tab once a company has many
    documents.
-8. **Import options the UI doesn't offer yet**: `POST /import/qbd/sync` takes
-   `reimport`, `txn_limit`, `txn_from`/`txn_to`, `apply_credits`, `entities`;
-   `POST …/parity` takes `as_of` and `trial_balance`. The client sends them;
-   the window only has Sync / sweep / full and Compare now.
+8. **Import options the UI doesn't offer yet**: `SyncBody` has `reimport`,
+   `txn_limit`, `txn_from`/`txn_to`, `apply_credits`, `entities`; `ParityBody`
+   has `as_of` and `trial_balance`. The client sends them; the window only has
+   Sync / sweep / full and Compare now.
 
 ## For the server
 
@@ -448,7 +480,12 @@ Closed by the server pass of 2026-10-20 and taken up in phase C: `GET
 /attachments/:id`, `?wait=` on `GET /import/qbd/parity`, `GET /open` with
 `entity_id`/`kind`, `#[ts(type = "number")]` on the `u64`/`i64` fields,
 `RegisterLine.downloaded` and the lb-qbd types in the generated files, 423
-`closed_period` with `detail.closing_date`.
+`closed_period` with `detail.closing_date`. Closed by the server's second pass
+the same day and taken up in the phase C follow-up: `ImportStatus`,
+`RunningJob`, `JobKind`, `SyncBody`, `ParityBody` and `ParityStatus` generated;
+a job's `import` change events (`id` sync|parity, `action`
+started|progress|finished|failed); `GET /import/qbd/status?wait=` answering on
+progress as well as on finish.
 
 Still open:
 
@@ -458,12 +495,10 @@ Still open:
   generated `MintedEnrolment` lacks `url`. The UI's `MintedEnrolmentLink` adds it.
 - `PATCH /auth/passkeys/:id` and the revoke routes are assumed to answer 204
   (the UI refetches rather than reading a body).
-- Closed on the server since (same day): `ImportStatus`, `RunningJob`,
-  `JobKind`, `SyncBody`, `ParityBody` and `ParityStatus` are generated now
-  (swap the copies in `api/types.ts`); a job emits `import` change events
-  (`id` sync|parity, `action` started|progress|finished|failed) like the
-  fixture does; `GET /import/qbd/status?wait=` returns on progress as well as
-  on finish, so the bar is live.
+- `PUT /import/qbd` and `POST …/qbwc/password` emit no change event (only
+  jobs do), so another tab's Connection panel stays stale until it refetches.
+  The fixture matches; an `import` event with `id: "settings"` would let the
+  UI refresh it.
 - Restoring a backup creates a company; `GET /session` must include it for the
   picker to show it (the UI invalidates the session query).
 
