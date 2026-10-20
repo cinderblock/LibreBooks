@@ -747,3 +747,48 @@ fn a_backdated_purchase_recosts_later_sales() {
     assert_eq!(sums[&asset], Money(5_000));
     assert_eq!(b.check_integrity().unwrap(), Vec::<String>::new());
 }
+
+#[test]
+fn a_refund_check_in_ar_is_paid_down_by_a_payment() {
+    // QBD: a check to a customer posted to A/R is a receivable (a refund given
+    // before the credit, or an advance); a later payment applies to it.
+    let b = books();
+    let s = setup(&b);
+    let ar = b
+        .read(|c| accounts::by_role(c, AccountRole::AccountsReceivable))
+        .unwrap()
+        .unwrap()
+        .id;
+    let mut chk = Txn::new(TxnType::Check, date(2026, 10, 1));
+    chk.account_id = Some(s.bank);
+    chk.entity_id = Some(s.customer);
+    chk.lines
+        .push(TxnLine::account(ar, Money(40_400)).with_entity(s.customer));
+    let chk = b.write(&me(), |w| txns::save(w, chk)).unwrap().txn;
+    assert_eq!(chk.ar_ap_account_id, Some(ar));
+    let open = |id| {
+        b.read(|c| {
+            Ok(txns::query(c, &txns::TxnFilter::default())?
+                .into_iter()
+                .find(|t| t.id == id)
+                .unwrap()
+                .open_balance)
+        })
+        .unwrap()
+    };
+    assert_eq!(open(chk.id), Some(Money(40_400)));
+    let mut pmt = Txn::new(TxnType::ReceivePayment, date(2026, 10, 10));
+    pmt.entity_id = Some(s.customer);
+    pmt.amount = Money(40_400);
+    pmt.applications
+        .push(Application::cash(chk.id, Money(40_400)));
+    b.write(&me(), |w| txns::save(w, pmt)).unwrap();
+    assert_eq!(open(chk.id), Some(Money::ZERO));
+    // An ordinary expense check is not an open item.
+    let mut plain = Txn::new(TxnType::Check, date(2026, 10, 2));
+    plain.account_id = Some(s.bank);
+    plain.lines.push(TxnLine::account(s.rent, Money(1)));
+    let plain = b.write(&me(), |w| txns::save(w, plain)).unwrap().txn;
+    assert_eq!(plain.ar_ap_account_id, None);
+    assert_eq!(open(plain.id), None);
+}
