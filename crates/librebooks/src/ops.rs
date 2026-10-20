@@ -6,9 +6,11 @@
 //! company appears in the server's list at once). They are the same functions
 //! the API calls (`lb_server::ops`).
 
+use std::future::Future;
 use std::io::Read as _;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
+use std::pin::Pin;
 
 use anyhow::{Context, Result, anyhow, bail};
 use clap::Subcommand;
@@ -497,14 +499,51 @@ pub fn secret(data_dir: &Path, secret_key: Option<PathBuf>, command: SecretComma
     Ok(())
 }
 
+/// How a running server is told to stop, and whom it tells it is up. The
+/// console and the Windows service differ only here.
+pub struct Control {
+    /// Resolves when the server should stop: Ctrl+C or SIGTERM at a console,
+    /// a Stop or Shutdown control from the Service Control Manager.
+    pub stop: Pin<Box<dyn Future<Output = ()> + Send>>,
+    /// Called once every address is listening (a service reports Running).
+    pub ready: Box<dyn FnOnce() + Send>,
+    /// Whether someone is watching standard output (the first-admin link is
+    /// printed there; a service logs it instead).
+    pub console: bool,
+}
+
+impl Control {
+    /// A command run from a terminal: stop on Ctrl+C (and SIGTERM on Unix).
+    pub fn console() -> Self {
+        Control {
+            stop: Box::pin(shutdown_signal()),
+            ready: Box::new(|| {}),
+            console: true,
+        }
+    }
+}
+
+impl std::fmt::Debug for Control {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Control")
+            .field("console", &self.console)
+            .finish_non_exhaustive()
+    }
+}
+
 /// `serve`'s runtime: listen on every address, run the background work, stop
-/// gracefully on Ctrl+C / SIGTERM or after an update was installed, then start
-/// the new version (or exit for the supervisor) if one was.
+/// gracefully when `control.stop` resolves or after an update was installed.
+/// Returns once everything has stopped (the runtime is gone: cloudflared
+/// stopped, files closed, ports free), with the restart request if an update
+/// made one; [`restart_or_exit`] acts on it for a console, a service manager
+/// restarts the service itself.
 pub fn run_server(
     config: &ServerConfig,
     binds: &[SocketAddr],
     secret_key: Option<PathBuf>,
-) -> Result<()> {
+    control: Control,
+) -> Result<Option<Restart>> {
+    let Control { stop, ready, .. } = control;
     let rt = tokio::runtime::Runtime::new()?;
     let restart = rt.block_on(async move {
         let state = lb_server::state_with(
@@ -521,7 +560,9 @@ pub fn run_server(
         let (stop_tx, stop_rx) = tokio::sync::watch::channel(false);
         tokio::spawn(async move {
             tokio::select! {
-                () = shutdown_signal() => {}
+                () = stop => {
+                    tracing::info!("shutting down");
+                }
                 r = restart_rx.wait_for(Option::is_some) => {
                     if r.is_ok() {
                         tracing::info!("restarting into the new version");
@@ -559,6 +600,7 @@ pub fn run_server(
             tracing::warn!("this build has no web UI embedded; build web/ first (bun run build)");
         }
         tracing::info!("company files in {}", config.companies_dir().display());
+        ready();
         let mut served = Ok(());
         for t in tasks {
             if let Err(e) = t.await? {
@@ -573,6 +615,12 @@ pub fn run_server(
     })?;
     // The runtime is gone (cloudflared stopped, files closed, ports free).
     drop(rt);
+    Ok(restart)
+}
+
+/// After [`run_server`] at a console: start the new version an update
+/// installed (or leave with the supervisor's restart code), else return.
+pub fn restart_or_exit(restart: Option<Restart>) -> Result<()> {
     if let Some(restart) = restart {
         if let Err(e) = restart.spawn() {
             bail!(
@@ -584,6 +632,7 @@ pub fn run_server(
     Ok(())
 }
 
+/// Ctrl+C, or SIGTERM on Unix (what systemd and `kill` send).
 async fn shutdown_signal() {
     #[cfg(unix)]
     {
@@ -603,5 +652,4 @@ async fn shutdown_signal() {
     {
         let _ = tokio::signal::ctrl_c().await;
     }
-    tracing::info!("shutting down");
 }

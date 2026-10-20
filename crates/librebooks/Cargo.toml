@@ -28,6 +28,12 @@ serde_json.workspace = true
 axum.workspace = true
 # To read a saved bridge key out of the secret store (SecretString).
 age.workspace = true
+# `service run` has no console: tracing goes to a rolling file in the data dir.
+tracing-appender.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+# `librebooks service`: the Service Control Manager entry point and registration.
+windows-service.workspace = true
 
 [features]
 default = ["qbsdk"]
