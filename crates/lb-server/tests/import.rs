@@ -80,6 +80,9 @@ struct WebConnector<'a> {
     quickbooks: FakeQuickBooks,
     user: String,
     password: String,
+    /// The company's import route. When set, the connector lets the job finish
+    /// before getLastError/closeConnection, the way a slow machine would.
+    settle: Option<String>,
 }
 
 /// One update run as the Web Connector sees it.
@@ -187,6 +190,19 @@ impl WebConnector<'_> {
                 break;
             }
         }
+        if let Some(base) = &self.settle {
+            // The real Web Connector asks getLastError only after QuickBooks has
+            // answered; by then the job may well have finished and reported.
+            for _ in 0..20 {
+                let (_, v) = self
+                    .server
+                    .call("GET", &format!("{base}/status?wait=2"), None)
+                    .await;
+                if v["running"].is_null() {
+                    break;
+                }
+            }
+        }
         let (_, v) = self.soap("getLastError", &[("ticket", &ticket)]).await;
         run.last_error = result_text(&v);
         let (_, v) = self.soap("closeConnection", &[("ticket", &ticket)]).await;
@@ -289,6 +305,7 @@ async fn a_web_connector_syncs_and_checks_parity_through_the_server() {
         quickbooks: FakeQuickBooks::new(larkspur()),
         user: "larkspur".into(),
         password,
+        settle: Some(base.clone()),
     };
     // Wrong password: "nvu". Right password, nothing queued: "none".
     assert_eq!(wc.authenticate("wrong").await.1, "nvu");
@@ -431,6 +448,7 @@ impl WebConnector<'_> {
             quickbooks: FakeQuickBooks::new(larkspur()),
             user: self.user.clone(),
             password: self.password.clone(),
+            settle: None,
         }
     }
 }
@@ -461,6 +479,7 @@ async fn a_connection_error_mid_run_is_reported() {
         quickbooks: FakeQuickBooks::new(larkspur()),
         user: "lark".into(),
         password: "correct horse battery".into(),
+        settle: None,
     };
     let (st, _) = s.call("POST", &format!("{base}/sync"), None).await;
     assert_eq!(st, StatusCode::ACCEPTED);
@@ -773,6 +792,7 @@ async fn web_connector_sign_in_failures_are_rate_limited() {
         quickbooks: FakeQuickBooks::new(larkspur()),
         user: "larkspur".into(),
         password,
+        settle: None,
     };
     assert_eq!(wc.authenticate(&wc.password).await.1, "none");
     for _ in 0..lb_auth::RateLimit::default().max_failures {

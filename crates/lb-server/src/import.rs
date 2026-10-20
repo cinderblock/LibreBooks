@@ -513,7 +513,10 @@ impl Slot {
             }
         }
         lock(&self.running).take();
-        lock(&self.connected).take();
+        // The Web Connector session stays: after the last percentage it still
+        // asks getLastError and closeConnection with its ticket, and must hear
+        // "NoOp" and the summary, not that the ticket is unknown. closeConnection
+        // (or the next authenticate) forgets it.
         lock(&self.progress).take();
         self.changed.notify_waiters();
     }
@@ -820,8 +823,12 @@ async fn authenticate_unlimited(
         return (ticket, AuthOutcome::NothingToDo);
     }
     let mut connected = lock(&slot.connected);
-    if connected.is_some() {
+    if connected.as_ref().is_some_and(|c| {
+        let h = c.session.handle();
+        !h.is_finished() && !h.is_closed()
+    }) {
         // Another Web Connector run is already in this session; let it finish.
+        // A session left over from a finished job is replaced.
         return (ticket, AuthOutcome::Busy);
     }
     let session = Session::new(handle, *lock(&state.imports.session));
