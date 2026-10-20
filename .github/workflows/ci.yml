@@ -1,7 +1,7 @@
 name: CI
 
 # Every push and pull request: format, lint and test the Rust workspace on
-# Linux and Windows, check the TypeScript types generated from Rust are
+# Linux and Windows (the desktop app in its own job), check the TypeScript types generated from Rust are
 # current, and typecheck, test and build the web UI. Releases are a separate
 # workflow (release.yml), run on tags.
 
@@ -40,7 +40,7 @@ jobs:
         run: cargo fmt --all --check
 
       # The default members: everything but the desktop app, which needs a
-      # webview toolkit and has its own job.
+      # webview toolkit and has its own job below.
       - name: Clippy
         run: cargo clippy --all-targets --locked
 
@@ -71,3 +71,35 @@ jobs:
         run: bun run --cwd web test
       - name: Build
         run: bun run --cwd web build
+
+  desktop:
+    name: Desktop (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v7
+      - name: Webview toolkit
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target"
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install --frozen-lockfile
+      # tauri::generate_context! reads the built web app at compile time.
+      - name: Web build
+        run: bun run --cwd web build
+      - name: Clippy
+        run: cargo clippy --manifest-path desktop/src-tauri/Cargo.toml --all-targets --locked
+      - name: Test
+        run: cargo test --manifest-path desktop/src-tauri/Cargo.toml --locked
