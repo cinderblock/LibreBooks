@@ -223,6 +223,51 @@ async fn back_up_list_verify_restore_and_export() {
             .contains("backup-co.lbk")
     );
     assert_eq!(&r.bytes[..2], b"PK");
+
+    // The export comes back in as a new company through the import route.
+    let (st, v) = s
+        .upload(
+            "/api/v1/companies/import",
+            Some(("backup-co.lbk", &r.bytes)),
+            &[("name", "Backup Co (moved)")],
+        )
+        .await;
+    assert_eq!(st, StatusCode::CREATED, "{v}");
+    assert_eq!(v["name"], "Backup Co (moved)");
+    assert_eq!(v["from"]["company_name"], "Backup Co");
+    let moved = v["id"].as_str().unwrap().to_owned();
+    assert_ne!(moved, c, "a fresh id");
+    let (_, accounts) = s
+        .call("GET", &format!("/api/v1/c/{moved}/accounts"), None)
+        .await;
+    assert!(
+        accounts
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|a| a["name"] == "Checking"),
+        "{accounts}"
+    );
+    // No file, or a file that isn't a .lbk: refused, nothing created.
+    let before = s.call("GET", "/api/v1/companies", None).await.1;
+    let (st, v) = s.upload("/api/v1/companies/import", None, &[]).await;
+    assert_eq!(st, StatusCode::BAD_REQUEST, "{v}");
+    let (st, v) = s
+        .upload(
+            "/api/v1/companies/import",
+            Some(("notes.txt", b"not a zip")),
+            &[],
+        )
+        .await;
+    assert!(st.is_client_error(), "{st} {v}");
+    let after = s.call("GET", "/api/v1/companies", None).await.1;
+    assert_eq!(before, after);
+    assert!(
+        std::fs::read_dir(s.state.ops.data_dir().join(".restore"))
+            .map(|d| d.count() == 0)
+            .unwrap_or(true),
+        "the working folder is left empty"
+    );
 }
 
 #[tokio::test]

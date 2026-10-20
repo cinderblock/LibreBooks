@@ -249,8 +249,9 @@ or `sc create` with a wrapper) that forwards stop as Ctrl+C.
   only in the running server's API.
 - **No native Windows service** entry point (`windows-service` crate): needed for
   a clean SCM stop; until then a wrapper.
-- **No `.lbk` import route** over the API (the CLI's `backup restore x.lbk` does
-  it). A multipart `POST /companies/import` is the natural home.
+- **`.lbk` import** over the API: multipart `POST /companies/import` (streams
+  the upload to `.restore/` under the data folder, then `import_lbk`); the CLI's
+  `backup restore x.lbk` does the same from a path.
 - **A renamed company's older backups** (under its old slug, inside its id
   folder) are listed but no longer pruned by retention.
 - **Settings races**: the store re-reads on change, but two processes writing

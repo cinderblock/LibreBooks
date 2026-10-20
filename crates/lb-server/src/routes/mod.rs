@@ -117,6 +117,12 @@ pub fn api() -> Router<AppState> {
             "/companies",
             get(system::companies).post(system::create_company),
         )
+        .route(
+            "/companies/import",
+            post(system::import_company).layer(axum::extract::DefaultBodyLimit::max(
+                system::IMPORT_BODY_LIMIT,
+            )),
+        )
         .route("/events", get(events::stream))
         .route("/auth/login/start", post(auth::login_start))
         .route("/auth/login/finish", post(auth::login_finish))
