@@ -321,7 +321,9 @@ async fn a_web_connector_syncs_and_checks_parity_through_the_server() {
         "nvu"
     );
 
-    // Start a sync: it waits for the Web Connector.
+    // Start a sync: it waits for the Web Connector. Its events go out as
+    // `import` changes (started, progress…, finished).
+    let mut events = s.state.events.subscribe();
     let (st, v) = s
         .call("POST", &format!("{base}/sync"), Some(json!({})))
         .await;
@@ -350,6 +352,16 @@ async fn a_web_connector_syncs_and_checks_parity_through_the_server() {
     assert!(run.rounds > 25, "{run:?}");
     assert_eq!(run.last_error, "NoOp");
     assert!(run.summary.starts_with("LibreBooks: done"), "{run:?}");
+    let mut actions = Vec::new();
+    while let Ok(e) = events.try_recv() {
+        if e.kind == "import" {
+            assert_eq!(e.id, "sync");
+            actions.push(e.action);
+        }
+    }
+    assert_eq!(actions.first(), Some(&"started"), "{actions:?}");
+    assert_eq!(actions.last(), Some(&"finished"), "{actions:?}");
+    assert!(actions.contains(&"progress"), "{actions:?}");
     // Everything the Web Connector carried was a query, and paging ran out.
     let requests = wc.quickbooks.requests();
     assert!(

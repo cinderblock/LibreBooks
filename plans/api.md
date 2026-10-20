@@ -184,7 +184,7 @@ QuickBooks Web Connector (QuickBooks polls this server) and the QuickBooks SDK
 (LibreBooks on the QuickBooks machine). One job (sync or parity) runs per
 company at a time, in the background; status and reports are read back, with
 `?wait=N` (seconds, at most 120) to long-poll until the running job finishes.
-Types `ImportSettings`, `QbdTransport`, `SyncReport`, `ParityReport`,
+Types `ImportSettings`, `QbdTransport`, `SyncReport`, `ParityReport`, `ImportStatus`, `RunningJob`, `JobKind`, `SyncBody`, `ParityBody`, `ParityStatus`,
 `SyncProgress` are lb-qbd's (`web/src/api/generated/`).
 
 | | |
@@ -192,9 +192,10 @@ Types `ImportSettings`, `QbdTransport`, `SyncReport`, `ParityReport`,
 | `GET /import/qbd` | → `ImportStatus { settings: ImportSettings, bridge_key_set, qbwc_password_set, sdk_available, running: RunningJob \| null, last_sync: SyncReport \| null, last_parity: ParityReport \| null, last_error }`. `RunningJob { kind: "sync" \| "parity", transport, started_at, progress: SyncProgress \| null, percent, waiting_for_web_connector, web_connector_connected }` |
 | `PUT /import/qbd` | `ImportSettings` plus write-only `bridge_key?` (saved as the secret `qbd.<company>.bridge-key`; `bridge.key_ref` then points at it) → `ImportStatus`. 400 `invalid` with `detail.problems` (empty bridge URL, no key, bad app URL…); 409 `duplicate` when another company uses the Web Connector user name. `qbwc.owner_id` / `file_id` are minted once and can't be changed. |
 | `POST /import/qbd/sync` | `{ full?, sweep?, reimport?, txn_limit?, txn_from?, txn_to?, apply_credits?, entities? }` (all optional) → 202 `ImportStatus`. 409 `running` while a job runs; 400 when the settings have problems; 501 `unsupported` for the SDK on a build without it; 502 `network` when the bridge can't be reached. Over the Web Connector the job waits for its next poll. |
-| `GET /import/qbd/status?wait=N` | → `ImportStatus` |
+| `GET /import/qbd/status?wait=N` | → `ImportStatus`; with `wait`, returns as soon as the job finishes **or reports progress** (else after N s, max 120) |
 | `POST /import/qbd/parity` | `{ as_of?, trial_balance? }` → 202 `ImportStatus` (same 409/400 rules) |
-| `GET /import/qbd/parity?wait=N` | → `{ running, job: RunningJob \| null, report: ParityReport \| null, error }` |
+| `GET /import/qbd/parity?wait=N` | → `ParityStatus { running, job: RunningJob \| null, report: ParityReport \| null, error }` |
+| events | A job emits `change` events with `kind: "import"`, `id: "sync" \| "parity"`, `action: started \| progress \| finished \| failed` on `GET /events`; the imported records themselves arrive as their own change events while it runs. |
 | `GET /import/qbd/qbwc.qwc` | → `application/xml` download `librebooks-<slug>.qwc` for the QuickBooks Web Connector (`AppURL` = the company's `qbwc.app_url`, else the server's first public URL, else the tunnel hostname, else the request's origin, + `/qbwc`; `IsReadOnly` true). 400 unless the URL is `https://` or `http://localhost`. |
 | `POST /import/qbd/qbwc/password` | `{ value }` (≥ 8 characters) → 204, or no body → `{ password }`: a generated one, shown this once. Saved as the secret `qbd.<company>.qbwc-password`. |
 

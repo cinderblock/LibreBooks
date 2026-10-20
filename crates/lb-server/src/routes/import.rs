@@ -16,12 +16,12 @@ use lb_core::CompanyId;
 use lb_qbd::config::{ImportSettings, QbdTransport};
 use lb_qbd::qbwc::{Call, soap};
 use serde::Deserialize;
-use serde_json::{Value, json};
+use serde_json::json;
 
 use super::blocking;
 use crate::auth::{Client, Principal, Role};
 use crate::error::{ApiError, ApiResult};
-use crate::import::{self, ImportStatus, ParityBody, SyncBody};
+use crate::import::{self, ImportStatus, ParityBody, ParityStatus, SyncBody};
 use crate::state::AppState;
 
 /// The company-scoped routes.
@@ -43,7 +43,8 @@ pub fn qbwc() -> Router<AppState> {
 #[derive(Debug, Default, Deserialize)]
 #[serde(default)]
 struct Wait {
-    /// Long-poll: wait up to this many seconds for a running job to finish.
+    /// Long-poll: wait up to this many seconds for a running job to finish
+    /// (status: or to report progress).
     wait: Option<u64>,
 }
 
@@ -68,7 +69,7 @@ async fn get_status(
     Query(wait): Query<Wait>,
 ) -> ApiResult<Json<ImportStatus>> {
     let books = s.books_for(&p, company, Role::Admin)?;
-    import::wait_for_idle(&s, company, wait.duration()).await;
+    import::wait_for_change(&s, company, wait.duration()).await;
     Ok(Json(status_of(&s, company, &books).await?))
 }
 
@@ -193,16 +194,12 @@ async fn get_parity(
     p: Principal,
     Path(company): Path<CompanyId>,
     Query(wait): Query<Wait>,
-) -> ApiResult<Json<Value>> {
+) -> ApiResult<Json<ParityStatus>> {
     let books = s.books_for(&p, company, Role::Admin)?;
     import::wait_for_idle(&s, company, wait.duration()).await;
-    let status = status_of(&s, company, &books).await?;
-    Ok(Json(json!({
-        "running": status.running.as_ref().is_some_and(|r| r.kind == import::JobKind::Parity),
-        "job": status.running,
-        "report": status.last_parity,
-        "error": status.last_error,
-    })))
+    Ok(Json(ParityStatus::of(
+        status_of(&s, company, &books).await?,
+    )))
 }
 
 /// `GET …/import/qbd/qbwc.qwc`: the file to add to the QuickBooks Web Connector.

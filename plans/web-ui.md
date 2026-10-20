@@ -458,20 +458,12 @@ Still open:
   generated `MintedEnrolment` lacks `url`. The UI's `MintedEnrolmentLink` adds it.
 - `PATCH /auth/passkeys/:id` and the revoke routes are assumed to answer 204
   (the UI refetches rather than reading a body).
-- `ImportStatus`, `RunningJob`, `JobKind`, `SyncBody`, `ParityBody` and the
-  `GET …/parity` envelope are lb-server structs without `#[derive(TS)]`; the UI
-  keeps copies in `api/types.ts` (`ImportStatus`, `RunningJob`, `ParityStatus`,
-  `QbdSyncOptions`, `QbdParityOptions`). Exporting them would close the last
-  import stand-ins.
-- The import emits no change events (`kind: "import"`): the UI long-polls
-  `GET /import/qbd/status?wait=` while a job runs and shows the status a write
-  returns. The fixture emits `import` events anyway (`finished` invalidates
-  everything derived from transactions), so an event-driven server would slot in.
-- `GET /import/qbd/status?wait=N` returns when the job *finishes* (or `wait`
-  runs out), not when progress changes; the UI re-asks on return, so the
-  progress bar moves at `wait` granularity on the real server (the fixture's
-  jobs are short enough not to show it). A "return on progress change" would
-  make it live.
+- Closed on the server since (same day): `ImportStatus`, `RunningJob`,
+  `JobKind`, `SyncBody`, `ParityBody` and `ParityStatus` are generated now
+  (swap the copies in `api/types.ts`); a job emits `import` change events
+  (`id` sync|parity, `action` started|progress|finished|failed) like the
+  fixture does; `GET /import/qbd/status?wait=` returns on progress as well as
+  on finish, so the bar is live.
 - Restoring a backup creates a company; `GET /session` must include it for the
   picker to show it (the UI invalidates the session query).
 

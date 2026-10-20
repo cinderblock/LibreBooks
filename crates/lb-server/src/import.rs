@@ -41,9 +41,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use subtle::ConstantTimeEq;
 use tokio::sync::Notify;
+use ts_rs::TS;
 
 use crate::error::{ApiError, ApiResult};
-use crate::state::AppState;
+use crate::state::{AppState, ChangeEvent};
 
 /// The folder under the data dir where reports are kept.
 pub const REPORTS_DIR: &str = "imports";
@@ -114,15 +115,26 @@ pub fn user_name_taken(state: &AppState, company: CompanyId, user_name: &str) ->
 // ---------------------------------------------------------------------------
 
 /// What a job does.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "lowercase")]
+#[ts(export)]
 pub enum JobKind {
     Sync,
     Parity,
 }
 
+impl JobKind {
+    fn as_str(self) -> &'static str {
+        match self {
+            JobKind::Sync => "sync",
+            JobKind::Parity => "parity",
+        }
+    }
+}
+
 /// A job in progress, as the status shows it.
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, TS)]
+#[ts(export)]
 pub struct RunningJob {
     pub kind: JobKind,
     pub transport: QbdTransport,
@@ -137,7 +149,8 @@ pub struct RunningJob {
 }
 
 /// Everything `GET …/import/qbd` shows.
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, TS)]
+#[ts(export)]
 pub struct ImportStatus {
     pub settings: ImportSettings,
     /// The bridge key and Web Connector password are set (never their values).
@@ -174,6 +187,8 @@ struct Slot {
     last_parity: Mutex<Option<ParityReport>>,
     last_error: Mutex<Option<String>>,
     loaded_from_disk: Mutex<bool>,
+    /// Bumped on every progress report (long-polls return on a change).
+    progress_seq: std::sync::atomic::AtomicU64,
     changed: Notify,
 }
 
@@ -227,12 +242,14 @@ impl ImportSlots {
 }
 
 /// Options for `POST …/sync`.
-#[derive(Clone, Debug, Default, Deserialize)]
+#[derive(Clone, Debug, Default, Deserialize, TS)]
 #[serde(default)]
+#[ts(export)]
 pub struct SyncBody {
     pub full: bool,
     pub sweep: bool,
     pub reimport: bool,
+    #[ts(type = "number | null")]
     pub txn_limit: Option<usize>,
     pub txn_from: Option<jiff::civil::Date>,
     pub txn_to: Option<jiff::civil::Date>,
@@ -258,11 +275,37 @@ impl SyncBody {
 }
 
 /// Options for `POST …/parity`.
-#[derive(Clone, Debug, Default, Deserialize)]
+#[derive(Clone, Debug, Default, Deserialize, TS)]
 #[serde(default)]
+#[ts(export)]
 pub struct ParityBody {
     pub as_of: Option<jiff::civil::Date>,
     pub trial_balance: Option<bool>,
+}
+
+/// What `GET …/import/qbd/parity` answers.
+#[derive(Clone, Debug, Serialize, TS)]
+#[ts(export)]
+pub struct ParityStatus {
+    /// A parity check is running now.
+    pub running: bool,
+    pub job: Option<RunningJob>,
+    pub report: Option<ParityReport>,
+    pub error: Option<String>,
+}
+
+impl ParityStatus {
+    pub fn of(status: ImportStatus) -> ParityStatus {
+        ParityStatus {
+            running: status
+                .running
+                .as_ref()
+                .is_some_and(|r| r.kind == JobKind::Parity),
+            job: status.running,
+            report: status.last_parity,
+            error: status.last_error,
+        }
+    }
 }
 
 /// One of the three transports as a [`QbdSource`].
@@ -565,14 +608,31 @@ async fn start(
     let dir = reports_dir(state);
     let handle = tokio::runtime::Handle::current();
     let slot_for_job = slot.clone();
+    let events = state.events.clone();
+    let announce = move |action: &'static str| {
+        // No subscribers is fine.
+        let _ = events.send(ChangeEvent {
+            company,
+            kind: "import",
+            id: kind.as_str().to_owned(),
+            action,
+        });
+    };
+    announce("started");
     // The engine writes SQLite as it imports: keep it off the request threads.
     tokio::task::spawn_blocking(move || {
         let progress_slot = slot_for_job.clone();
+        let announce_progress = announce.clone();
         let progress = move |p: &SyncProgress| {
             *lock(&progress_slot.progress) = Some(p.clone());
+            progress_slot
+                .progress_seq
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            progress_slot.changed.notify_waiters();
             if let Some(h) = &qbwc {
                 h.set_progress(p);
             }
+            announce_progress("progress");
         };
         let outcome = handle.block_on(async {
             match kind {
@@ -588,7 +648,9 @@ async fn start(
         });
         // Dropping the source finishes a Web Connector queue (no more requests).
         drop(source);
+        let ok = outcome.is_ok();
         slot_for_job.finish(kind, outcome, &dir, company);
+        announce(if ok { "finished" } else { "failed" });
     });
     Ok(())
 }
@@ -639,6 +701,29 @@ pub async fn wait_for_idle(state: &AppState, company: CompanyId, wait: Duration)
     loop {
         let changed = slot.changed.notified();
         if lock(&slot.running).is_none() {
+            return;
+        }
+        let now = tokio::time::Instant::now();
+        if now >= deadline {
+            return;
+        }
+        tokio::select! {
+            () = changed => {}
+            () = tokio::time::sleep_until(deadline) => return,
+        }
+    }
+}
+
+/// Wait up to `wait` for the running job to finish **or report progress**, so a
+/// long-polled status follows the progress bar rather than `wait`'s granularity.
+pub async fn wait_for_change(state: &AppState, company: CompanyId, wait: Duration) {
+    let slot = state.imports.slot(company);
+    let seq = || slot.progress_seq.load(std::sync::atomic::Ordering::Relaxed);
+    let before = seq();
+    let deadline = tokio::time::Instant::now() + wait;
+    loop {
+        let changed = slot.changed.notified();
+        if lock(&slot.running).is_none() || seq() != before {
             return;
         }
         let now = tokio::time::Instant::now();
