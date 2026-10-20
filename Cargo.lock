@@ -2144,6 +2144,7 @@ dependencies = [
 name = "lb-server"
 version = "0.1.0"
 dependencies = [
+ "age",
  "anyhow",
  "axum",
  "axum-extra",
@@ -2165,6 +2166,7 @@ dependencies = [
  "mime_guess",
  "pretty_assertions",
  "rand 0.10.3",
+ "reqwest",
  "rusqlite",
  "rust-embed",
  "rust_decimal",
@@ -2272,6 +2274,7 @@ dependencies = [
  "lb-qbd",
  "lb-server",
  "lb-store",
+ "lb-tunnel",
  "lb-update",
  "serde_json",
  "tokio",

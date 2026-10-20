@@ -41,6 +41,11 @@ rand.workspace = true
 rust_decimal.workspace = true
 base64.workspace = true
 hex.workspace = true
+# The secret store (age, as lb-backup uses), the feed providers' HTTP client type,
+# and atomic file writes.
+age.workspace = true
+reqwest.workspace = true
+tempfile.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
