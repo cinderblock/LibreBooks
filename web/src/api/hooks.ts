@@ -140,8 +140,11 @@ export function useAttachments(query: AttachmentQuery = {}, enabled = true) {
 /**
  * The QuickBooks import in one document (`ImportStatus`): the settings, what
  * is set, the running job and the last reports. While a job runs the server
- * long-polls (`wait`) and we ask again as soon as it answers, so the progress
- * bar moves without a fast timer; idle, a plain fetch now and then.
+ * long-polls (`wait`), answering on every progress step, and we ask again as
+ * soon as it answers, so the progress bar is live without a fast timer; idle,
+ * a plain fetch now and then. The `import` change events (`started`,
+ * `finished`, `failed`) refetch it through `invalidateForEvent`, so a job
+ * begun elsewhere shows up too.
  */
 export function useQbdStatus(enabled = true) {
   const api = useApi();

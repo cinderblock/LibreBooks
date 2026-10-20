@@ -547,6 +547,9 @@ describe('administration', () => {
 
   test('QuickBooks import: settings (key write-only), a sync that runs and reports, parity, Web Connector password', async () => {
     const api = make();
+    const events: string[] = [];
+    const sub = api.subscribe(co, { onChange: (e) => events.push(`${e.kind}:${e.id}:${e.action}`) });
+    const settled = () => new Promise((r) => setTimeout(r, 40));
     const st = await api.qbdStatus(co);
     expect(st.settings.transport).toBe('bridge');
     expect(st.bridge_key_set).toBe(true);
@@ -561,23 +564,44 @@ describe('administration', () => {
     const bad = await rejects(api.putQbdSettings(co, { ...st.settings, bridge: { ...st.settings.bridge, url: 'nope' } }));
     expect(bad.code).toBe('invalid');
     expect((bad.detail as { problems: string[] }).problems[0]).toContain('bridge URL');
-    // One job at a time; `wait` long-polls until it is done.
+    // Settings changes emit no change event, as on the server (only jobs do).
+    await settled();
+    expect(events).toEqual([]);
+    // One job at a time. `?wait=` on the status answers at the next progress step (the bar is live), not only at the end…
     const sync = await api.qbdSync(co, { full: true });
     expect(sync.running?.kind).toBe('sync');
     expect((await rejects(api.qbdSync(co))).code).toBe('running');
     expect((await rejects(api.qbdParityRun(co))).code).toBe('running');
-    const done = await api.qbdStatus(co, 10);
-    expect(done.running).toBeNull();
+    const stepped = await api.qbdStatus(co, 10);
+    expect(stepped.running?.progress).toEqual({ entity: 'Account', phase: 'Listing', done: 0, total: 56 });
+    // …so a watcher asks again until the job is gone.
+    let done = stepped;
+    let polls = 0;
+    while (done.running) {
+      done = await api.qbdStatus(co, 10);
+      polls += 1;
+    }
+    expect(polls).toBeGreaterThan(1);
     expect(done.last_sync?.full).toBe(true);
+    // The events are the server's: `import`, the job kind as the id, started → progress… → finished.
+    await settled();
+    expect(events).toEqual(['import:sync:started', ...Array<string>(6).fill('import:sync:progress'), 'import:sync:finished']);
+    events.length = 0;
+    // `?wait=` on the parity route holds until the job is done.
     expect((await api.qbdParity(co)).report).toBeNull();
     const started = await api.qbdParityRun(co);
     expect(started.running?.kind).toBe('parity');
     expect((await api.qbdParity(co)).running).toBe(true);
-    const parity = (await api.qbdParity(co, 10)).report;
+    const parityStatus = await api.qbdParity(co, 10);
+    expect(parityStatus.running).toBe(false);
+    const parity = parityStatus.report;
     expect(parity?.summary.accounts_off).toBe(2);
     expect(parity?.accounts.filter((a) => a.difference !== 0).length).toBe(2);
     expect(parity?.summary.total_abs_difference).toBe(12_501);
     expect((await api.qbdStatus(co)).last_parity?.generated_at).toBe(parity!.generated_at);
+    await settled();
+    expect(events).toEqual(['import:parity:started', 'import:parity:finished']);
+    sub.close();
     // The Web Connector password: generated and shown once, or chosen (nothing back); at least 8 characters.
     const pw = await api.qbwcPassword(co, null);
     expect(pw?.length).toBe(12);

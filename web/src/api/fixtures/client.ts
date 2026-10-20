@@ -22,11 +22,11 @@ import type {
   MergeRequest,
   NameBalance,
   NewEnrolment,
-  QbdParityOptions,
-  QbdSyncOptions,
+  ParityBody,
   RestoreRequest,
   Role,
   ServerSettings,
+  SyncBody,
   TunnelUpdate,
   UserUpdate,
   CatalogEntry,
@@ -1538,16 +1538,16 @@ export class FixtureApiClient implements ApiClient {
   }
   qbdStatus(co: CompanyId, wait?: number) {
     this.checkCompany(co);
-    // Long-poll like the server: answer when the running job finishes, or when `wait` runs out.
-    return this.admin.qbdWaitIdle(wait ?? 0).then(() => this.delay(() => this.admin.qbdStatus()));
+    // Long-poll like the server: answer when the running job reports progress or finishes, or when `wait` runs out.
+    return this.admin.qbdWaitChange(wait ?? 0).then(() => this.delay(() => this.admin.qbdStatus()));
   }
   putQbdSettings(co: CompanyId, settings: ImportSettings, bridgeKey?: string | null) {
     return this.adm(() => this.admin.putQbdSettings(settings, bridgeKey), co);
   }
-  qbdSync(co: CompanyId, opts?: QbdSyncOptions) {
+  qbdSync(co: CompanyId, opts?: Partial<SyncBody>) {
     return this.adm(() => this.admin.qbdSync(opts), co);
   }
-  qbdParityRun(co: CompanyId, opts?: QbdParityOptions) {
+  qbdParityRun(co: CompanyId, opts?: Partial<ParityBody>) {
     return this.adm(() => this.admin.qbdParityRun(opts), co);
   }
   qbdParity(co: CompanyId, wait?: number) {

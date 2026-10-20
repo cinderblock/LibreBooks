@@ -5,6 +5,13 @@
 // One `ImportStatus` document carries all of it (`GET /import/qbd`); the
 // settings are lb-qbd's generated `ImportSettings`. Routes: `/import/qbd`,
 // `…/sync`, `…/status`, `…/parity`, `…/qbwc.qwc`, `…/qbwc/password`.
+//
+// Event-driven: a job's `import` change events (`id` sync | parity; `started`,
+// `progress`, `finished`, `failed`) refetch the status through
+// `invalidateForEvent`, and a finished or failed sync invalidates everything
+// derived from transactions. While a job runs, `useQbdStatus` long-polls
+// `…/status?wait=` and the server answers on every progress step, so the bar
+// follows the job; the events only wake the window when nothing is in flight.
 
 import { Alert, Badge, Button, Card, Code, CopyButton, Group, List, Modal, NumberInput, PasswordInput, Progress, SegmentedControl, Select, SimpleGrid, Stack, Switch, Table, Tabs, Text, TextInput, Title, Tooltip } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
@@ -12,11 +19,11 @@ import { IconCheck, IconCopy, IconDownload, IconRefresh, IconScale } from '@tabl
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
 import { saveDownload } from '~/api/client';
-import { useApi, useCompanyId } from '~/api/context';
+import { useApi, useCompanyId, useRecordChanges } from '~/api/context';
 import { describeError, isApiError } from '~/api/errors';
 import { useQbdParity, useQbdStatus } from '~/api/hooks';
 import { qk } from '~/api/keys';
-import type { FileMode, ImportSettings, ImportStatus, QbdTransport, RunningJob, SyncReport } from '~/api/types';
+import type { ChangeEvent, FileMode, ImportSettings, ImportStatus, JobKind, QbdTransport, RunningJob, SyncReport } from '~/api/types';
 import { formatDateTime } from '~/lib/dates';
 import { formatMoney } from '~/lib/money';
 import { useIsMobile } from '~/lib/useMobile';
@@ -86,11 +93,25 @@ export function ImportWindow() {
   );
 }
 
+const JOB_LABEL: Record<JobKind, string> = { sync: 'QuickBooks sync', parity: 'Parity check' };
+
+/** A word when a job ends while the window is open; the status (refetched on the same event) carries the details. */
+function useJobNotices() {
+  const notice = (e: ChangeEvent) => {
+    const job = JOB_LABEL[e.id as JobKind] ?? 'QuickBooks job';
+    if (e.action === 'finished') notifications.show({ message: `${job} finished.`, color: 'teal' });
+    else if (e.action === 'failed') notifications.show({ message: `${job} failed; see the window for why.`, color: 'red' });
+  };
+  useRecordChanges('import', 'sync', notice);
+  useRecordChanges('import', 'parity', notice);
+}
+
 function Import() {
   const win = useWindow();
   const mobile = useIsMobile();
   const [tab, setTab] = useState<Tab>((win.desc.params.tab as Tab | undefined) ?? 'sync');
   const status = useQbdStatus();
+  useJobNotices();
   return (
     <Stack p={mobile ? 'sm' : 'md'} gap="md" className={classes.page} data-testid="qbd-import">
       <div>

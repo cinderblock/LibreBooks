@@ -128,9 +128,16 @@ export function invalidateForEvent(qc: QueryClient, co: CompanyId, e: ChangeEven
     return;
   }
   if (e.kind === 'import') {
-    void qc.invalidateQueries({ queryKey: qk.qbdAll(co) });
-    // A finished sync changed the books (progress ticks don't).
-    if (e.action === 'finished') invalidateTxnDerived(qc, co);
+    // A job (`id` sync | parity) `started`, reported `progress`, `finished` or
+    // `failed`. While a job runs the status query long-polls and the server
+    // answers it on every progress step, so an event joins the request in
+    // flight rather than cancelling it (`cancelRefetch: false`); when nothing
+    // is in flight (a job started elsewhere, or by the Web Connector's
+    // schedule) it refetches at once.
+    void qc.invalidateQueries({ queryKey: qk.qbdAll(co) }, { cancelRefetch: false });
+    // A sync that finished, or failed part-way, changed the books (progress
+    // ticks don't; a parity check only reads).
+    if (e.id === 'sync' && (e.action === 'finished' || e.action === 'failed')) invalidateTxnDerived(qc, co);
     return;
   }
   if (e.kind === 'user' || e.kind === 'enrolment') {
