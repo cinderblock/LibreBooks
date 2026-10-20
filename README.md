@@ -4,10 +4,11 @@ Open-source double-entry accounting, built to be a complete drop-in replacement
 for QuickBooks Desktop: the same books, forms, registers, lists, reports and
 keyboard-first data entry, with no subscription. MIT licensed.
 
-> **Status: early, under heavy construction.** The accounting core and the
-> company file are working and tested; the server, web UI, desktop app,
-> QuickBooks import and everything else in [the plan](plans/librebooks.md) are
-> being built now. Not ready for real books yet.
+> **Status: early, under heavy construction.** The accounting core, company
+> file, server, passkey sign-in, reports, bank feeds, backups, the read-only
+> QuickBooks Desktop import and the web UI's foundation are working and tested;
+> most forms, the desktop app and the rest of [the plan](plans/librebooks.md)
+> are being built now. Not ready for real books yet.
 
 ## What it is meant to be
 
@@ -67,8 +68,17 @@ keyboard-first data entry, with no subscription. MIT licensed.
 Needs Rust (stable, see `rust-toolchain.toml`) and [Bun](https://bun.sh).
 
 ```sh
-cargo test                 # the Rust workspace
+cargo test                       # the Rust workspace
+bun install && bun run --cwd web check  # the web UI: typecheck and unit tests
+bun run --cwd web dev            # the web UI on http://localhost:5740/?fixtures=1
+                                 # (fixture mode: a synthetic company, no server)
+bun run --cwd web build          # web/dist, which the server embeds
+cargo run -p librebooks -- serve # the server on http://127.0.0.1:8740
 ```
+
+The first `serve` prints a one-hour link to create the first admin with a
+passkey. `librebooks --help` lists the rest: companies, enrolment links, the
+QuickBooks Desktop import (`import qbd`, read-only) and its parity check.
 
 ## Money
 
