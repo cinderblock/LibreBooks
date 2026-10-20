@@ -1,0 +1,5 @@
+Date;Payee;Memo;Money Out;Money In;Balance
+13/10/2026;Café de Flore;Lunch;12,50;;987,50
+14/10/2026;Salary;October;;2.000,00;2.987,50
+02/10/2026;Rent;;1.000,00;;1.000,00
+Total;;;1.012,50;2.000,00;

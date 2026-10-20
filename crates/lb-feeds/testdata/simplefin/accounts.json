@@ -1,0 +1,72 @@
+{
+  "errors": ["Connection to Example Credit Union may need attention"],
+  "accounts": [
+    {
+      "org": {
+        "domain": "examplebank.test",
+        "sfin-url": "https://bridge.example.test/simplefin",
+        "name": "Example Bank"
+      },
+      "id": "ACT-1111-2222",
+      "name": "Everyday Checking",
+      "currency": "USD",
+      "balance": "5198.51",
+      "available-balance": "5098.51",
+      "balance-date": 1792000000,
+      "transactions": [
+        {
+          "id": "TRN-001",
+          "posted": 1790856000,
+          "amount": "2500.00",
+          "description": "ACME PAYROLL",
+          "transacted_at": 1790856000
+        },
+        {
+          "id": "TRN-002",
+          "posted": 1791028800,
+          "amount": "-1200.00",
+          "description": "CHECK 1041",
+          "payee": "Landlord LLC",
+          "memo": "October rent"
+        },
+        {
+          "id": "TRN-003",
+          "posted": 0,
+          "amount": "-4.50",
+          "description": "PENDING CAFE",
+          "pending": true
+        },
+        {
+          "id": "TRN-004",
+          "posted": 1791374400,
+          "amount": "-89.99",
+          "description": "COMCAST CABLE COMM",
+          "extra": { "category": "Utilities" }
+        }
+      ],
+      "holdings": []
+    },
+    {
+      "org": { "domain": "examplecard.test", "name": "Example Card" },
+      "id": "ACT-3333-4444",
+      "name": "Rewards Visa",
+      "currency": "USD",
+      "balance": "-772.18",
+      "balance-date": 1792000000,
+      "transactions": [
+        {
+          "id": "CC-1",
+          "posted": 1790424000,
+          "amount": "-42.17",
+          "description": "AMZN Mktp US*2K4AB1CD2"
+        },
+        {
+          "id": "CC-2",
+          "posted": 1790500000,
+          "amount": "bad",
+          "description": "BROKEN"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,44 @@
+﻿ OFXHEADER : 100
+DATA:OFXSGML
+VERSION:102
+
+<ofx>
+	<signonmsgsrsv1><sonrs><status><code>0<severity>INFO</status></sonrs></signonmsgsrsv1>
+
+	<bankmsgsrsv1>
+	<stmttrnrs>
+	<stmtrs>
+		<curdef>USD
+		<bankacctfrom>
+			<bankid>  666666666
+			<acctid>  0000 4321
+			<accttype>checking
+		</bankacctfrom>
+		<banktranlist>
+			<stmttrn>
+				<trntype>check
+				<dtposted>20261008
+				<trnamt>  -150.00
+				<fitid>  X1
+				<refnum>0001042
+				<memo>CHECK #1042
+			</stmttrn>
+			<stmttrn>
+				<trntype>dep
+				<dtposted>2026-10-09
+				<trnamt>$ 1,500.00
+				<fitid>X2
+				<name>MOBILE DEPOSIT
+			</stmttrn>
+			<stmttrn>
+				<trntype>pos
+				<dtposted>20261009
+				<trnamt>-3,45
+				<fitid>X3
+				<name>KIOSK
+			</stmttrn>
+		</banktranlist>
+	</stmtrs>
+	</stmttrnrs>
+	</bankmsgsrsv1>
+</ofx>

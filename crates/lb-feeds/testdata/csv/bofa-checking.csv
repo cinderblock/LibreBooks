@@ -1,0 +1,12 @@
+Description,,Summary Amt.
+Beginning balance as of 10/01/2026,,"4,000.00"
+Total credits,,"2,500.00"
+Total debits,,"-1,301.49"
+Ending balance as of 10/14/2026,,"5,198.51"
+
+Date,Description,Amount,Running Bal.
+10/01/2026,Beginning balance as of 10/01/2026,,"4,000.00"
+10/01/2026,"ACME PAYROLL DES:PAYROLL ID:XXXXX12 INDN:TEST CO ID:9999999999 PPD","2,500.00","6,500.00"
+10/03/2026,"Check 1041","-1,200.00","5,300.00"
+10/07/2026,"COMCAST CALIFORNIA DES:CABLE ID:XXXXX34 INDN:TEST CO ID:9999999998 PPD","-89.99","5,210.01"
+10/14/2026,"MONTHLY MAINTENANCE FEE","-11.50","5,198.51"
