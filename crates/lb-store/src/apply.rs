@@ -144,7 +144,7 @@ pub fn apply_credits_to(w: &mut Writer<'_>, charge: TxnId, cap: Money) -> Result
         id: charge,
         txn_type: t.txn_type,
         date: t.date,
-        open: owed,
+        balance: owed,
     };
     let plan = allocate(std::slice::from_ref(&target), &credits);
     if plan.is_empty() {
@@ -241,36 +241,39 @@ fn allocate(charges: &[Open], credits: &[Open]) -> Vec<(Open, Open, Money)> {
 }
 
 /// Names (customers, or vendors) with both open credits and open charges: the
-/// candidates for applying.
+/// candidates for applying. A job's invoices and its customer's credit memo
+/// belong to the same name, so the comparison is by top-level name.
 pub fn names_with_unapplied_credits(c: &Connection, receivable: bool) -> Result<Vec<EntityId>> {
     let (charges, credits): (&[TxnType], &[TxnType]) = if receivable {
         (&AR_CHARGES, &AR_CREDITS)
     } else {
         (&AP_CHARGES, &AP_CREDITS)
     };
-    let list = |ts: &[TxnType]| {
-        ts.iter()
+    let roots_with = |types: &[TxnType]| -> Result<Vec<EntityId>> {
+        let list = types
+            .iter()
             .map(|t| format!("'{}'", t.as_str()))
             .collect::<Vec<_>>()
-            .join(",")
-    };
-    let sql = format!(
-        "SELECT DISTINCT e.id FROM txn t JOIN entity e ON e.id = t.entity_id
-         WHERE t.txn_type IN ({}) AND t.open_balance > 0 AND t.is_void = 0
-           AND EXISTS (SELECT 1 FROM txn u WHERE u.entity_id = t.entity_id AND u.txn_type IN ({})
-                         AND u.open_balance > 0 AND u.is_void = 0)",
-        list(credits),
-        list(charges)
-    );
-    let mut stmt = c.prepare(&sql)?;
-    let rows = stmt.query_map(params![], |r| r.get::<_, String>(0))?;
-    let mut roots = Vec::new();
-    for row in rows {
-        let id: EntityId = codec::parse_id(&row?)?;
-        let root = entities::root_of(c, id)?;
-        if !roots.contains(&root) {
-            roots.push(root);
+            .join(",");
+        let mut stmt = c.prepare(&format!(
+            "SELECT DISTINCT entity_id FROM txn
+             WHERE entity_id IS NOT NULL AND txn_type IN ({list}) AND open_balance > 0 AND is_void = 0"
+        ))?;
+        let rows = stmt.query_map(params![], |r| r.get::<_, String>(0))?;
+        let mut roots = Vec::new();
+        for row in rows {
+            let id: EntityId = codec::parse_id(&row?)?;
+            let root = entities::root_of(c, id)?;
+            if !roots.contains(&root) {
+                roots.push(root);
+            }
         }
-    }
-    Ok(roots)
+        Ok(roots)
+    };
+    let with_credits = roots_with(credits)?;
+    let with_charges = roots_with(charges)?;
+    Ok(with_credits
+        .into_iter()
+        .filter(|r| with_charges.contains(r))
+        .collect())
 }
