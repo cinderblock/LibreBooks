@@ -190,8 +190,15 @@ Phases are ordered; each ends usable. **Current step is marked ▶.**
   separate "downloaded" mark (`b084b6f`); auto-add stays strict; importing must
   not require the QB Bridge → merged QuickBooks transports (Web Connector SOAP
   endpoint, SDK over COM, import routes/settings/CLI; 91 lb-qbd tests). Whole
-  workspace: 623 tests; CI green at `5a2aa32`. ▶ Running: web phase B agent
-  (resumed 2026-10-20 09:20 PT after a session-limit cut-off). Next with the user: point
+  workspace: 623 tests; CI green at `5a2aa32`. **2026-10-20 server hardening**
+  (main tree, each CI-green): `/qbwc` sign-in rate limit (`8ca2038`), `.lbk`
+  import route `POST /companies/import` (`dcdfc5b`), self-update smoke test
+  (`13d39ad`), retention scope for renamed companies (`ab9867c`), Access
+  middleware success-path test (`0b651a8`). ▶ Running: web phase B agent
+  (resumed 09:20 PT after a session-limit cut-off; worktree
+  `agent-af93b28647e2ebef7`) and a Windows-service/systemd agent (worktree
+  `agent-a335c5b9cf55f2181`: `librebooks service install|uninstall|start|stop|
+  status|run`, SCM entry point, systemd unit generation). Merge both when done. Next with the user: point
   QuickBooks' Web Connector on cad-3 at this server over HTTPS (steps in
   `plans/qbd-import.md`), run a sync, and see whether the 14 bridge gaps close.
 - Phase 1 — Ledger core
