@@ -50,6 +50,7 @@ pub use model::{
     PasskeyId, PasskeyInfo, Principal, Role, SessionId, SessionInfo, SessionKind, User, UserUpdate,
 };
 pub use perm::Permission;
+pub use ratelimit::RateLimiter;
 
 pub use lb_core::{CompanyId, UserId};
 

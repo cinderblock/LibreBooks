@@ -19,7 +19,7 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 
 use super::blocking;
-use crate::auth::{Principal, Role};
+use crate::auth::{Client, Principal, Role};
 use crate::error::{ApiError, ApiResult};
 use crate::import::{self, ImportStatus, ParityBody, SyncBody};
 use crate::state::AppState;
@@ -311,7 +311,7 @@ fn soap_response(xml: String) -> Response {
 
 /// Every Web Connector method. Each answer is a SOAP envelope; a body that
 /// isn't one gets a SOAP fault.
-async fn qbwc_post(State(s): State<AppState>, body: String) -> Response {
+async fn qbwc_post(State(s): State<AppState>, Client(client): Client, body: String) -> Response {
     let call = match soap::parse_call(&body) {
         Ok(c) => c,
         Err(e) => {
@@ -333,7 +333,7 @@ async fn qbwc_post(State(s): State<AppState>, body: String) -> Response {
             user_name,
             password,
         } => {
-            let (ticket, outcome) = import::authenticate(&s, &user_name, &password).await;
+            let (ticket, outcome) = import::authenticate(&s, &client, &user_name, &password).await;
             soap::authenticate_response(&ticket, &outcome)
         }
         Call::SendRequestXml {

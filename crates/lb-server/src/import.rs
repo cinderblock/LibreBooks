@@ -190,6 +190,10 @@ pub struct ImportSlots {
     session: Mutex<SessionConfig>,
     /// Rows per qbXML iterator page (smaller in tests, to exercise paging).
     page_size: Mutex<Option<usize>>,
+    /// Failed Web Connector sign-ins per client address: the same brake as
+    /// lb-auth's (20 in 10 minutes), since `/qbwc` is reachable through the
+    /// tunnel without a session.
+    qbwc_limiter: lb_auth::RateLimiter,
 }
 
 impl std::fmt::Debug for ImportSlots {
@@ -214,6 +218,11 @@ impl ImportSlots {
     /// Rows per qbXML page (tests use a few to exercise iterators).
     pub fn set_page_size(&self, rows: usize) {
         *lock(&self.page_size) = Some(rows.max(1));
+    }
+
+    /// Forget Web Connector sign-in failures that have aged out (housekeeping).
+    pub fn prune(&self) {
+        self.qbwc_limiter.prune(Timestamp::now());
     }
 }
 
@@ -742,8 +751,30 @@ pub fn new_password() -> String {
 
 /// `authenticate`: find the company by user name, check the password in
 /// constant time, and say whether there's work. A ticket is always returned
-/// (the Web Connector expects one even for "none" and "nvu").
+/// (the Web Connector expects one even for "none" and "nvu"). A client that
+/// has failed too often lately is told "nvu" without a look at the password.
 pub async fn authenticate(
+    state: &AppState,
+    client: &lb_auth::ClientInfo,
+    user_name: &str,
+    password: &str,
+) -> (String, AuthOutcome) {
+    let key = client
+        .ip
+        .map_or_else(|| "?".to_owned(), |ip| ip.to_string());
+    let limiter = &state.imports.qbwc_limiter;
+    if let Err(e) = limiter.check(&key, Timestamp::now()) {
+        tracing::warn!(client = key, error = %e, "Web Connector sign-in refused: too many failures");
+        return (ticket(), AuthOutcome::Invalid);
+    }
+    let (ticket, outcome) = authenticate_unlimited(state, user_name, password).await;
+    if matches!(outcome, AuthOutcome::Invalid) {
+        limiter.fail(&key, Timestamp::now());
+    }
+    (ticket, outcome)
+}
+
+async fn authenticate_unlimited(
     state: &AppState,
     user_name: &str,
     password: &str,

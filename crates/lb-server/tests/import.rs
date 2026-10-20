@@ -749,3 +749,42 @@ async fn import_routes_need_an_admin_on_the_company() {
     let (st, _) = s.call("GET", &base, None).await;
     assert_eq!(st, StatusCode::UNAUTHORIZED);
 }
+
+/// Twenty wrong passwords in ten minutes and the client is told "nvu" even
+/// with the right one: `/qbwc` is reachable through the tunnel without a
+/// session, so it gets the same brake as the passkey endpoints.
+#[tokio::test]
+async fn web_connector_sign_in_failures_are_rate_limited() {
+    let s = server();
+    let c = s.company("Larkspur Labs").await;
+    let base = format!("/api/v1/c/{c}/import/qbd");
+    let (st, v) = s
+        .call(
+            "PUT",
+            &base,
+            Some(json!({ "transport": "qbwc", "qbwc": { "user_name": "larkspur" } })),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "{v}");
+    let (_, v) = s.call("POST", &format!("{base}/qbwc/password"), None).await;
+    let password = v["password"].as_str().unwrap().to_owned();
+    let wc = WebConnector {
+        server: &s,
+        quickbooks: FakeQuickBooks::new(larkspur()),
+        user: "larkspur".into(),
+        password,
+    };
+    assert_eq!(wc.authenticate(&wc.password).await.1, "none");
+    for _ in 0..lb_auth::RateLimit::default().max_failures {
+        assert_eq!(wc.authenticate("wrong").await.1, "nvu");
+    }
+    // The tests' requests carry no peer address, so they are all one client.
+    assert_eq!(
+        wc.authenticate(&wc.password).await.1,
+        "nvu",
+        "blocked after too many failures, right password or not"
+    );
+    // Housekeeping's prune changes nothing while the failures are fresh.
+    s.state.imports.prune();
+    assert_eq!(wc.authenticate(&wc.password).await.1, "nvu");
+}

@@ -49,4 +49,5 @@ fn run_once(state: &AppState) {
     {
         tracing::warn!(error = %e, "couldn't prune sign-in records");
     }
+    state.imports.prune();
 }

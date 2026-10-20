@@ -5,6 +5,9 @@
 //! client (keyed by IP) is refused until its oldest failure ages out. Only
 //! failures count, so a busy office behind one NAT address isn't throttled
 //! for signing in successfully.
+//!
+//! Public so `lb-server` can brake other sign-ins the same way (the QuickBooks
+//! Web Connector's user name + password on `/qbwc`).
 
 use std::collections::{HashMap, VecDeque};
 use std::sync::Mutex;
@@ -16,13 +19,28 @@ use crate::clock::{self, dur_ms, ms};
 use crate::config::RateLimit;
 use crate::error::{AuthError, Result};
 
-pub(crate) struct RateLimiter {
+pub struct RateLimiter {
     limit: RateLimit,
     failures: Mutex<HashMap<String, VecDeque<i64>>>,
 }
 
 /// More keys than this and every insert sweeps out the idle ones.
 const SWEEP_AT: usize = 10_000;
+
+impl std::fmt::Debug for RateLimiter {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RateLimiter")
+            .field("limit", &self.limit)
+            .field("clients", &self.lock().len())
+            .finish_non_exhaustive()
+    }
+}
+
+impl Default for RateLimiter {
+    fn default() -> Self {
+        RateLimiter::new(RateLimit::default())
+    }
+}
 
 impl RateLimiter {
     pub fn new(limit: RateLimit) -> RateLimiter {
@@ -38,7 +56,8 @@ impl RateLimiter {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
-    /// Refuse if `key` has used up its failures.
+    /// Refuse if `key` has used up its failures (`AuthError::RateLimited`
+    /// with how long to wait).
     pub fn check(&self, key: &str, now: Timestamp) -> Result<()> {
         let now = ms(now);
         let window = dur_ms(self.limit.window);
@@ -77,6 +96,7 @@ impl RateLimiter {
         }
     }
 
+    /// Drop clients whose failures have all aged out.
     pub fn prune(&self, now: Timestamp) {
         let cutoff = clock::ms(now) - dur_ms(self.limit.window);
         self.lock()

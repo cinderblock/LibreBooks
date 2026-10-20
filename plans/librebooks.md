@@ -326,10 +326,11 @@ Phases are ordered; each ends usable. **Current step is marked ▶.**
       unexercised until the first tag.
 - [x] Phase 1 core: lb-core posting rules for all 25 types (18 rule tests),
       lb-store company file (15 integration tests); reconciliation, opening
-      balances, attachments (`ac5475c`). Inventory re-costing on back-dated
-      purchases, JE lines in A/R-A/P as open items: still to do.
+      balances, attachments (`ac5475c`); inventory re-costing on back-dated purchases
+      (`inventory.rs`); JEs, checks, card charges and deposits in A/R-A/P as
+      open items (`9f68491`, `ff88706`).
 - [x] Phase 2: server API (`84edc4c`), auth integration (`49063f0`), reports API
-      (`c33ee6c`), server ops (`ef1d3e4`, `5427aba`). QBD import routes still to do.
+      (`c33ee6c`), server ops (`ef1d3e4`, `5427aba`), QBD import routes (`1f8fa94`).
 - [x] Phase 3: QBD read-only import + parity (`a0a7559`, `b580484`); Web
       Connector and SDK transports + import routes merged. Full import
       of the real company done; after the open-item fixes (`9f68491`, `55e9c3a`,

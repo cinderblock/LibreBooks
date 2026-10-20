@@ -466,7 +466,9 @@ describes the protocol:
   with a bridge run of the same options.
 - The SDK transport has no automated test of the COM calls (nothing to call
   here); the request/response path is tested through the shared source.
-- No rate limit on `/qbwc` sign-in attempts beyond the random password.
+- `/qbwc` sign-in failures are rate limited per client address with lb-auth's
+  limiter (20 in 10 minutes, then "nvu" regardless of the password); the key
+  is the peer address, or the forwarded one behind the tunnel.
 
 ## Progress log
 
