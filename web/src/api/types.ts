@@ -16,11 +16,7 @@ import type { DeviceKeyInfo } from './generated/DeviceKeyInfo';
 import type { EnrolmentPurpose } from './generated/EnrolmentPurpose';
 import type { FeedFilter } from './generated/FeedFilter';
 import type { FileKind } from './generated/FileKind';
-import type { ImportSettings } from './generated/ImportSettings';
-import type { ParityReport } from './generated/ParityReport';
 import type { PasskeyInfo } from './generated/PasskeyInfo';
-import type { QbdEntity } from './generated/QbdEntity';
-import type { QbdTransport } from './generated/QbdTransport';
 import type { Statement } from './generated/Statement';
 import type { StatementAccount } from './generated/StatementAccount';
 import type { StatementCharge } from './generated/StatementCharge';
@@ -42,8 +38,6 @@ import type { Role } from './generated/Role';
 import type { SalesRep } from './generated/SalesRep';
 import type { SalesTaxCode } from './generated/SalesTaxCode';
 import type { SessionKind } from './generated/SessionKind';
-import type { SyncProgress } from './generated/SyncProgress';
-import type { SyncReport } from './generated/SyncReport';
 import type { Terms } from './generated/Terms';
 import type { Txn } from './generated/Txn';
 import type { TypeEntry } from './generated/TypeEntry';
@@ -198,6 +192,16 @@ export type { BridgeSettings } from './generated/BridgeSettings';
 export type { QbwcSettings } from './generated/QbwcSettings';
 export type { SdkSettings } from './generated/SdkSettings';
 export type { FileMode } from './generated/FileMode';
+// The server's envelopes around them (lb-server): the status document
+// (`GET /import/qbd` and `…/status`), a running job, and the request bodies.
+// Both bodies are `#[serde(default)]` on the server, so the client sends a
+// `Partial<SyncBody>` / `Partial<ParityBody>`.
+export type { ImportStatus } from './generated/ImportStatus';
+export type { RunningJob } from './generated/RunningJob';
+export type { JobKind } from './generated/JobKind';
+export type { SyncBody } from './generated/SyncBody';
+export type { ParityBody } from './generated/ParityBody';
+export type { ParityStatus } from './generated/ParityStatus';
 
 // ---------------------------------------------------------------------------
 // Server-level
@@ -663,66 +667,4 @@ export interface SimpleFinClaim {
 export interface AmazonPreview {
   matches: AmazonMatch[];
   orders: AmazonOrder[];
-}
-
-// ---------------------------------------------------------------------------
-// QuickBooks import (`/import/qbd/*`, admin). `ImportSettings` and its parts,
-// the reports and `SyncProgress` are lb-qbd's generated types. The server's
-// envelopes around them (`ImportStatus`, `RunningJob`, the request bodies) are
-// lb-server structs with no ts-rs export, so they live here (plans/api.md).
-
-export type QbdJobKind = 'sync' | 'parity';
-
-/** A job in progress, as `ImportStatus.running` shows it. */
-export interface RunningJob {
-  kind: QbdJobKind;
-  transport: QbdTransport;
-  started_at: string;
-  progress: SyncProgress | null;
-  /** 1–99, what the Web Connector is told. */
-  percent: number;
-  /** A Web Connector job that is waiting for the Web Connector to poll. */
-  waiting_for_web_connector: boolean;
-  /** A Web Connector session is open right now. */
-  web_connector_connected: boolean;
-}
-
-/** `GET /import/qbd` and `…/status`: the settings, what is set, what runs, the last reports. */
-export interface ImportStatus {
-  settings: ImportSettings;
-  /** The bridge key and Web Connector password are set (never their values). */
-  bridge_key_set: boolean;
-  qbwc_password_set: boolean;
-  sdk_available: boolean;
-  running: RunningJob | null;
-  last_sync: SyncReport | null;
-  last_parity: ParityReport | null;
-  /** Why the last job failed outright (a report carries its own issues). */
-  last_error: string | null;
-}
-
-/** `POST /import/qbd/sync` body; everything optional. */
-export interface QbdSyncOptions {
-  full?: boolean;
-  sweep?: boolean;
-  reimport?: boolean;
-  txn_limit?: number | null;
-  txn_from?: string | null;
-  txn_to?: string | null;
-  apply_credits?: boolean | null;
-  entities?: QbdEntity[] | null;
-}
-
-/** `POST /import/qbd/parity` body. */
-export interface QbdParityOptions {
-  as_of?: string | null;
-  trial_balance?: boolean | null;
-}
-
-/** `GET /import/qbd/parity`: the last report, and whether a parity job is running. */
-export interface ParityStatus {
-  running: boolean;
-  job: RunningJob | null;
-  report: ParityReport | null;
-  error: string | null;
 }

@@ -18,10 +18,9 @@ import type {
   MintedEnrolmentLink,
   NameBalance,
   NewEnrolment,
+  ParityBody,
   ParityStatus,
   PasskeyInfo,
-  QbdParityOptions,
-  QbdSyncOptions,
   RestoreRequest,
   Restored,
   Role,
@@ -30,6 +29,7 @@ import type {
   ServerSettings,
   ServerView,
   SessionInfo,
+  SyncBody,
   TunnelUpdate,
   TunnelView,
   UpdateInstalled,
@@ -285,8 +285,8 @@ export interface ApiClient {
    */
   putQbdSettings(co: CompanyId, settings: ImportSettings, bridgeKey?: string | null): Promise<ImportStatus>;
   /** 202 with the status; 409 `running` while a job is going. */
-  qbdSync(co: CompanyId, opts?: QbdSyncOptions): Promise<ImportStatus>;
-  qbdParityRun(co: CompanyId, opts?: QbdParityOptions): Promise<ImportStatus>;
+  qbdSync(co: CompanyId, opts?: Partial<SyncBody>): Promise<ImportStatus>;
+  qbdParityRun(co: CompanyId, opts?: Partial<ParityBody>): Promise<ImportStatus>;
   /** The last parity report and whether a parity job runs; `wait` long-polls like `qbdStatus`. */
   qbdParity(co: CompanyId, wait?: number): Promise<ParityStatus>;
   qbwcFile(co: CompanyId): Promise<FileDownload>;

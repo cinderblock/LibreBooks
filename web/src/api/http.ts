@@ -27,10 +27,9 @@ import type {
   MintedEnrolmentLink,
   NameBalance,
   NewEnrolment,
+  ParityBody,
   ParityStatus,
   PasskeyInfo,
-  QbdParityOptions,
-  QbdSyncOptions,
   RestoreRequest,
   Restored,
   Role,
@@ -39,6 +38,7 @@ import type {
   ServerSettings,
   ServerView,
   SessionInfo,
+  SyncBody,
   TunnelUpdate,
   TunnelView,
   UpdateInstalled,
@@ -652,10 +652,10 @@ export class HttpApiClient implements ApiClient {
     // The key rides beside the flattened settings and is saved as a secret; it never comes back.
     return this.request<ImportStatus>('PUT', this.co(co, '/import/qbd'), { body: bridgeKey ? { ...settings, bridge_key: bridgeKey } : settings });
   }
-  qbdSync(co: CompanyId, opts: QbdSyncOptions = {}) {
+  qbdSync(co: CompanyId, opts: Partial<SyncBody> = {}) {
     return this.request<ImportStatus>('POST', this.co(co, '/import/qbd/sync'), { body: opts });
   }
-  qbdParityRun(co: CompanyId, opts: QbdParityOptions = {}) {
+  qbdParityRun(co: CompanyId, opts: Partial<ParityBody> = {}) {
     return this.request<ImportStatus>('POST', this.co(co, '/import/qbd/parity'), { body: opts });
   }
   qbdParity(co: CompanyId, wait?: number) {

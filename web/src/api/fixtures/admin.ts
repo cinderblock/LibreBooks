@@ -23,15 +23,14 @@ import type {
   EnrolmentInfo,
   ImportSettings,
   ImportStatus,
+  JobKind,
   MintedEnrolmentLink,
   NewEnrolment,
+  ParityBody,
   ParityReport,
   ParityRow,
   ParityStatus,
   PasskeyInfo,
-  QbdJobKind,
-  QbdParityOptions,
-  QbdSyncOptions,
   RestoreRequest,
   RunningJob,
   Restored,
@@ -41,6 +40,7 @@ import type {
   ServerSettings,
   ServerView,
   SessionInfo,
+  SyncBody,
   SyncProgress,
   SyncReport,
   TunnelUpdate,
@@ -98,8 +98,8 @@ export class FixtureAdmin {
   private lastSync: SyncReport | null;
   private parity: ParityReport | null = null;
   private qbdTimers: ReturnType<typeof setTimeout>[] = [];
-  /** Who waits for the running job to finish (`?wait=` long-polls). */
-  private qbdIdleWaiters: Array<() => void> = [];
+  /** Long-poll waiters: the status ones wake on a progress step too, the parity ones only when the job ends. */
+  private qbdWaiters: Array<{ onProgress: boolean; wake(): void }> = [];
 
   constructor(private host: AdminHost) {
     this.seedPeople();
@@ -629,24 +629,45 @@ export class FixtureAdmin {
     };
   }
 
-  /** `?wait=N`: resolves when no job runs, or after `wait` seconds (at most 120, as the server caps it). */
+  /**
+   * `?wait=N` on `…/status`, as the server's `wait_for_change`: resolves on the
+   * running job's next progress step or its end (so a long-polled status
+   * follows the progress bar), or after `wait` seconds (at most 120, as the
+   * server caps it). At once when nothing runs.
+   */
+  qbdWaitChange(wait: number): Promise<void> {
+    return this.qbdWait(wait, true);
+  }
+
+  /** `?wait=N` on `…/parity`, as the server's `wait_for_idle`: resolves when no job runs, or after `wait` seconds. */
   qbdWaitIdle(wait: number): Promise<void> {
+    return this.qbdWait(wait, false);
+  }
+
+  private qbdWait(wait: number, onProgress: boolean): Promise<void> {
     if (!this.qbdJob || wait <= 0) return Promise.resolve();
     return new Promise<void>((resolve) => {
-      const timer = setTimeout(done, Math.min(wait, 120) * 1000);
-      function done() {
-        clearTimeout(timer);
-        resolve();
-      }
-      this.qbdIdleWaiters.push(done);
+      const waiter = {
+        onProgress,
+        wake: () => {
+          clearTimeout(timer);
+          this.qbdWaiters = this.qbdWaiters.filter((w) => w !== waiter);
+          resolve();
+        },
+      };
+      const timer = setTimeout(waiter.wake, Math.min(wait, 120) * 1000);
+      this.qbdWaiters.push(waiter);
     });
+  }
+
+  /** The running job reported progress: the status long-polls answer with it. */
+  private qbdProgressed() {
+    for (const w of [...this.qbdWaiters]) if (w.onProgress) w.wake();
   }
 
   private qbdFinished() {
     this.qbdJob = null;
-    const waiters = this.qbdIdleWaiters;
-    this.qbdIdleWaiters = [];
-    for (const w of waiters) w();
+    for (const w of [...this.qbdWaiters]) w.wake();
   }
 
   /**
@@ -664,13 +685,17 @@ export class FixtureAdmin {
     else if (!next.bridge.key_ref && this.qbd.bridge.key_ref) next.bridge.key_ref = this.qbd.bridge.key_ref;
     const problems = this.qbdProblems(next);
     if (problems.length) throw new ApiError(400, 'invalid', problems.join('; '), { problems });
+    // No change event: the server emits `import` events for jobs only (plans/api.md).
     this.qbd = next;
-    this.host.emit('import', 'qbd', 'updated');
     return this.qbdStatus();
   }
 
-  /** One job per company at a time; the settings must be sound; the SDK needs a Windows build with it. */
-  private startJob(kind: QbdJobKind): RunningJob {
+  /**
+   * One job per company at a time; the settings must be sound; the SDK needs a
+   * Windows build with it. Announces `import` / `started` with the job kind as
+   * the id, as the server does; `progress` and `finished` follow.
+   */
+  private startJob(kind: JobKind): RunningJob {
     if (this.qbdJob) throw new ApiError(409, 'running', `a ${this.qbdJob.kind} job is already running for this company`);
     const problems = this.qbdProblems(this.qbd);
     if (problems.length) throw new ApiError(400, 'invalid', problems.join('; '), { problems });
@@ -684,11 +709,12 @@ export class FixtureAdmin {
       waiting_for_web_connector: this.qbd.transport === 'qbwc',
       web_connector_connected: false,
     };
+    this.host.emit('import', kind, 'started');
     return this.qbdJob;
   }
 
   /** A sync runs for about two seconds, stepping through the phases, then lands a report (202). */
-  qbdSync(opts: QbdSyncOptions = {}): ImportStatus {
+  qbdSync(opts: Partial<SyncBody> = {}): ImportStatus {
     const job = this.startJob('sync');
     const steps: SyncProgress[] = [
       { entity: 'Account', phase: 'Listing', done: 0, total: 56 },
@@ -706,7 +732,8 @@ export class FixtureAdmin {
           job.web_connector_connected = job.transport === 'qbwc';
           job.progress = p;
           job.percent = Math.min(99, Math.round((100 * (i + 1)) / (steps.length + 1)));
-          this.host.emit('import', 'qbd', 'updated');
+          this.qbdProgressed();
+          this.host.emit('import', 'sync', 'progress');
         }, 300 * (i + 1)),
       );
     });
@@ -714,11 +741,10 @@ export class FixtureAdmin {
       setTimeout(() => {
         this.lastSync = this.sampleReport(job.started_at, !!opts.full);
         this.qbdFinished();
-        // `finished` (not `updated`): the books changed, so registers and reports are stale.
-        this.host.emit('import', 'qbd', 'finished');
+        // `finished` (not `progress`): the books changed, so registers and reports are stale.
+        this.host.emit('import', 'sync', 'finished');
       }, 300 * (steps.length + 1)),
     );
-    this.host.emit('import', 'qbd', 'updated');
     return this.qbdStatus();
   }
 
@@ -728,20 +754,19 @@ export class FixtureAdmin {
   }
 
   /** A parity check asks QuickBooks for every balance; here it answers in a moment (202). */
-  qbdParityRun(opts: QbdParityOptions = {}): ImportStatus {
+  qbdParityRun(opts: Partial<ParityBody> = {}): ImportStatus {
     this.startJob('parity');
     this.qbdTimers.push(
       setTimeout(() => {
         this.parity = this.buildParity(opts);
         this.qbdFinished();
-        this.host.emit('import', 'parity', 'updated');
+        this.host.emit('import', 'parity', 'finished');
       }, 400),
     );
-    this.host.emit('import', 'qbd', 'updated');
     return this.qbdStatus();
   }
 
-  private buildParity(opts: QbdParityOptions): ParityReport {
+  private buildParity(opts: Partial<ParityBody>): ParityReport {
     const balances = new Map(this.host.balances().map((b) => [b.account_id, b.debit_positive]));
     const rows: ParityRow[] = this.host
       .accounts()
@@ -770,7 +795,6 @@ export class FixtureAdmin {
     const given = password?.trim() ?? '';
     if (given && given.length < 8) throw new ApiError(400, 'invalid', 'the Web Connector password needs at least 8 characters');
     this.qbwcPasswordSet = true;
-    this.host.emit('import', 'qbd', 'updated');
     if (given) return null;
     return Array.from(crypto.getRandomValues(new Uint8Array(12)), (b) => 'abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789'[b % 54]).join('');
   }

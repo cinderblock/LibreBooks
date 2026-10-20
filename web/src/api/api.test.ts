@@ -1,9 +1,33 @@
 import { describe, expect, test } from 'bun:test';
+import { QueryClient } from '@tanstack/react-query';
 import { blankLine, blankTxn } from './blank';
 import { txnQueryParams } from './client';
 import { ApiError, apiErrorFromBody, errorTargets } from './errors';
 import { type FetchFn, HttpApiClient } from './http';
 import { parseApiJson, stringifyApiJson } from './json';
+import { invalidateForEvent, qk } from './keys';
+
+describe('invalidateForEvent', () => {
+  test('an import event refreshes the import queries; only a sync that ended touches the books', () => {
+    const co = 'co1';
+    const qc = new QueryClient();
+    const keys = { status: qk.qbdStatus(co), parity: qk.qbdParity(co), txns: qk.txns(co), balances: qk.balances(co) };
+    const fresh = () => {
+      for (const k of Object.values(keys)) qc.setQueryData(k, {});
+    };
+    const stale = () => Object.fromEntries(Object.entries(keys).map(([name, k]) => [name, qc.getQueryState(k)?.isInvalidated ?? false]));
+    const after = (id: string, action: string) => {
+      fresh();
+      invalidateForEvent(qc, co, { kind: 'import', id, action });
+      return stale();
+    };
+    expect(after('sync', 'started')).toEqual({ status: true, parity: true, txns: false, balances: false });
+    expect(after('sync', 'progress')).toEqual({ status: true, parity: true, txns: false, balances: false });
+    expect(after('sync', 'finished')).toEqual({ status: true, parity: true, txns: true, balances: true });
+    expect(after('sync', 'failed')).toEqual({ status: true, parity: true, txns: true, balances: true });
+    expect(after('parity', 'finished')).toEqual({ status: true, parity: true, txns: false, balances: false });
+  });
+});
 
 describe('JSON edit_seq handling', () => {
 });
