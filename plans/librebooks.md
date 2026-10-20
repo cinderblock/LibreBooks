@@ -184,13 +184,13 @@ Phases are ordered; each ends usable. **Current step is marked ▶.**
   agent (secret store, settings, backups/update/tunnel/feeds routes and CLI).
   Merged since: lb-qbd (`a0a7559`), web UI, desktop (`5951bd2`), server ops
   (`ef1d3e4`: secret store, settings, backups/update/tunnel/feeds routes).
-  **2026-10-20 ~01:00: the account's weekly usage limit hit (resets Oct 23,
-  3am PT).** The server-ops agent still has its CLI wiring uncommitted in
-  `.claude/worktrees/agent-a16c3059f0635380d` (`crates/librebooks/src/ops.rs`,
-  main.rs, README); the web phase B agent died before starting (worktree
-  `agent-a493abfcafa87a0b2`, nothing done). ▶ Next session: resume both agents
-  (SendMessage to their ids, or relaunch with the same briefs), then the QBD
-  import routes in lb-server (on the merged secret store), then forms.
+  Server-ops CLI merged too (`5427aba`): `librebooks backup|update|tunnel|secret`,
+  and `serve` runs the schedulers, updater, tunnel and housekeeping. Whole
+  workspace: 588 tests pass. **2026-10-20 ~01:00: the account's weekly usage
+  limit hit (resets Oct 23, 3am PT).** The web phase B agent (forms, reconcile
+  UI, admin screens) died before starting; its worktree `agent-a493abfcafa87a0b2`
+  holds nothing. ▶ Next session: relaunch phase B with the same brief, then the
+  QBD import routes in lb-server (on the merged secret store).
 - Phase 1 — Ledger core
   - Domain types, chart of accounts (all QBD account types), names (customers +
     jobs, vendors, employees, other names), items (all QBD item types), classes,
@@ -324,7 +324,7 @@ Phases are ordered; each ends usable. **Current step is marked ▶.**
       balances, attachments (`ac5475c`). Inventory re-costing on back-dated
       purchases, JE lines in A/R-A/P as open items: still to do.
 - [x] Phase 2: server API (`84edc4c`), auth integration (`49063f0`), reports API
-      (`c33ee6c`). Feeds/backup/update/tunnel routes: server-ops agent running.
+      (`c33ee6c`), server ops (`ef1d3e4`, `5427aba`). QBD import routes still to do.
 - [x] Phase 3: QBD read-only import + parity (`a0a7559`, `b580484`). Full import
       of the real company done; after the open-item fixes (`9f68491`, `55e9c3a`,
       `ff88706`) the rerun has 0 failures, 0 open-balance mismatches, 145/159
@@ -333,8 +333,9 @@ Phases are ordered; each ends usable. **Current step is marked ▶.**
 - [~] Phase 4: web UI foundation merged (`web UI`, 157 tests, Playwright);
       other forms, reports catalog UI, admin screens, register editing next.
 - [x] Phase 5: desktop merged (`5951bd2`): local + thin-client modes, NSIS built.
-- [x] Phase 6 libraries: backups, self-update, tunnel (merged); server wiring running.
-- [x] Phase 7 library: feeds (merged); routes running.
+- [x] Phase 6: backups, self-update, tunnel: libraries, server routes, CLI (merged).
+      Release workflow untested until the repo exists; no signing key yet.
+- [x] Phase 7: feeds library and routes (merged); feeds UI pending (phase B).
 - [ ] Phase 8: parity tail.
 - [ ] Phase 9: native QBW research.
 
