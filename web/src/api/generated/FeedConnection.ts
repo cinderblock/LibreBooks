@@ -34,4 +34,4 @@ not_before: string | null, last_sync_at: string | null, last_error: string | nul
 /**
  * Edit sequence (optimistic concurrency); 0 for a new connection.
  */
-edit_seq: bigint, };
+edit_seq: number, };

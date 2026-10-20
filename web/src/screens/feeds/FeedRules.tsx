@@ -18,12 +18,12 @@ import { useIsMobile } from '~/lib/useMobile';
 const blankRule = (): FeedRule => ({
   id: '',
   name: '',
-  priority: 0 as unknown as bigint,
+  priority: 0,
   enabled: true,
   match_all: true,
   conditions: [{ kind: 'Text', field: 'Payee', op: 'Contains', value: '' }],
   actions: { rename_to: null, entity_id: null, account_id: null, class_id: null, memo: null, auto_add: false },
-  edit_seq: 0 as unknown as bigint,
+  edit_seq: 0,
 });
 
 export function FeedRules() {

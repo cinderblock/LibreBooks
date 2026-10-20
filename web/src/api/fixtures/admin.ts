@@ -224,7 +224,7 @@ export class FixtureAdmin {
     // ts-rs writes `size` as bigint; the server sends a plain number (see `asNumber`).
     // The media type without parameters (`text/plain;charset=utf-8` → `text/plain`), as the server records it.
     const mime = (blob.type || 'application/octet-stream').split(';')[0]!.trim();
-    const meta: AttachmentMeta = { id, record_kind: record?.record_kind ?? null, record_id: record?.record_id ?? null, filename, mime, size: blob.size as unknown as bigint, sha256: id.replace(/-/g, '').padEnd(64, 'a'), created_at: createdAt, created_by: 'Demo User' };
+    const meta: AttachmentMeta = { id, record_kind: record?.record_kind ?? null, record_id: record?.record_id ?? null, filename, mime, size: blob.size, sha256: id.replace(/-/g, '').padEnd(64, 'a'), created_at: createdAt, created_by: 'Demo User' };
     this.attachmentStore.set(id, { meta, blob });
     return meta;
   }

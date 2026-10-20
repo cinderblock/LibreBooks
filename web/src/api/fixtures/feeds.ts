@@ -128,7 +128,7 @@ export class FixtureFeeds {
         not_before: null,
         last_sync_at: `${addDays(this.host.today, -2)}T14:03:00Z`,
         last_error: null,
-        edit_seq: 1 as unknown as bigint,
+        edit_seq: 1,
       },
       {
         id: '00000000-0000-4000-a000-000000000002',
@@ -141,18 +141,18 @@ export class FixtureFeeds {
         not_before: null,
         last_sync_at: `${addDays(this.host.today, -1)}T02:00:00Z`,
         last_error: null,
-        edit_seq: 1 as unknown as bigint,
+        edit_seq: 1,
       },
     ];
     const rule = (id: string, name: string, priority: number, conditions: Condition[], actions: Partial<FeedRule['actions']>): FeedRule => ({
       id,
       name,
-      priority: priority as unknown as bigint,
+      priority: priority,
       enabled: true,
       match_all: true,
       conditions,
       actions: { rename_to: null, entity_id: null, account_id: null, class_id: null, memo: null, auto_add: false, ...actions },
-      edit_seq: 1 as unknown as bigint,
+      edit_seq: 1,
     });
     this.rules = [
       rule('00000000-0000-4000-b000-000000000001', 'Pacific Power', 10, [{ kind: 'Text', field: 'Payee', op: 'Contains', value: 'PACIFIC POWER' }], { rename_to: 'Pacific Power', entity_id: ent('Pacific Power')?.id ?? null, account_id: acct('Utilities:Electric')?.id ?? null }),
@@ -449,7 +449,7 @@ export class FixtureFeeds {
   // ---- connections -------------------------------------------------------------
 
   createConnection(c: FeedConnection): FeedConnection {
-    const saved: FeedConnection = { ...c, id: c.id || crypto.randomUUID(), edit_seq: 1 as unknown as bigint, last_sync_at: null, last_error: null };
+    const saved: FeedConnection = { ...c, id: c.id || crypto.randomUUID(), edit_seq: 1, last_sync_at: null, last_error: null };
     this.connections.push(saved);
     this.host.emit('feed_connection', saved.id, 'created');
     return saved;
@@ -460,7 +460,7 @@ export class FixtureFeeds {
     if (i < 0) throw new ApiError(404, 'not_found', 'No such connection');
     const cur = this.connections[i]!;
     if (Number(cur.edit_seq) !== Number(c.edit_seq)) throw new ApiError(409, 'conflict', 'Someone else changed this connection', { expected: Number(c.edit_seq), actual: Number(cur.edit_seq) });
-    const saved = { ...c, edit_seq: (Number(cur.edit_seq) + 1) as unknown as bigint };
+    const saved = { ...c, edit_seq: (Number(cur.edit_seq) + 1) };
     this.connections[i] = saved;
     this.host.emit('feed_connection', saved.id, 'updated');
     return saved;
@@ -479,7 +479,7 @@ export class FixtureFeeds {
     if (!c) throw new ApiError(404, 'not_found', 'No such connection');
     if (!value.trim()) throw new ApiError(400, 'invalid', 'The credential is empty');
     c.last_error = null;
-    c.edit_seq = (Number(c.edit_seq) + 1) as unknown as bigint;
+    c.edit_seq = (Number(c.edit_seq) + 1);
     this.host.emit('feed_connection', c.id, 'updated');
     return c;
   }
@@ -665,7 +665,7 @@ export class FixtureFeeds {
     const accountId = req.account_id ?? conn?.account_id;
     if (!accountId) throw new ApiError(400, 'invalid', 'Choose the account this file belongs to', { field: 'account_id' });
     if (!conn) {
-      conn = this.createConnection({ id: '', name: `${statement.account.institution ?? name} (file)`, account_id: accountId, settings: { provider: 'File', csv_mapping: det.kind === 'Csv' ? (req.mapping ?? det.csv!.mapping) : null }, account_key: statement.account.account_key || null, reverse_signs: false, match_days: 10, not_before: null, last_sync_at: null, last_error: null, edit_seq: 0 as unknown as bigint });
+      conn = this.createConnection({ id: '', name: `${statement.account.institution ?? name} (file)`, account_id: accountId, settings: { provider: 'File', csv_mapping: det.kind === 'Csv' ? (req.mapping ?? det.csv!.mapping) : null }, account_key: statement.account.account_key || null, reverse_signs: false, match_days: 10, not_before: null, last_sync_at: null, last_error: null, edit_seq: 0 });
     }
     conn.last_sync_at = new Date().toISOString();
     return this.ingest(statement.transactions, accountId, conn.id, 'file');
@@ -720,7 +720,7 @@ export class FixtureFeeds {
   // ---- rules CRUD ---------------------------------------------------------------
 
   createRule(r: FeedRule): FeedRule {
-    const saved: FeedRule = { ...r, id: r.id || crypto.randomUUID(), priority: (Math.max(0, ...this.rules.map((x) => Number(x.priority))) + 10) as unknown as bigint, edit_seq: 1 as unknown as bigint };
+    const saved: FeedRule = { ...r, id: r.id || crypto.randomUUID(), priority: (Math.max(0, ...this.rules.map((x) => Number(x.priority))) + 10), edit_seq: 1 };
     this.rules.push(saved);
     this.host.emit('feed_rule', saved.id, 'created');
     return saved;
@@ -730,7 +730,7 @@ export class FixtureFeeds {
     if (i < 0) throw new ApiError(404, 'not_found', 'No such rule');
     const cur = this.rules[i]!;
     if (Number(cur.edit_seq) !== Number(r.edit_seq)) throw new ApiError(409, 'conflict', 'Someone else changed this rule', { expected: Number(r.edit_seq), actual: Number(cur.edit_seq) });
-    const saved = { ...r, priority: cur.priority, edit_seq: (Number(cur.edit_seq) + 1) as unknown as bigint };
+    const saved = { ...r, priority: cur.priority, edit_seq: (Number(cur.edit_seq) + 1) };
     this.rules[i] = saved;
     this.host.emit('feed_rule', saved.id, 'updated');
     return saved;
@@ -744,7 +744,7 @@ export class FixtureFeeds {
   reorderRules(ids: string[]): FeedRule[] {
     ids.forEach((id, i) => {
       const r = this.rules.find((x) => x.id === id);
-      if (r) r.priority = ((i + 1) * 10) as unknown as bigint;
+      if (r) r.priority = ((i + 1) * 10);
     });
     this.rules.sort((a, b) => Number(a.priority) - Number(b.priority));
     this.host.emit('feed_rule', 'all', 'reordered');

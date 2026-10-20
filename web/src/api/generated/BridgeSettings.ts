@@ -16,4 +16,4 @@ key_ref: string | null,
 /**
  * Milliseconds between requests, to go easy on a QuickBooks in use.
  */
-delay_ms: bigint, };
+delay_ms: number, };

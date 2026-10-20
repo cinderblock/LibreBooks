@@ -25,6 +25,7 @@ pub struct AttachmentMeta {
     pub record_id: Option<String>,
     pub filename: String,
     pub mime: String,
+    #[ts(type = "number")]
     pub size: u64,
     pub sha256: String,
     pub created_at: String,

@@ -98,6 +98,7 @@ pub struct FeedConnection {
     pub last_error: Option<String>,
     /// Edit sequence (optimistic concurrency); 0 for a new connection.
     #[serde(default)]
+    #[ts(type = "number")]
     pub edit_seq: i64,
 }
 

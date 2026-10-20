@@ -5,4 +5,4 @@ export type AttachmentMeta = { id: AttachmentId,
 /**
  * What it is attached to (`txn`, `entity`, `account`, `item`), or nothing yet.
  */
-record_kind: string | null, record_id: string | null, filename: string, mime: string, size: bigint, sha256: string, created_at: string, created_by: string | null, };
+record_kind: string | null, record_id: string | null, filename: string, mime: string, size: number, sha256: string, created_at: string, created_by: string | null, };

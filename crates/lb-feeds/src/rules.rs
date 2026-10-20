@@ -103,6 +103,7 @@ pub struct FeedRule {
     pub id: FeedRuleId,
     pub name: String,
     /// Lower runs first.
+    #[ts(type = "number")]
     pub priority: i64,
     pub enabled: bool,
     /// All conditions must hold (true) or any one (false).
@@ -110,6 +111,7 @@ pub struct FeedRule {
     pub conditions: Vec<Condition>,
     pub actions: RuleActions,
     #[serde(default)]
+    #[ts(type = "number")]
     pub edit_seq: i64,
 }
 

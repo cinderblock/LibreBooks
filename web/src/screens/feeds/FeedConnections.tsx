@@ -31,7 +31,7 @@ const blankConnection = (settings: ProviderSettings): FeedConnection => ({
   not_before: null,
   last_sync_at: null,
   last_error: null,
-  edit_seq: 0 as unknown as bigint,
+  edit_seq: 0,
 });
 
 export function FeedConnections({ onImport }: { onImport(accountId: string | null): void }) {

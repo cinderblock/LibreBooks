@@ -99,7 +99,7 @@ web/src/
     client.ts                ApiClient interface (the one thing screens talk to)
     http.ts                  fetch client: cookies, X-LibreBooks, bearer token, multipart, downloads, SSE w/ retry
     errors.ts                ApiError, posting-error text, error → form field mapping
-    json.ts                  edit_seq revived to BigInt (see Findings)
+    json.ts                  JSON parse/stringify helpers (no BigInt: see Findings)
     types.ts, blank.ts       re-exports of generated types + local stand-ins; blank records
     keys.ts, hooks.ts        TanStack Query keys (qk per company, sk server-level), hooks per resource, invalidation per event
     context.tsx              ApiProvider, CompanyProvider, SSE subscription, change bus
@@ -287,12 +287,11 @@ register. Console handle: `__librebooks.simulateRemoteEdit(txnId)`,
 
 ## Findings / gotchas
 
-- **ts-rs `edit_seq` is `bigint`, JSON is a number.** `api/json.ts` revives it to
-  BigInt on read and writes it back as a number, so the generated types are
-  truthful at runtime. Other `u64`/`i64` fields (`AttachmentMeta.size`,
-  `FeedConnection.edit_seq`, `FeedRule.priority`) are typed `bigint` but arrive
-  as numbers; read them through `asNumber()`. A cleaner fix on the Rust side:
-  `#[ts(type = "number")]`.
+- **ts-rs exports `u64`/`i64` as `bigint`, JSON carries numbers.** Fixed on the
+  Rust side with `#[ts(type = "number")]` on every such field (`edit_seq`
+  everywhere, `AttachmentMeta.size`, `BridgeSettings.delay_ms`,
+  `FeedRule.priority`); `api/json.ts` no longer revives BigInt and no generated
+  type says `bigint`. `asNumber()` stays as a harmless guard.
 - **Local stand-ins** (in `api/types.ts`) to swap when generated: `Session`,
   `SaveOutcome`/`PreviewOutcome`/`RegisterResponse`, `AuditEntry`, the reconcile
   envelopes, the server-ops shapes (`ServerSettings`, `ServerView`, `UpdateView`,

@@ -10,8 +10,8 @@ export type FeedRule = { id: FeedRuleId, name: string,
 /**
  * Lower runs first.
  */
-priority: bigint, enabled: boolean, 
+priority: number, enabled: boolean, 
 /**
  * All conditions must hold (true) or any one (false).
  */
-match_all: boolean, conditions: Array<Condition>, actions: RuleActions, edit_seq: bigint, };
+match_all: boolean, conditions: Array<Condition>, actions: RuleActions, edit_seq: number, };

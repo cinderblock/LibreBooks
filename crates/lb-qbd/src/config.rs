@@ -57,6 +57,7 @@ pub struct BridgeSettings {
     /// through the import settings' write-only `bridge_key`.
     pub key_ref: Option<String>,
     /// Milliseconds between requests, to go easy on a QuickBooks in use.
+    #[ts(type = "number")]
     pub delay_ms: u64,
 }
 
