@@ -229,5 +229,87 @@ describe('reconciliation', () => {
   });
 });
 
+describe('bank feeds', () => {
+  test('the queue has suggestions; a download with a register twin has a strong candidate; match marks the line downloaded', async () => {
+    const api = make();
+    const summary = await api.feedsSummary(co);
+    expect(summary.length).toBeGreaterThan(0);
+    const queue = await api.feedTxns(co, { statuses: ['New'] });
+    expect(queue.length).toBeGreaterThan(3);
+    const fee = queue.find((t) => t.payee === 'MONTHLY SERVICE FEE')!;
+    expect(fee.suggestion?.rule_id).toBeTruthy();
+    expect(fee.suggestion?.auto_add).toBe(true);
+    const twin = queue.find((t) => t.check_number)!;
+    const cands = await api.feedCandidates(co, twin.id);
+    expect(cands[0]?.strong).toBe(true);
+    expect(cands[0]?.reasons.join(' ')).toContain('Check number');
+    await api.feedMatch(co, twin.id, cands[0]!.txn_id);
+    expect((await api.feedTxn(co, twin.id)).status).toBe('Matched');
+    const reg = await api.register(co, twin.account_id);
+    expect((reg.lines.find((l) => l.txn_id === cands[0]!.txn_id) as { downloaded?: boolean }).downloaded).toBe(true);
+    await api.feedUndo(co, twin.id);
+    expect((await api.feedTxn(co, twin.id)).status).toBe('New');
+  });
+  test('add writes a transaction from the suggestion; undo deletes it; ignore and rules', async () => {
+    const api = make();
+    const fee = (await api.feedTxns(co, { statuses: ['New'] })).find((t) => t.payee === 'MONTHLY SERVICE FEE')!;
+    const preview = await api.feedPreview(co, fee.id, { entity_id: null, account_id: null, class_id: null, memo: null, number: null });
+    expect(preview.txn.txn_type).toBe('Check');
+    expect(preview.postings.length).toBe(2);
+    const out = await api.feedAdd(co, fee.id, { entity_id: null, account_id: null, class_id: null, memo: 'Bank fee', number: null });
+    const saved = await api.txn(co, out.txn_id);
+    expect(saved.txn.memo).toBe('Bank fee');
+    expect(saved.txn.amount).toBe(1_200);
+    await api.feedUndo(co, fee.id);
+    await expect(api.txn(co, out.txn_id)).rejects.toMatchObject({ status: 404 });
+    expect(await api.feedIgnore(co, [fee.id])).toBe(1);
+    const rules = await api.feedRules(co);
+    const r = await api.createFeedRule(co, { ...rules[0]!, id: '', name: 'Cafe', conditions: [{ kind: 'Text', field: 'Payee', op: 'Contains', value: 'CAFE' }], actions: { ...rules[0]!.actions, rename_to: 'Riverside Cafe', account_id: api.find('account', 'Meals and Entertainment')!, entity_id: null, auto_add: false } });
+    expect(await api.applyFeedRules(co)).toBeGreaterThan(0);
+    const cafe = (await api.feedTxns(co, { statuses: ['New'] })).find((t) => t.payee?.includes('CAFE'))!;
+    expect(cafe.suggestion?.rule_id).toBe(r.id);
+  });
+  test('a CSV is detected, mapped, previewed and imported through the pipeline', async () => {
+    const api = make();
+    // The fee row repeats a seeded download (same date, amount and payee → the same synthesised id).
+    const csv = ['Date,Description,Amount', '10/16/2026,ZELLE FROM NGUYEN DAVID,500.00', '10/17/2026,SHELL OIL 57444281,-62.30', '10/18/2026,MONTHLY SERVICE FEE,-12.00'].join('\n');
+    const file = new File([csv], 'checking.csv', { type: 'text/csv' });
+    const det = await api.feedDetect(co, file);
+    expect(det.kind).toBe('Csv');
+    expect(det.csv?.confident).toBe(true);
+    expect(det.csv?.preview.transactions).toHaveLength(3);
+    expect(det.csv?.preview.transactions[1]?.amount).toBe(-6_230);
+    const checking = api.find('account', 'Checking')!;
+    const report = await api.feedImport(co, { file, account_id: checking, mapping: det.csv!.mapping });
+    // One of the three is already in the queue (same date, amount, payee → same synthesised id).
+    expect(report.import.imported.length + report.import.duplicates).toBe(3);
+    expect(report.import.duplicates).toBeGreaterThanOrEqual(1);
+    // The bank-fee rule adds automatically when nothing in the register matches.
+    expect(report.auto_added.length + report.waiting + report.matched.length).toBe(report.import.imported.length);
+    const ofx = '<OFX><BANKMSGSRSV1><STMTTRNRS><STMTRS><CURDEF>USD<BANKACCTFROM><BANKID>123456789<ACCTID>00004471</BANKACCTFROM><BANKTRANLIST><STMTTRN><TRNTYPE>DEBIT<DTPOSTED>20261015<TRNAMT>-45.00<FITID>abc1<NAME>TOOL BARN</STMTTRN></BANKTRANLIST><LEDGERBAL><BALAMT>1234.56<DTASOF>20261019</LEDGERBAL></STMTRS></STMTTRNRS></BANKMSGSRSV1></OFX>';
+    const d2 = await api.feedDetect(co, new File([ofx], 'stmt.qbo'));
+    expect(d2.kind).toBe('Ofx');
+    expect(d2.statements?.[0]?.transactions[0]).toMatchObject({ fitid: 'abc1', amount: -4_500, posted: '2026-10-15' });
+    expect(d2.statements?.[0]?.ledger_balance).toBe(123_456);
+  });
+  test('SimpleFIN claim lists accounts; Amazon orders match card downloads', async () => {
+    const api = make();
+    const claim = await api.simplefinClaim(co, 'aHR0cHM6Ly9icmlkZ2U');
+    expect(claim.accounts.length).toBe(2);
+    const orders = ['Order ID,Order Date,Total Owed,Product Name,Ship Date', `111-2223334-4445556,${addDaysIso('2026-10-19', -3)},48.17,USB-C cable,${addDaysIso('2026-10-19', -2)}`].join('\n');
+    const p = await api.amazonOrders(co, new File([orders], 'orders.csv'));
+    expect(p.orders).toHaveLength(1);
+    expect(p.matches).toHaveLength(1);
+    expect(p.matches[0]?.memo).toContain('USB-C cable');
+    expect(await api.amazonApply(co, p)).toBe(1);
+  });
+});
+
+function addDaysIso(d: string, n: number): string {
+  const t = new Date(`${d}T00:00:00Z`);
+  t.setUTCDate(t.getUTCDate() + n);
+  return t.toISOString().slice(0, 10);
+}
+
 const textOf = (row: Row) => (row.cells[0]?.value.type === 'Text' ? row.cells[0].value.value : '');
 const money = (c: Cell | undefined) => (c?.value.type === 'Money' ? c.value.value : Number.NaN);

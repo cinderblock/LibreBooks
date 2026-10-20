@@ -95,6 +95,17 @@ test('reconcile at 375px: one column at a time, the difference stays in view', a
   await page.screenshot({ path: test.info().outputPath('reconcile-375.png') });
 });
 
+test('bank feeds at 375px: downloads as cards with Match / Add / Ignore', async ({ page }) => {
+  await start(page, `${CO}/feeds?tab=queue`);
+  const feeds = page.getByTestId('bank-feeds');
+  const first = feeds.getByTestId('feed-row').first();
+  await expect(first).toBeVisible();
+  await expect(first.getByRole('button', { name: 'Match' })).toBeVisible();
+  await expect(first.getByRole('button', { name: 'Ignore' })).toBeVisible();
+  await expectNoSideways(page);
+  await page.screenshot({ path: test.info().outputPath('feeds-375.png') });
+});
+
 test('banking → a register as a tappable list', async ({ page }) => {
   await start(page);
   await page.getByRole('navigation', { name: 'Main' }).getByText('Banking', { exact: true }).tap();

@@ -27,6 +27,9 @@ export function Banking() {
             {FORM_LABELS[f]}
           </Button>
         ))}
+        <Button variant="default" onClick={() => open(paths.feeds())}>
+          Bank Feeds
+        </Button>
       </Group>
       <SimpleGrid cols={{ base: 1, sm: 2, lg: 3 }} spacing="sm">
         {cash.map((a) => (

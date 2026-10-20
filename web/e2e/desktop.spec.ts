@@ -236,6 +236,36 @@ test('reconcile: begin, mark all deposits, the difference moves, discard', async
   await expect(page.getByTestId('reconcile-begin')).toBeVisible();
 });
 
+test('bank feeds: review a download, match it to its register twin, add another from its rule', async ({ page }) => {
+  await start(page);
+  await page.getByRole('menubar').getByText('Banking', { exact: true }).click();
+  await page.getByRole('menuitem', { name: /Bank Feeds/ }).click();
+  const feeds = page.getByTestId('bank-feeds');
+  await expect(feeds.getByTestId('feed-account-row').first()).toBeVisible();
+  await feeds.getByRole('button', { name: 'Review' }).first().click();
+  const rows = feeds.getByTestId('feed-row');
+  await expect(rows.first()).toBeVisible();
+  // A download that mirrors a register check (it carries the check number) has a likely match.
+  const twin = rows.filter({ hasText: /CHECK \d+/ }).first();
+  await twin.getByRole('button', { name: 'Match' }).click();
+  const dialog = page.getByRole('dialog', { name: /Match to a transaction/ });
+  await expect(dialog.getByTestId('feed-candidate').first()).toHaveAttribute('data-strong', 'true');
+  await dialog.getByRole('button', { name: 'Match', exact: true }).first().click();
+  await expect(page.getByText(/Matched to /)).toBeVisible();
+  // The bank fee: its rule suggests the account; Add previews the postings and writes it.
+  const fee = rows.filter({ hasText: 'MONTHLY SERVICE FEE' }).first();
+  await fee.getByRole('button', { name: 'Add', exact: true }).click();
+  const editor = feeds.getByTestId('feed-add-row');
+  await expect(editor.getByRole('combobox', { name: 'Account' })).toHaveValue('Bank Service Charges');
+  await editor.getByRole('button', { name: 'Preview' }).click();
+  await expect(editor.getByRole('cell', { name: 'Bank Service Charges' })).toBeVisible();
+  await editor.getByRole('button', { name: 'Add to register' }).click();
+  await expect(page.getByText(/Added as Check/)).toBeVisible();
+  // Rules are listed in order with their actions.
+  await feeds.getByRole('tab', { name: 'Rules' }).click();
+  await expect(feeds.getByTestId('feed-rule').first()).toContainText('Pacific Power');
+});
+
 test('saving an empty check shows the problem inline', async ({ page }) => {
   await start(page, '/c/00000000-0000-4000-8000-00000000c0de/checks/new');
   const form = page.getByTestId('write-checks');

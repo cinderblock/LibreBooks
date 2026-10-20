@@ -13,10 +13,26 @@ import { ApiError, apiErrorFromBody } from './errors';
 import { parseApiJson, stringifyApiJson } from './json';
 import type {
   AccountBalance,
+  AddOutcome,
+  AddRequest,
+  AmazonPreview,
   AuditEntry,
+  BatchOutcome,
   CatalogEntry,
   ChangeEvent,
   ClearedStatus,
+  FeedAccountSummary,
+  FeedAddPreview,
+  FeedConnection,
+  FeedDetection,
+  FeedImportRequest,
+  FeedQuery,
+  FeedRule,
+  FeedTxn,
+  IngestReport,
+  MatchCandidate,
+  SimpleFinClaim,
+  StatementAccount,
   CompanyId,
   CompanyInfo,
   CompanySummary,
@@ -310,6 +326,121 @@ export class HttpApiClient implements ApiClient {
   async undoReconcile(co: CompanyId, accountId: string) {
     const r = await this.request<{ undone: Reconciliation | null }>('POST', this.co(co, `/accounts/${encodeURIComponent(accountId)}/reconcile/undo`));
     return r.undone;
+  }
+
+  // ---- bank feeds -----------------------------------------------------------
+
+  private feedQuery(q: FeedQuery = {}): URLSearchParams {
+    const p = new URLSearchParams();
+    for (const [k, v] of Object.entries(q)) {
+      if (v === null || v === undefined) continue;
+      if (Array.isArray(v)) {
+        if (v.length) p.set(k, v.join(','));
+      } else if (typeof v === 'boolean') {
+        if (v) p.set(k, 'true');
+      } else p.set(k, String(v));
+    }
+    return p;
+  }
+  feedsSummary(co: CompanyId) {
+    return this.request<FeedAccountSummary[]>('GET', this.co(co, '/feeds'));
+  }
+  feedTxns(co: CompanyId, query?: FeedQuery) {
+    return this.request<FeedTxn[]>('GET', this.co(co, '/feeds/txns'), { query: this.feedQuery(query) });
+  }
+  feedTxn(co: CompanyId, id: string) {
+    return this.request<FeedTxn>('GET', this.co(co, `/feeds/txns/${encodeURIComponent(id)}`));
+  }
+  feedDetect(co: CompanyId, file: File) {
+    const body = new FormData();
+    body.append('file', file, file.name);
+    return this.request<FeedDetection>('POST', this.co(co, '/feeds/detect'), { body });
+  }
+  feedImport(co: CompanyId, req: FeedImportRequest) {
+    const body = new FormData();
+    body.append('file', req.file, req.file.name);
+    if (req.account_id) body.append('account_id', req.account_id);
+    if (req.connection_id) body.append('connection_id', req.connection_id);
+    if (req.mapping) body.append('mapping', JSON.stringify(req.mapping));
+    if (req.statement !== null && req.statement !== undefined) body.append('statement', String(req.statement));
+    return this.request<IngestReport>('POST', this.co(co, '/feeds/import'), { body });
+  }
+  feedCandidates(co: CompanyId, id: string, days?: number) {
+    const p = new URLSearchParams();
+    if (days) p.set('days', String(days));
+    return this.request<MatchCandidate[]>('GET', this.co(co, `/feeds/txns/${encodeURIComponent(id)}/candidates`), { query: p });
+  }
+  feedMatch(co: CompanyId, id: string, txnId: string) {
+    return this.request<void>('POST', this.co(co, `/feeds/txns/${encodeURIComponent(id)}/match`), { body: { txn_id: txnId } });
+  }
+  feedPreview(co: CompanyId, id: string, req: AddRequest) {
+    return this.request<FeedAddPreview>('POST', this.co(co, `/feeds/txns/${encodeURIComponent(id)}/preview`), { body: req });
+  }
+  feedAdd(co: CompanyId, id: string, req: AddRequest) {
+    return this.request<AddOutcome>('POST', this.co(co, `/feeds/txns/${encodeURIComponent(id)}/add`), { body: req });
+  }
+  feedAddAll(co: CompanyId, ids: string[], req?: AddRequest) {
+    return this.request<BatchOutcome>('POST', this.co(co, '/feeds/txns/add-all'), { body: { ids, request: req ?? null } });
+  }
+  async feedIgnore(co: CompanyId, ids: string[]) {
+    const r = await this.request<{ ignored: number }>('POST', this.co(co, '/feeds/txns/ignore'), { body: { ids } });
+    return r.ignored;
+  }
+  feedUndo(co: CompanyId, id: string) {
+    return this.request<FeedTxn>('POST', this.co(co, `/feeds/txns/${encodeURIComponent(id)}/undo`));
+  }
+  feedConnections(co: CompanyId) {
+    return this.request<FeedConnection[]>('GET', this.co(co, '/feeds/connections'));
+  }
+  createFeedConnection(co: CompanyId, c: FeedConnection) {
+    return this.request<FeedConnection>('POST', this.co(co, '/feeds/connections'), { body: c });
+  }
+  updateFeedConnection(co: CompanyId, c: FeedConnection) {
+    return this.request<FeedConnection>('PUT', this.co(co, `/feeds/connections/${encodeURIComponent(c.id)}`), { body: c });
+  }
+  deleteFeedConnection(co: CompanyId, id: string, editSeq: number) {
+    return this.request<void>('DELETE', this.co(co, `/feeds/connections/${encodeURIComponent(id)}`), { query: new URLSearchParams({ edit_seq: String(editSeq) }) });
+  }
+  setFeedCredentials(co: CompanyId, id: string, value: string) {
+    return this.request<FeedConnection>('PUT', this.co(co, `/feeds/connections/${encodeURIComponent(id)}/credentials`), { body: { value } });
+  }
+  syncFeedConnection(co: CompanyId, id: string) {
+    return this.request<IngestReport>('POST', this.co(co, `/feeds/connections/${encodeURIComponent(id)}/sync`));
+  }
+  feedRemoteAccounts(co: CompanyId, id: string) {
+    return this.request<StatementAccount[]>('POST', this.co(co, `/feeds/connections/${encodeURIComponent(id)}/remote-accounts`));
+  }
+  simplefinClaim(co: CompanyId, setupToken: string) {
+    return this.request<SimpleFinClaim>('POST', this.co(co, '/feeds/simplefin/claim'), { body: { setup_token: setupToken } });
+  }
+  feedRules(co: CompanyId) {
+    return this.request<FeedRule[]>('GET', this.co(co, '/feeds/rules'));
+  }
+  createFeedRule(co: CompanyId, r: FeedRule) {
+    return this.request<FeedRule>('POST', this.co(co, '/feeds/rules'), { body: r });
+  }
+  updateFeedRule(co: CompanyId, r: FeedRule) {
+    return this.request<FeedRule>('PUT', this.co(co, `/feeds/rules/${encodeURIComponent(r.id)}`), { body: r });
+  }
+  deleteFeedRule(co: CompanyId, id: string) {
+    return this.request<void>('DELETE', this.co(co, `/feeds/rules/${encodeURIComponent(id)}`));
+  }
+  reorderFeedRules(co: CompanyId, ids: string[]) {
+    return this.request<FeedRule[]>('POST', this.co(co, '/feeds/rules/reorder'), { body: { ids } });
+  }
+  async applyFeedRules(co: CompanyId, ids?: string[], accountId?: string | null) {
+    const r = await this.request<{ applied: number }>('POST', this.co(co, '/feeds/rules/apply'), { body: { ids: ids ?? null, account_id: accountId ?? null } });
+    return r.applied;
+  }
+  amazonOrders(co: CompanyId, file: File, accountId?: string | null) {
+    const body = new FormData();
+    body.append('file', file, file.name);
+    if (accountId) body.append('account_id', accountId);
+    return this.request<AmazonPreview>('POST', this.co(co, '/feeds/amazon/orders'), { body });
+  }
+  async amazonApply(co: CompanyId, preview: AmazonPreview) {
+    const r = await this.request<{ annotated: number }>('POST', this.co(co, '/feeds/amazon/apply'), { body: preview });
+    return r.annotated;
   }
 
   /**

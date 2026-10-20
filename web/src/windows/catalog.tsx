@@ -8,6 +8,7 @@ import { FORMS } from '~/forms/registry';
 import { FormLoader } from '~/forms/useTxnForm';
 import { AccountQuickFill } from '~/inputs/pickers';
 import { Reconcile } from '~/screens/Reconcile';
+import { BankFeeds } from '~/screens/feeds/BankFeeds';
 import { Banking } from '~/screens/Banking';
 import { Center } from '~/screens/Centers';
 import { ChartOfAccounts } from '~/screens/ChartOfAccounts';
@@ -85,6 +86,7 @@ export const WINDOW_KINDS: Record<WindowKind, KindDef> = {
   company: { render: () => <Company />, title: () => 'Company' },
   form: { render: () => <FormWindow />, title: (d) => FORMS[d.params.form ?? '']?.label ?? FORM_LABELS[d.params.form ?? ''] ?? 'Form' },
   reconcile: { render: () => <Reconcile />, title: () => 'Reconcile' },
+  feeds: { render: () => <BankFeeds />, title: () => 'Bank Feeds' },
 };
 
 export function windowTitle(desc: WindowDesc, titles: Record<string, string>): string {

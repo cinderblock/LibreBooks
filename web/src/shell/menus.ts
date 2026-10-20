@@ -124,7 +124,7 @@ export const MENUS: Menu[] = [
       { label: 'Use Register', command: 'nav.useRegister' },
       { label: 'Banking Overview', path: paths.banking() },
       form('reconcile', { command: 'nav.reconcile' }),
-      form('bank-feeds', { command: 'nav.bankFeeds', keywords: ['download', 'online banking', 'import'] }),
+      { label: FORM_LABELS['bank-feeds']!, command: 'nav.bankFeeds', path: paths.feeds(), keywords: ['download', 'online banking', 'import'] },
     ],
   },
   {

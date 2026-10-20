@@ -12,6 +12,7 @@ import type {
   ClearedStatus,
   DateRange,
   Entity,
+  FeedQuery,
   Item,
   ListName,
   ListQuery,
@@ -286,6 +287,48 @@ export function useReconcileActions(accountId: string | null) {
   const discard = useMutation({ mutationFn: (id: string) => api.discardReconcile(co, id), onSuccess: refresh });
   const undo = useMutation({ mutationFn: () => api.undoReconcile(co, accountId!), onSuccess: refresh });
   return { start, mark, finish, discard, undo };
+}
+
+// ---- bank feeds ---------------------------------------------------------------
+
+export function useFeedsSummary() {
+  const api = useApi();
+  const co = useCompanyId();
+  return useQuery({ queryKey: qk.feedsSummary(co), queryFn: () => api.feedsSummary(co), staleTime: 10_000 });
+}
+
+export function useFeedTxns(q: FeedQuery, enabled = true) {
+  const api = useApi();
+  const co = useCompanyId();
+  return useQuery({ queryKey: qk.feedTxns(co, q), queryFn: () => api.feedTxns(co, q), enabled, staleTime: 10_000, placeholderData: keepPreviousData });
+}
+
+export function useFeedCandidates(id: string | null) {
+  const api = useApi();
+  const co = useCompanyId();
+  return useQuery({ queryKey: qk.feedCandidates(co, id ?? ''), queryFn: () => api.feedCandidates(co, id!), enabled: !!id, staleTime: 10_000 });
+}
+
+export function useFeedConnections() {
+  const api = useApi();
+  const co = useCompanyId();
+  return useQuery({ queryKey: qk.feedConnections(co), queryFn: () => api.feedConnections(co), staleTime: 30_000 });
+}
+
+export function useFeedRules() {
+  const api = useApi();
+  const co = useCompanyId();
+  return useQuery({ queryKey: qk.feedRules(co), queryFn: () => api.feedRules(co), staleTime: 30_000 });
+}
+
+/** Every feed write refreshes the feed queries and the registers (downloaded marks). */
+export function useFeedInvalidate() {
+  const co = useCompanyId();
+  const qc = useQueryClient();
+  return () => {
+    void qc.invalidateQueries({ queryKey: qk.feedsAll(co) });
+    invalidateTxnDerived(qc, co);
+  };
 }
 
 /** Create (edit_seq 0) or update a transaction; refreshes everything it touches. */

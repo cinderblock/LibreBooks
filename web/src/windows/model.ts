@@ -22,7 +22,8 @@ export type WindowKind =
   | 'list'
   | 'company'
   | 'form'
-  | 'reconcile';
+  | 'reconcile'
+  | 'feeds';
 
 export interface WindowDesc {
   key: string;

@@ -12,6 +12,8 @@ import { clone } from '../json';
 import type {
   Account,
   AccountBalance,
+  AddRequest,
+  AmazonPreview,
   AuditEntry,
   CatalogEntry,
   ChangeEvent,
@@ -21,6 +23,10 @@ import type {
   CompanySummary,
   DateRange,
   Entity,
+  FeedConnection,
+  FeedImportRequest,
+  FeedQuery,
+  FeedRule,
   Health,
   ListName,
   ListQuery,
@@ -53,6 +59,7 @@ import { accountTypeOrder, naturalBalance } from '~/lib/accountTypes';
 import { addDays, addMonths, todayIso } from '~/lib/dates';
 import { hierarchicalCompare } from '~/lib/tree';
 import { reportToCsv } from '~/reports/rows';
+import { FixtureFeeds } from './feeds';
 import { fixturePost, type PostingBooks } from './post';
 import { FIXTURE_COMPANY_ID, buildSeed, stressNames } from './seed';
 import { fixtureCatalog, runFixtureReport } from './reports';
@@ -95,6 +102,9 @@ export class FixtureApiClient implements ApiClient {
   private savedDocs: Saved[] = [];
   /** Reconciliations, in progress (finished_at null) and finished. */
   private reconciliations: Reconciliation[] = [];
+  /** Register lines a bank feed matched or added (txn id → accounts). */
+  private downloaded = new Map<string, Set<string>>();
+  private feeds: FixtureFeeds;
 
   constructor(opts: FixtureOptions = {}) {
     this.latency = opts.latencyMs ?? 90;
@@ -125,6 +135,40 @@ export class FixtureApiClient implements ApiClient {
       });
     }
     for (const t of seed.txns) this.loadSeedTxn(t);
+    this.feeds = new FixtureFeeds({
+      today: this.today,
+      accounts: () => this.lists.accounts,
+      entities: () => this.lists.entities,
+      roleAccount: (role) => this.lists.accounts.find((a) => a.role === role),
+      txns: () => [...this.txnStore.values()],
+      txn: (id) => this.txnStore.get(id),
+      createTxn: (txn) => {
+        this.validate(txn);
+        const posted = this.post(txn);
+        const now = new Date().toISOString();
+        const saved: Txn = { ...clone(txn), amount: posted.total, edit_seq: 1, created_at: now, modified_at: now, created_by: 'fixture-user', modified_by: 'fixture-user' };
+        const stored = { txn: saved, postings: posted.postings, total: posted.total, seq: this.seq++ };
+        this.txnStore.set(saved.id, stored);
+        this.record('created', null, saved);
+        this.emit('txn', saved.id, 'created');
+        return stored;
+      },
+      deleteTxn: (id) => {
+        const s = this.txnStore.get(id);
+        if (!s) return;
+        this.txnStore.delete(id);
+        this.record('deleted', s.txn, null);
+        this.emit('txn', id, 'deleted');
+      },
+      setDownloaded: (txnId, accountId, on) => {
+        const set = this.downloaded.get(txnId) ?? new Set<string>();
+        if (on) set.add(accountId);
+        else set.delete(accountId);
+        this.downloaded.set(txnId, set);
+        this.emit('txn', txnId, 'updated');
+      },
+      emit: (kind, id, action) => this.emit(kind, id, action),
+    });
   }
 
   // ---- plumbing -------------------------------------------------------------
@@ -643,7 +687,9 @@ export class FixtureApiClient implements ApiClient {
         edit_seq: s.txn.edit_seq,
         due_date: s.txn.due_date,
         open_balance: this.openBalance(s, applied),
-      });
+        // QBD's lightning bolt: a bank feed matched or added this line (not yet in the generated type).
+        ...(this.downloaded.get(s.txn.id)?.has(accountId) ? { downloaded: true } : {}),
+      } as RegisterLine);
     }
     return { opening, lines };
   }
@@ -1053,6 +1099,109 @@ export class FixtureApiClient implements ApiClient {
     this.reconciliations = this.reconciliations.filter((r) => r.id !== last.id);
     this.emit('reconciliation', last.id, 'undone');
     return this.delay(() => last);
+  }
+
+  // ---- bank feeds (FIXTURE: ./feeds.ts) --------------------------------------
+
+  private feed<T>(co: CompanyId, f: () => T): Promise<T> {
+    this.checkCompany(co);
+    try {
+      const v = f();
+      return this.delay(() => v);
+    } catch (e) {
+      return Promise.reject(e);
+    }
+  }
+  feedsSummary(co: CompanyId) {
+    return this.feed(co, () => this.feeds.summary());
+  }
+  feedTxns(co: CompanyId, query?: FeedQuery) {
+    return this.feed(co, () => this.feeds.list(query));
+  }
+  feedTxn(co: CompanyId, id: string) {
+    return this.feed(co, () => this.feeds.get(id));
+  }
+  async feedDetect(co: CompanyId, file: File) {
+    const text = await file.text();
+    return this.feed(co, () => this.feeds.detect(file.name, text));
+  }
+  async feedImport(co: CompanyId, req: FeedImportRequest) {
+    const text = await req.file.text();
+    return this.feed(co, () => this.feeds.import(req, req.file.name, text));
+  }
+  feedCandidates(co: CompanyId, id: string, days?: number) {
+    return this.feed(co, () => this.feeds.candidates(id, days));
+  }
+  feedMatch(co: CompanyId, id: string, txnId: string) {
+    return this.feed(co, () => this.feeds.match(id, txnId));
+  }
+  feedPreview(co: CompanyId, id: string, req: AddRequest) {
+    return this.feed(co, () => {
+      const p = this.feeds.preview(id, req);
+      const posted = this.post(p.txn);
+      return { ...p, postings: posted.postings, total: posted.total, sales_tax: posted.sales_tax };
+    });
+  }
+  feedAdd(co: CompanyId, id: string, req: AddRequest) {
+    return this.feed(co, () => this.feeds.add(id, req));
+  }
+  feedAddAll(co: CompanyId, ids: string[], req?: AddRequest) {
+    return this.feed(co, () => this.feeds.addAll(ids, req));
+  }
+  feedIgnore(co: CompanyId, ids: string[]) {
+    return this.feed(co, () => this.feeds.ignore(ids));
+  }
+  feedUndo(co: CompanyId, id: string) {
+    return this.feed(co, () => this.feeds.undo(id));
+  }
+  feedConnections(co: CompanyId) {
+    return this.feed(co, () => this.feeds.connections);
+  }
+  createFeedConnection(co: CompanyId, c: FeedConnection) {
+    return this.feed(co, () => this.feeds.createConnection(c));
+  }
+  updateFeedConnection(co: CompanyId, c: FeedConnection) {
+    return this.feed(co, () => this.feeds.updateConnection(c));
+  }
+  deleteFeedConnection(co: CompanyId, id: string, editSeq: number) {
+    return this.feed(co, () => this.feeds.deleteConnection(id, editSeq));
+  }
+  setFeedCredentials(co: CompanyId, id: string, value: string) {
+    return this.feed(co, () => this.feeds.setCredentials(id, value));
+  }
+  syncFeedConnection(co: CompanyId, id: string) {
+    return this.feed(co, () => this.feeds.sync(id));
+  }
+  feedRemoteAccounts(co: CompanyId, id: string) {
+    return this.feed(co, () => this.feeds.remoteAccounts(id));
+  }
+  simplefinClaim(co: CompanyId, setupToken: string) {
+    return this.feed(co, () => this.feeds.simplefinClaim(setupToken));
+  }
+  feedRules(co: CompanyId) {
+    return this.feed(co, () => [...this.feeds.rules].sort((a, b) => Number(a.priority) - Number(b.priority)));
+  }
+  createFeedRule(co: CompanyId, r: FeedRule) {
+    return this.feed(co, () => this.feeds.createRule(r));
+  }
+  updateFeedRule(co: CompanyId, r: FeedRule) {
+    return this.feed(co, () => this.feeds.updateRule(r));
+  }
+  deleteFeedRule(co: CompanyId, id: string) {
+    return this.feed(co, () => this.feeds.deleteRule(id));
+  }
+  reorderFeedRules(co: CompanyId, ids: string[]) {
+    return this.feed(co, () => this.feeds.reorderRules(ids));
+  }
+  applyFeedRules(co: CompanyId, ids?: string[], accountId?: string | null) {
+    return this.feed(co, () => this.feeds.applyRules(ids, accountId));
+  }
+  async amazonOrders(co: CompanyId, file: File, accountId?: string | null) {
+    const text = await file.text();
+    return this.feed(co, () => this.feeds.amazonOrders(text, accountId));
+  }
+  amazonApply(co: CompanyId, preview: AmazonPreview) {
+    return this.feed(co, () => this.feeds.amazonApply(preview));
   }
 
   // ---- events ---------------------------------------------------------------

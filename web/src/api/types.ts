@@ -615,6 +615,14 @@ export interface FeedImportRequest {
   statement?: number | null;
 }
 
+/** `POST /feeds/txns/:id/preview`: the transaction "Add" would make, with its postings. */
+export interface FeedAddPreview {
+  txn: Txn;
+  postings: Posting[];
+  total: Money;
+  sales_tax: Money;
+}
+
 export interface SimpleFinClaim {
   access: string;
   accounts: StatementAccount[];

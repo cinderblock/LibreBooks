@@ -3,7 +3,7 @@
 
 import type { QueryClient } from '@tanstack/react-query';
 import type { TxnQuery } from './client';
-import type { ChangeEvent, CompanyId, DateRange, ListName, ListQuery, ReportRequest, SavedKind } from './types';
+import type { ChangeEvent, CompanyId, DateRange, FeedQuery, ListName, ListQuery, ReportRequest, SavedKind } from './types';
 
 export const qk = {
   company: (co: CompanyId) => ['c', co] as const,
@@ -28,6 +28,12 @@ export const qk = {
   reconcileAll: (co: CompanyId) => ['c', co, 'reconcile'] as const,
   reconcileOverview: (co: CompanyId, accountId: string) => ['c', co, 'reconcile', 'account', accountId] as const,
   reconciliation: (co: CompanyId, id: string) => ['c', co, 'reconcile', 'id', id] as const,
+  feedsAll: (co: CompanyId) => ['c', co, 'feeds'] as const,
+  feedsSummary: (co: CompanyId) => ['c', co, 'feeds', 'summary'] as const,
+  feedTxns: (co: CompanyId, q: FeedQuery = {}) => ['c', co, 'feeds', 'txns', q] as const,
+  feedCandidates: (co: CompanyId, id: string) => ['c', co, 'feeds', 'candidates', id] as const,
+  feedConnections: (co: CompanyId) => ['c', co, 'feeds', 'connections'] as const,
+  feedRules: (co: CompanyId) => ['c', co, 'feeds', 'rules'] as const,
   savedAll: (co: CompanyId) => ['c', co, 'saved'] as const,
   saved: (co: CompanyId, kind: SavedKind) => ['c', co, 'saved', kind] as const,
   memorizedDue: (co: CompanyId) => ['c', co, 'memorized-due'] as const,
@@ -79,6 +85,12 @@ export function invalidateForEvent(qc: QueryClient, co: CompanyId, e: ChangeEven
   }
   if (e.kind === 'company' || e.kind === 'info') {
     void qc.invalidateQueries({ queryKey: qk.info(co) });
+    return;
+  }
+  if (e.kind.startsWith('feed')) {
+    void qc.invalidateQueries({ queryKey: qk.feedsAll(co) });
+    // A match or add marks a register line as downloaded.
+    void qc.invalidateQueries({ queryKey: qk.registerAll(co) });
     return;
   }
   if (e.kind === 'saved' || e.kind === 'memorized') {

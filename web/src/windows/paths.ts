@@ -43,6 +43,8 @@ export function parseWindowPath(relPath: string): WindowDesc | null {
       return seg.length === 1 ? one(a, a) : null;
     case 'banking':
       return seg.length === 1 ? one('banking', 'banking') : null;
+    case 'feeds':
+      return seg.length === 1 ? one('feeds', 'feeds') : null;
     // A prefilled form (hand-off token) is its own window: the token is in the key.
     case 'checks':
       return seg.length === 2 && b === 'new' ? one('check', `check:new${q.draft ? `:${q.draft}` : ''}`) : null;
@@ -77,6 +79,12 @@ export const paths = {
   vendors: (select?: string) => `/vendors${select ? `?select=${encodeURIComponent(select)}` : ''}`,
   employees: (select?: string) => `/employees${select ? `?select=${encodeURIComponent(select)}` : ''}`,
   banking: () => '/banking',
+  /** Bank Feeds; `tab` and `account` preselect a panel and its account. */
+  feeds: (params: { tab?: string; account?: string } = {}) => {
+    const qs = new URLSearchParams(Object.entries(params).filter((e): e is [string, string] => !!e[1]));
+    const s = qs.toString();
+    return `/feeds${s ? `?${s}` : ''}`;
+  },
   /** A new check; `draft` is a hand-off token (`windows/handoff.ts`) for a prefilled one. */
   newCheck: (draft?: string) => `/checks/new${draft ? `?draft=${encodeURIComponent(draft)}` : ''}`,
   txn: (id: string) => `/txns/${encodeURIComponent(id)}`,

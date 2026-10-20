@@ -4,9 +4,25 @@
 
 import type {
   AccountBalance,
+  AddOutcome,
+  AddRequest,
+  AmazonPreview,
   AuditEntry,
+  BatchOutcome,
   CatalogEntry,
   ChangeEvent,
+  FeedAccountSummary,
+  FeedAddPreview,
+  FeedConnection,
+  FeedDetection,
+  FeedImportRequest,
+  FeedQuery,
+  FeedRule,
+  FeedTxn,
+  IngestReport,
+  MatchCandidate,
+  SimpleFinClaim,
+  StatementAccount,
   ClearedStatus,
   CompanyId,
   CompanyInfo,
@@ -128,6 +144,39 @@ export interface ApiClient {
   finishReconcile(co: CompanyId, id: string, adjust: boolean): Promise<Reconciliation>;
   discardReconcile(co: CompanyId, id: string): Promise<void>;
   undoReconcile(co: CompanyId, accountId: string): Promise<Reconciliation | null>;
+
+  // ---- bank feeds (plans/api.md "Bank feeds") ----
+  feedsSummary(co: CompanyId): Promise<FeedAccountSummary[]>;
+  feedTxns(co: CompanyId, query?: FeedQuery): Promise<FeedTxn[]>;
+  feedTxn(co: CompanyId, id: string): Promise<FeedTxn>;
+  /** Look at a file before importing: its kind, a CSV mapping guess with a preview, or the OFX statements. */
+  feedDetect(co: CompanyId, file: File): Promise<FeedDetection>;
+  feedImport(co: CompanyId, req: FeedImportRequest): Promise<IngestReport>;
+  feedCandidates(co: CompanyId, id: string, days?: number): Promise<MatchCandidate[]>;
+  feedMatch(co: CompanyId, id: string, txnId: string): Promise<void>;
+  feedPreview(co: CompanyId, id: string, req: AddRequest): Promise<FeedAddPreview>;
+  feedAdd(co: CompanyId, id: string, req: AddRequest): Promise<AddOutcome>;
+  feedAddAll(co: CompanyId, ids: string[], req?: AddRequest): Promise<BatchOutcome>;
+  feedIgnore(co: CompanyId, ids: string[]): Promise<number>;
+  feedUndo(co: CompanyId, id: string): Promise<FeedTxn>;
+  feedConnections(co: CompanyId): Promise<FeedConnection[]>;
+  createFeedConnection(co: CompanyId, c: FeedConnection): Promise<FeedConnection>;
+  updateFeedConnection(co: CompanyId, c: FeedConnection): Promise<FeedConnection>;
+  deleteFeedConnection(co: CompanyId, id: string, editSeq: number): Promise<void>;
+  /** Write-only: a password, PIN, access URL or token, kept by the server. */
+  setFeedCredentials(co: CompanyId, id: string, value: string): Promise<FeedConnection>;
+  syncFeedConnection(co: CompanyId, id: string): Promise<IngestReport>;
+  feedRemoteAccounts(co: CompanyId, id: string): Promise<StatementAccount[]>;
+  simplefinClaim(co: CompanyId, setupToken: string): Promise<SimpleFinClaim>;
+  feedRules(co: CompanyId): Promise<FeedRule[]>;
+  createFeedRule(co: CompanyId, r: FeedRule): Promise<FeedRule>;
+  updateFeedRule(co: CompanyId, r: FeedRule): Promise<FeedRule>;
+  deleteFeedRule(co: CompanyId, id: string): Promise<void>;
+  reorderFeedRules(co: CompanyId, ids: string[]): Promise<FeedRule[]>;
+  /** Re-run the rules over waiting transactions; returns how many got a suggestion. */
+  applyFeedRules(co: CompanyId, ids?: string[], accountId?: string | null): Promise<number>;
+  amazonOrders(co: CompanyId, file: File, accountId?: string | null): Promise<AmazonPreview>;
+  amazonApply(co: CompanyId, preview: AmazonPreview): Promise<number>;
 
   /** Live changes (SSE `/events?company=`); the fixture client emits its own. */
   subscribe(co: CompanyId, handlers: EventHandlers): EventSubscription;

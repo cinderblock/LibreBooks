@@ -45,7 +45,7 @@ export function useGlobalCommands(): { run: RunCommand; overlay: boolean; setOve
     'form.transfer': () => open(paths.form('transfer')),
     'form.journal': () => open(paths.form('journal')),
     'nav.reconcile': () => open(paths.form('reconcile')),
-    'nav.bankFeeds': () => open(paths.form('bank-feeds')),
+    'nav.bankFeeds': () => open(paths.feeds()),
     'nav.customerCenter': () => open(paths.customers()),
     'nav.vendorCenter': () => open(paths.vendors()),
     'nav.useRegister': () => setRegisterPicker(true),
