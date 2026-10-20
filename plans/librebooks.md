@@ -196,9 +196,11 @@ Phases are ordered; each ends usable. **Current step is marked ▶.**
   (`13d39ad`), retention scope for renamed companies (`ab9867c`), Access
   middleware success-path test (`0b651a8`). ▶ Running: web phase B agent
   (resumed 09:20 PT after a session-limit cut-off; worktree
-  `agent-af93b28647e2ebef7`) and a Windows-service/systemd agent (worktree
-  `agent-a335c5b9cf55f2181`: `librebooks service install|uninstall|start|stop|
-  status|run`, SCM entry point, systemd unit generation). Merge both when done. Next with the user: point
+  `agent-af93b28647e2ebef7`). Merged: the server as a service (`27fc74d`:
+  `librebooks service install|uninstall|start|stop|status|run`, Windows SCM
+  entry point with the Ctrl+C shutdown path, rolling log file, systemd unit
+  generation; the real SCM/systemctl cycle is untested by rule). Merge the
+  web branch when its agent reports. Next with the user: point
   QuickBooks' Web Connector on cad-3 at this server over HTTPS (steps in
   `plans/qbd-import.md`), run a sync, and see whether the 14 bridge gaps close.
 - Phase 1 — Ledger core
