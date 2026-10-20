@@ -92,13 +92,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: ". -> target"
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: latest
-      - run: bun install --frozen-lockfile
-      # tauri::generate_context! reads the built web app at compile time.
-      - name: Web build
-        run: bun run --cwd web build
+      # The app's own pages (desktop/ui) are in the repo; the web app itself is
+      # embedded by lb-server, which tolerates a missing build in debug.
       - name: Clippy
         run: cargo clippy --manifest-path desktop/src-tauri/Cargo.toml --all-targets --locked
       - name: Test
