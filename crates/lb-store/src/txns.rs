@@ -227,17 +227,19 @@ pub fn save(w: &mut Writer<'_>, mut txn: Txn) -> Result<SaveOutcome> {
     w.tx.execute("DELETE FROM posting WHERE txn_id = ?1", [&id])?;
     let mut postings = posted.postings.clone();
     for (seq, p) in postings.iter_mut().enumerate() {
-        if let Some(prev) = old_cleared.get(&(
+        let mut reconciliation: Option<String> = None;
+        if let Some((prev, rec)) = old_cleared.get(&(
             p.account_id,
             p.line_id.map(|l| l.to_string()),
             p.amount.minor(),
         )) {
             p.cleared = *prev;
+            reconciliation.clone_from(rec);
         }
         w.tx.execute(
             "INSERT INTO posting (txn_id, seq, date, txn_type, account_id, amount, entity_id, class_id, item_id,
-                                  line_id, memo, quantity, cleared)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+                                  line_id, memo, quantity, cleared, reconciliation_id)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
             params![
                 id,
                 seq as i64,
@@ -252,6 +254,7 @@ pub fn save(w: &mut Writer<'_>, mut txn: Txn) -> Result<SaveOutcome> {
                 p.memo,
                 p.quantity.map(|q| q.to_string()),
                 cleared_str(p.cleared),
+                reconciliation,
             ],
         )?;
     }
@@ -417,27 +420,32 @@ fn touched_txns(txn: &Txn) -> BTreeSet<TxnId> {
 fn existing_cleared(
     c: &Connection,
     id: TxnId,
-) -> Result<HashMap<(AccountId, Option<String>, i64), ClearedStatus>> {
-    let mut stmt =
-        c.prepare("SELECT account_id, line_id, amount, cleared FROM posting WHERE txn_id = ?1")?;
+) -> Result<HashMap<ClearedKey, (ClearedStatus, Option<String>)>> {
+    let mut stmt = c.prepare(
+        "SELECT account_id, line_id, amount, cleared, reconciliation_id FROM posting WHERE txn_id = ?1",
+    )?;
     let rows = stmt.query_map([id.to_string()], |r| {
         Ok((
             r.get::<_, String>(0)?,
             r.get::<_, Option<String>>(1)?,
             r.get::<_, i64>(2)?,
             r.get::<_, String>(3)?,
+            r.get::<_, Option<String>>(4)?,
         ))
     })?;
     let mut out = HashMap::new();
     for row in rows {
-        let (a, l, amt, cl) = row?;
+        let (a, l, amt, cl, rec) = row?;
         let status = parse_cleared(&cl);
         if status != ClearedStatus::Uncleared {
-            out.insert((codec::parse_id(&a)?, l, amt), status);
+            out.insert((codec::parse_id(&a)?, l, amt), (status, rec));
         }
     }
     Ok(out)
 }
+
+/// A posting's identity across an edit: same account, same form line, same amount.
+type ClearedKey = (AccountId, Option<String>, i64);
 
 fn uses_ar_ap(t: TxnType) -> bool {
     matches!(
@@ -920,6 +928,30 @@ pub fn accounts_of_types(c: &Connection, types: &[AccountType]) -> Result<Vec<Ac
     ))?;
     let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
     rows.map(|s| codec::parse_id(&s?)).collect()
+}
+
+/// Payments and sales receipts sitting in Undeposited Funds, not yet in a deposit
+/// (what Make Deposits offers).
+pub fn undeposited(c: &Connection) -> Result<Vec<TxnSummary>> {
+    let Some(uf) = accounts::by_role(c, AccountRole::UndepositedFunds)? else {
+        return Ok(Vec::new());
+    };
+    let mut stmt = c.prepare(
+        "SELECT t.id, t.txn_type, t.date, t.number, t.entity_id, e.full_name, t.account_id, a.full_name,
+                p.amount, t.open_balance, t.due_date, t.memo, t.is_void, t.is_pending, t.edit_seq
+         FROM posting p JOIN txn t ON t.id = p.txn_id
+              LEFT JOIN entity e ON e.id = t.entity_id
+              LEFT JOIN account a ON a.id = p.account_id
+         WHERE p.account_id = ?1 AND p.amount > 0 AND t.txn_type <> 'Deposit' AND t.is_void = 0
+           AND NOT EXISTS (SELECT 1 FROM deposit_link d WHERE d.payment_txn_id = t.id)
+         ORDER BY t.date, t.rowid",
+    )?;
+    let rows = stmt.query_map([uf.id.to_string()], summary_row)?;
+    let mut out = Vec::new();
+    for r in rows {
+        out.push(r??);
+    }
+    Ok(out)
 }
 
 #[cfg(test)]

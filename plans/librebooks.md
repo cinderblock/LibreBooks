@@ -175,8 +175,12 @@ over SSE (`/api/v1/events`) so a second user's change appears in open registers.
 Phases are ordered; each ends usable. **Current step is marked ▶.**
 
 - Phase 0 — Foundation
-  - ▶ Plan, repo, license, README, workspace skeleton, CI (fmt, clippy, test,
-    web typecheck/test), `.gitattributes`.
+  - Plan, repo, license, README, workspace skeleton, `.gitattributes`. Done
+    (`858b1be`). CI still to write.
+- **Wave 1 (2026-10-19, running in parallel worktrees):** lb-auth, lb-reports,
+  lb-qbd, lb-backup + lb-update + lb-tunnel, lb-feeds, web UI foundation (phase A,
+  fixture mode). Each agent writes `plans/<area>.md`. ▶ Meanwhile the parent
+  session builds lb-server + the `librebooks` CLI, then merges each branch.
 - Phase 1 — Ledger core
   - Domain types, chart of accounts (all QBD account types), names (customers +
     jobs, vendors, employees, other names), items (all QBD item types), classes,
@@ -263,8 +267,11 @@ Phases are ordered; each ends usable. **Current step is marked ▶.**
 ## Progress log
 
 - [x] Survey environment, sibling projects, QB bridge shape.
-- [ ] Phase 0: repo skeleton + CI.
-- [ ] Phase 1: ledger core.
+- [x] Phase 0: repo skeleton (`858b1be`); API contract `plans/api.md` (`091efac`).
+- [ ] CI workflows.
+- [x] Phase 1 core: lb-core posting rules for all 25 types (18 rule tests),
+      lb-store company file (15 integration tests). Inventory re-costing on
+      back-dated purchases, JE lines in A/R-A/P as open items: still to do.
 - [ ] Phase 2: server + auth.
 - [ ] Phase 3: QBD read-only import + parity.
 - [ ] Phase 4: web UI.
@@ -286,6 +293,16 @@ Phases are ordered; each ends usable. **Current step is marked ▶.**
 4. **Bridge gaps.** The QB Bridge lacks CreditCardCharge/Credit, Transfer,
    VendorCredit and others. Extend the bridge (a separate repo, separate thread),
    or rely on the Web Connector transport?
+
+- **Compute budget:** the machine is shared (6 cores). Every cargo/test run
+  goes through `node ~/.claude/bin/cpu-slots.mjs run --slots 4 --label … -- …`.
+  Cargo's build dir is shared machine-wide (`~/.cargo/build`), so parallel
+  worktree builds take turns on its lock.
+- `ts-rs` exports TypeScript into `web/src/api/generated/` whenever
+  `cargo test` runs (`.cargo/config.toml` sets `TS_RS_EXPORT_DIR`); commit them.
+- `MemoryBooks` helper methods are `add_*`: inherent methods named like the
+  `PostingContext` trait's (`account`, `item`) lose to the trait's `&self`
+  methods at autoref, which gave baffling arity errors.
 
 ## Things not to do
 

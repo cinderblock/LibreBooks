@@ -1,0 +1,73 @@
+name: CI
+
+# Every push and pull request: format, lint and test the Rust workspace on
+# Linux and Windows, check the TypeScript types generated from Rust are
+# current, and typecheck, test and build the web UI. Releases are a separate
+# workflow (release.yml), run on tags.
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+  RUSTFLAGS: -D warnings
+
+jobs:
+  rust:
+    name: Rust (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Format
+        if: runner.os == 'Linux'
+        run: cargo fmt --all --check
+
+      # The default members: everything but the desktop app, which needs a
+      # webview toolkit and has its own job.
+      - name: Clippy
+        run: cargo clippy --all-targets --locked
+
+      - name: Test
+        run: cargo test --locked
+
+      - name: Generated TypeScript types are current
+        if: runner.os == 'Linux'
+        run: |
+          git add -N web/src/api/generated
+          git diff --exit-code -- web/src/api/generated || {
+            echo "::error::web/src/api/generated is out of date: run 'cargo test' and commit the changes"
+            exit 1
+          }
+
+  web:
+    name: Web UI
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install --frozen-lockfile
+      - name: Typecheck
+        run: bun run --cwd web typecheck
+      - name: Test
+        run: bun run --cwd web test
+      - name: Build
+        run: bun run --cwd web build
