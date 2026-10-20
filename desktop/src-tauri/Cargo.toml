@@ -1,0 +1,66 @@
+[package]
+name = "librebooks-desktop"
+description = "LibreBooks desktop app: the books on this computer, or a thin client to a LibreBooks server."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+default-run = "LibreBooks"
+
+[[bin]]
+name = "LibreBooks"
+path = "src/main.rs"
+
+[lib]
+name = "librebooks_desktop"
+path = "src/lib.rs"
+
+[build-dependencies]
+tauri-build = { version = "2.7", features = [] }
+
+[dependencies]
+lb-server.workspace = true
+
+tauri = { version = "2.12", features = ["tray-icon", "image-png"] }
+tauri-plugin-updater = "2.14"
+tauri-plugin-single-instance = "2.5"
+tauri-plugin-window-state = "2.5"
+tauri-plugin-dialog = "2.8"
+tauri-plugin-opener = "2.7"
+tauri-plugin-log = "2.10"
+tauri-plugin-process = "2.4"
+
+anyhow.workspace = true
+thiserror.workspace = true
+# `log` makes lb-server's tracing events reach tauri-plugin-log.
+tracing = { workspace = true, features = ["log"] }
+log = "0.4"
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+futures.workspace = true
+axum.workspace = true
+reqwest.workspace = true
+url.workspace = true
+rand.workspace = true
+base64.workspace = true
+hex.workspace = true
+subtle.workspace = true
+ed25519-dalek.workspace = true
+directories.workspace = true
+keyring = "4.2"
+
+# WebView2's "browser accelerator keys" switch, which Tauri doesn't expose
+# (see window.rs). Same versions as wry's, so the COM types are shared.
+[target.'cfg(windows)'.dependencies]
+webview2-com = "0.39"
+windows-core = "0.62"
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true
