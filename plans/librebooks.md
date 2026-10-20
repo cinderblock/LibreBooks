@@ -194,13 +194,18 @@ Phases are ordered; each ends usable. **Current step is marked ▶.**
   (main tree, each CI-green): `/qbwc` sign-in rate limit (`8ca2038`), `.lbk`
   import route `POST /companies/import` (`dcdfc5b`), self-update smoke test
   (`13d39ad`), retention scope for renamed companies (`ab9867c`), Access
-  middleware success-path test (`0b651a8`). ▶ Running: web phase B agent
-  (resumed 09:20 PT after a session-limit cut-off; worktree
-  `agent-af93b28647e2ebef7`). Merged: the server as a service (`27fc74d`:
+  middleware success-path test (`0b651a8`), secret-store cross-process lock
+  (`a84e4d3`). Merged: web phase B (`4c8dc59`: form engine and every purchase
+  and sales form, payments/deposits/transfers/journal, register editing,
+  reconcile, bank feeds, Report Center with memorized reports, admin screens;
+  233 web tests, 40 Playwright) and the last `bigint` exports made numbers
+  (`1e1cd08`). Merged: the server as a service (`27fc74d`:
   `librebooks service install|uninstall|start|stop|status|run`, Windows SCM
   entry point with the Ctrl+C shutdown path, rolling log file, systemd unit
-  generation; the real SCM/systemctl cycle is untested by rule). Merge the
-  web branch when its agent reports. Next with the user: point
+  generation; the real SCM/systemctl cycle is untested by rule). ▶ Next: the
+  server gaps the web plan lists (`plans/web-ui.md` → "For the server":
+  `/open` by name, `/balances/names`, `MintedEnrolment.url`, `?token=` on
+  attachments, `wait` on parity, an all-attachments list). Next with the user: point
   QuickBooks' Web Connector on cad-3 at this server over HTTPS (steps in
   `plans/qbd-import.md`), run a sync, and see whether the 14 bridge gaps close.
 - Phase 1 — Ledger core
@@ -346,13 +351,15 @@ Phases are ordered; each ends usable. **Current step is marked ▶.**
       `ff88706`) the rerun has 0 failures, 0 open-balance mismatches, 145/159
       accounts exact. The 14 still off are all bridge gaps (card charges,
       transfers): see question 7.
-- [~] Phase 4: web UI foundation merged (`web UI`, 157 tests, Playwright);
-      other forms, reports catalog UI, admin screens, register editing next.
+- [x] Phase 4: web UI foundation (157 tests) and phase B (`4c8dc59`: all forms,
+      registers, reconcile, feeds, reports, admin; 233 tests, 40 Playwright).
+      Left (see `plans/web-ui.md`): list record editors, payroll/sales orders/
+      progress invoicing, PDF/XLSX export, company creation, code-splitting.
 - [x] Phase 5: desktop merged (`5951bd2`): local + thin-client modes, NSIS built.
 - [x] Phase 6: backups, self-update, tunnel: libraries, server routes, CLI (merged).
       Signing keys in GitHub secrets (`42946a7`); release workflow untested
       until the first tag.
-- [x] Phase 7: feeds library and routes (merged); feeds UI pending (phase B).
+- [x] Phase 7: feeds library, routes and UI (merged).
 - [ ] Phase 8: parity tail.
 - [ ] Phase 9: native QBW research.
 
