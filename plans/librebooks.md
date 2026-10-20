@@ -205,9 +205,14 @@ Phases are ordered; each ends usable. **Current step is marked ▶.**
   generation; the real SCM/systemctl cycle is untested by rule). The server
   gaps the web plan listed are closed (`bfa063a`: `/balances/names`, all-
   attachments list; the rest were already so and are now documented); a Web
-  Connector session race CI found is fixed (`90fc1f6`). ▶ Next: the UI
-  follow-ups in `plans/web-ui.md` (generated types for the stand-ins,
-  `/balances/names` in the centres, an Attached tab). Next with the user: point
+  Connector session race CI found is fixed (`90fc1f6`). Merged web phase C
+  (`74124b4`: generated lb-qbd types in, Balance/Balance Total in the Centers
+  from `/balances/names`, the Attached tab, 423 in the fixture; 235 web tests,
+  41 Playwright). Import API (`2f8c1e1`): its shapes export to TS, jobs emit
+  `import` events, the status long-poll returns on progress; CI now lints and
+  tests the desktop app on both platforms (`498401b`). ▶ Running: a web agent
+  swapping the last import type copies for the generated ones and making the
+  Import window event-driven. Next with the user: point
   QuickBooks' Web Connector on cad-3 at this server over HTTPS (steps in
   `plans/qbd-import.md`), run a sync, and see whether the 14 bridge gaps close.
 - Phase 1 — Ledger core
