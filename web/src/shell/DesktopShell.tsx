@@ -12,7 +12,8 @@ import { windowTitle } from '~/windows/catalog';
 import { useWindows } from '~/windows/WindowsProvider';
 import { FixtureBadge, LiveIndicator, NAV_ICONS, ThemeToggle } from './chrome';
 import type { RunCommand } from './GlobalCommands';
-import { MENUS, NAV_ITEMS, type MenuItem } from './menus';
+import { useIsAdmin } from '~/api/hooks';
+import { MENUS, NAV_ITEMS, visibleEntries, type MenuItem } from './menus';
 import { UserMenu } from './UserMenu';
 import { WindowHost } from './WindowHost';
 import classes from './shell.module.css';
@@ -43,13 +44,14 @@ function TopMenu({ run, onShortcuts }: { run: RunCommand; onShortcuts(): void })
   const windows = useWindows();
   const { state } = windows;
   const { format } = useShortcutCatalog();
+  const admin = useIsAdmin();
   return (
     <Menubar trigger="click" aria-label="Main menu">
       {MENUS.map((m) => (
         <Menubar.Menu key={m.label}>
           <Menubar.Target>{m.label}</Menubar.Target>
           <Menubar.Dropdown>
-            {m.entries.map((e, i) =>
+            {visibleEntries(m.entries, admin).map((e, i) =>
               'divider' in e ? (
                 <Menu.Divider key={`d${i}`} />
               ) : 'children' in e ? (

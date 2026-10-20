@@ -1,70 +1,98 @@
 import { describe, expect, test } from 'bun:test';
-import { allSections, groupEnd, reportToCsv, visibleRows } from './rows';
-import type { Report, ReportRow } from './types';
+import type { Cell, Report, Row, RowKind } from '~/api/types';
+import { allSections, columnGroups, formatPercent, groupEnd, reportToCsv, valueText, visibleRows } from './rows';
 
-const row = (id: string, kind: ReportRow['kind'], depth: number, label: string, amount: number | null = null): ReportRow => ({
-  id,
+const text = (s: string): Cell => ({ value: { type: 'Text', value: s } });
+const money = (c: number): Cell => ({ value: { type: 'Money', value: c } });
+const empty = (): Cell => ({ value: { type: 'Empty' } });
+const row = (kind: RowKind, depth: number, label: string, amount?: number): Row => ({
   kind,
   depth,
-  cells: [label, amount],
+  cells: [text(label), amount === undefined ? empty() : money(amount)],
 });
 
-// Income
-//   Sales
-//     Cabinetry      100
-//     Furniture      200
-//   Total Sales      300
-//   Design            50
-// Total Income       350
-// Net Income         350
-const rows: ReportRow[] = [
-  row('inc', 'section', 0, 'Income'),
-  row('sales', 'section', 1, 'Sales'),
-  row('cab', 'data', 2, 'Cabinetry', 100),
-  row('fur', 'data', 2, 'Furniture', 200),
-  row('tsales', 'subtotal', 1, 'Total Sales', 300),
-  row('design', 'data', 1, 'Design', 50),
-  row('tinc', 'subtotal', 0, 'Total Income', 350),
-  row('net', 'total', 0, 'Net Income', 350),
+// A small P&L outline: Income (two accounts) closed by Total Income, then Net Income.
+const rows: Row[] = [
+  row('Header', 0, 'Income'),
+  row('Data', 1, 'Design Services', 10_000),
+  row('Header', 1, 'Sales'),
+  row('Data', 2, 'Sales:Custom Furniture', 20_000),
+  row('Subtotal', 1, 'Total Sales', 20_000),
+  row('Subtotal', 0, 'Total Income', 30_000),
+  row('Total', 0, 'Net Income', 30_000),
 ];
 
 describe('report outline', () => {
-  test('group ends at the matching subtotal', () => {
-    expect(groupEnd(rows, 0)).toBe(6);
-    expect(groupEnd(rows, 1)).toBe(4);
+  test('a header is closed by the subtotal at its depth', () => {
+    expect(groupEnd(rows, 0)).toBe(5);
+    expect(groupEnd(rows, 2)).toBe(4);
+    expect(groupEnd([row('Header', 0, 'Lonely'), row('Data', 1, 'x', 1)], 0)).toBe(-1);
   });
-  test('expanded shows everything', () => {
-    expect(visibleRows(rows, new Set()).map((v) => v.row.id)).toEqual(rows.map((r) => r.id));
+  test('collapsing shows the subtotal on the header line and hides the group', () => {
+    const v = visibleRows(rows, new Set([0]));
+    expect(v.map((r) => r.row.cells[0]!.value)).toEqual([text('Income').value, text('Net Income').value]);
+    expect(v[0]!.collapsed).toBe(true);
+    expect(v[0]!.cells[1]).toEqual(money(30_000));
   });
-  test('collapsing a section shows its subtotal on its own line', () => {
-    const v = visibleRows(rows, new Set(['sales']));
-    expect(v.map((x) => x.row.id)).toEqual(['inc', 'sales', 'design', 'tinc', 'net']);
-    expect(v[1]!.cells).toEqual(['Sales', 300]);
-    expect(v[1]!.collapsed).toBe(true);
+  test('nested collapse only hides its own group', () => {
+    const v = visibleRows(rows, new Set([2]));
+    expect(v).toHaveLength(5);
+    expect(v[2]!.cells[1]).toEqual(money(20_000));
+    expect(v[2]!.row.kind).toBe('Header');
   });
-  test('collapse all keeps only the top level', () => {
-    const v = visibleRows(rows, allSections(rows));
-    expect(v.map((x) => x.row.id)).toEqual(['inc', 'net']);
-    expect(v[0]!.cells).toEqual(['Income', 350]);
+  test('allSections lists only headers that have a closing subtotal', () => {
+    expect([...allSections(rows)]).toEqual([0, 2]);
   });
 });
 
-test('CSV export', () => {
-  const r: Report = {
-    title: 'Profit & Loss',
-    subtitle: 'October 2026',
-    company_name: 'Juniper Hill, LLC',
-    basis: 'Accrual',
-    range: { from: '2026-10-01', to: '2026-10-31' },
-    columns: [
-      { id: 'label', label: '', kind: 'text' },
-      { id: 'amount', label: 'Amount', kind: 'money' },
-    ],
-    rows: [row('a', 'section', 0, 'Income'), row('b', 'data', 1, 'Sales, "Retail"', -123_456)],
-    generated_at: '2026-10-19T00:00:00Z',
-    request: { report: 'profit_and_loss' },
-  };
-  expect(reportToCsv(r)).toBe(
-    ['"Juniper Hill, LLC"', 'Profit & Loss', 'October 2026', 'Accrual Basis', '', ',Amount', 'Income,', '"  Sales, ""Retail""",-1234.56', ''].join('\r\n'),
-  );
+describe('cell text', () => {
+  test('values format by type', () => {
+    expect(valueText({ type: 'Money', value: -123_456 })).toBe('-1,234.56');
+    expect(valueText({ type: 'Money', value: -5 }, { parens: true })).toBe('(0.05)');
+    expect(valueText({ type: 'Date', value: '2026-10-19' })).toBe('10/19/2026');
+    expect(valueText({ type: 'Date', value: '2026-10-19' }, { shortDate: true })).toBe('10/19/26');
+    expect(valueText({ type: 'Percent', value: '12.5' })).toBe('12.5%');
+    expect(valueText({ type: 'Number', value: '1234.5' })).toBe('1,234.5');
+    expect(valueText({ type: 'Empty' })).toBe('');
+    expect(formatPercent('-100')).toBe('-100%');
+  });
+  test('column groups span consecutive columns', () => {
+    const cols = [
+      { id: 'label', label: '', kind: 'Text', align: 'Left' },
+      { id: 'c0', label: 'Actual', kind: 'Money', align: 'Right', group: 'Oct 2026' },
+      { id: 'c1', label: '% of Income', kind: 'Percent', align: 'Right', group: 'Oct 2026' },
+      { id: 'c2', label: 'Actual', kind: 'Money', align: 'Right', group: 'Sep 2026' },
+    ] as const;
+    expect(columnGroups(cols)).toEqual([
+      { label: '', start: 0, span: 1 },
+      { label: 'Oct 2026', start: 1, span: 2 },
+      { label: 'Sep 2026', start: 3, span: 1 },
+    ]);
+  });
+});
+
+describe('CSV export', () => {
+  test('writes a title block, headers and indented labels; quotes commas', () => {
+    const r: Report = {
+      id: 'ProfitAndLoss',
+      title: 'Profit & Loss',
+      company_name: 'Juniper Hill Woodworks',
+      subtitle: 'October 1 through October 19, 2026',
+      basis: 'Accrual',
+      generated_at: '2026-10-19T00:00:00Z',
+      columns: [
+        { id: 'label', label: '', kind: 'Text', align: 'Left' },
+        { id: 'amount', label: 'Oct 1 - 19, 26', kind: 'Money', align: 'Right' },
+      ],
+      rows: [row('Header', 0, 'Income'), row('Data', 1, 'Sales, net', 1_050), row('Spacer', 0, ''), row('Total', 0, 'Net Income', 1_050)],
+      notes: [],
+    };
+    const lines = reportToCsv(r).split('\r\n');
+    expect(lines.slice(0, 4)).toEqual(['Juniper Hill Woodworks', 'Profit & Loss', '"October 1 through October 19, 2026"', 'Accrual Basis']);
+    expect(lines[5]).toBe(',"Oct 1 - 19, 26"');
+    expect(lines[6]).toBe('Income,');
+    expect(lines[7]).toBe('"  Sales, net",10.50');
+    expect(lines[8]).toBe('');
+    expect(lines[9]).toBe('Net Income,10.50');
+  });
 });

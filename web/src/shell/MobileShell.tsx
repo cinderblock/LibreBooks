@@ -18,6 +18,7 @@ import {
   IconReceipt,
   IconSearch,
   IconTruck,
+  IconUserCircle,
   IconUserPlus,
   IconUsers,
 } from '@tabler/icons-react';
@@ -103,11 +104,11 @@ export function MobileShell({ live, onShortcuts }: { live: LiveStatus; onShortcu
       <Drawer opened={plus} onClose={() => setPlus(false)} position="bottom" size="auto" title="Create" radius="md">
         <div className={classes.sheetGrid}>
           <SheetItem icon={<IconChecks size={26} />} label="Write Check" onClick={() => go(paths.newCheck())} />
-          <SheetItem icon={<IconFileInvoice size={26} />} label="Invoice" onClick={() => go(paths.form('invoice'))} todo />
-          <SheetItem icon={<IconCash size={26} />} label="Receive Payment" onClick={() => go(paths.form('receive-payment'))} todo />
-          <SheetItem icon={<IconReceipt size={26} />} label="Enter Bill" onClick={() => go(paths.form('bill'))} todo />
-          <SheetItem icon={<IconBuildingBank size={26} />} label="Deposit" onClick={() => go(paths.form('deposit'))} todo />
-          <SheetItem icon={<IconCreditCard size={26} />} label="Card Charge" onClick={() => go(paths.form('cc-charge'))} todo />
+          <SheetItem icon={<IconFileInvoice size={26} />} label="Invoice" onClick={() => go(paths.form('invoice'))} />
+          <SheetItem icon={<IconCash size={26} />} label="Receive Payment" onClick={() => go(paths.form('receive-payment'))} />
+          <SheetItem icon={<IconReceipt size={26} />} label="Enter Bill" onClick={() => go(paths.form('bill'))} />
+          <SheetItem icon={<IconBuildingBank size={26} />} label="Deposit" onClick={() => go(paths.form('deposit'))} />
+          <SheetItem icon={<IconCreditCard size={26} />} label="Card Charge" onClick={() => go(paths.form('cc-charge'))} />
           <SheetItem
             icon={<IconUserPlus size={26} />}
             label="New Customer"
@@ -142,6 +143,7 @@ export function MobileShell({ live, onShortcuts }: { live: LiveStatus; onShortcu
               <SheetItem key={n.label} icon={NAV_ICONS[n.icon]!(26)} label={n.label === 'Lists' ? 'Accounts' : n.label} onClick={() => go(n.path)} />
             ))}
             <SheetItem icon={<IconSearch size={26} />} label="Find" onClick={() => go(paths.find())} />
+            <SheetItem icon={<IconUserCircle size={26} />} label="My Account" onClick={() => go(paths.account())} />
           </div>
           {state.windows.length > 1 && (
             <div>

@@ -159,7 +159,7 @@ function OtherNames() {
       rows={rows}
       loading={isLoading}
       error={error}
-      onOpen={(r) => open(paths.report('transaction_list_by_date', { entity: r.id, macro: 'All' }))}
+      onOpen={(r) => open(paths.report('TransactionListByDate', { name: r.id, dates: 'All' }))}
       columns={[{ key: 'phone', header: 'Phone', width: '160px', render: (r) => r.cols[0] }]}
     />
   );

@@ -2,11 +2,13 @@
 // the desktop app's local session and fixture mode have nothing to sign out of).
 
 import { Avatar, Menu, Text, UnstyledButton } from '@mantine/core';
-import { IconLogout } from '@tabler/icons-react';
+import { IconLogout, IconUserCircle } from '@tabler/icons-react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router';
 import { useApi } from '~/api/context';
 import { useSession } from '~/api/hooks';
+import { useOpenWindow } from '~/windows/WindowsProvider';
+import { paths } from '~/windows/paths';
 
 export function useSignOut(): (() => void) | null {
   const api = useApi();
@@ -34,6 +36,7 @@ function initials(name: string): string {
 export function UserMenu() {
   const { data } = useSession();
   const signOut = useSignOut();
+  const open = useOpenWindow();
   if (!data) return null;
   const { user } = data;
   return (
@@ -55,6 +58,9 @@ export function UserMenu() {
             {user.kind ? ` · ${user.kind === 'local' ? 'this computer' : `${user.kind} sign-in`}` : ''}
           </Text>
         </Menu.Label>
+        <Menu.Item leftSection={<IconUserCircle size={14} />} onClick={() => open(paths.account())}>
+          My Account
+        </Menu.Item>
         {signOut && (
           <Menu.Item leftSection={<IconLogout size={14} />} onClick={signOut}>
             Sign out

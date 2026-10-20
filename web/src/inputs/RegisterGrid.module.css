@@ -22,6 +22,32 @@
   grid-template-columns: 84px 84px minmax(160px, 2fr) minmax(0, 1fr);
 }
 
+/* 1-Line mode: Date · Number · Payee · Account · Memo · amounts · balance. */
+.one {
+  display: grid;
+  grid-template-columns: 84px 90px minmax(120px, 1.4fr) minmax(120px, 1.4fr) minmax(80px, 1fr) 110px 36px 110px 120px;
+  align-items: center;
+  height: 26px;
+}
+
+.one > * {
+  padding: 0 6px;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.bolt {
+  display: inline-flex;
+  color: var(--mantine-color-yellow-7);
+  margin-right: 1px;
+}
+
+.entry[data-editing] {
+  background: light-dark(#e8f3ff, rgba(50, 120, 250, 0.12));
+}
+
 .r1 > *,
 .r2 > * {
   padding: 0 6px;

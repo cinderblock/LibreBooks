@@ -358,6 +358,39 @@ export function formatDateShort(iso: IsoDate | null | undefined): string {
   return `${String(m).padStart(2, '0')}/${String(d).padStart(2, '0')}/${String(y % 100).padStart(2, '0')}`;
 }
 
+/**
+ * A timestamp as people read it in a list: "just now", "12 minutes ago",
+ * "in 3 days", "yesterday". Past and future both; coarse on purpose.
+ */
+export function relativeTime(iso: string | null | undefined, now: Date = new Date()): string {
+  if (!iso) return '';
+  const t = new Date(iso).getTime();
+  if (Number.isNaN(t)) return iso;
+  const diff = Math.round((t - now.getTime()) / 1000);
+  const past = diff < 0;
+  const s = Math.abs(diff);
+  const say = (n: number, unit: string) => {
+    const phrase = `${n} ${unit}${n === 1 ? '' : 's'}`;
+    return past ? `${phrase} ago` : `in ${phrase}`;
+  };
+  if (s < 45) return past ? 'just now' : 'in a moment';
+  if (s < 3600) return say(Math.max(1, Math.round(s / 60)), 'minute');
+  if (s < 86_400) return say(Math.round(s / 3600), 'hour');
+  const days = Math.round(s / 86_400);
+  if (days === 1) return past ? 'yesterday' : 'tomorrow';
+  if (days < 30) return say(days, 'day');
+  if (days < 365) return say(Math.round(days / 30), 'month');
+  return say(Math.round(days / 365), 'year');
+}
+
+/** `2026-10-19T14:05:00Z` → `10/19/2026 2:05 PM` in local time. */
+export function formatDateTime(iso: string | null | undefined): string {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return `${formatDate(todayIso(d))} ${d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}`;
+}
+
 /** Local-midnight Date for a calendar widget (which works in local time). */
 export function isoToLocalDate(iso: IsoDate): Date {
   const { y, m, d } = split(iso);

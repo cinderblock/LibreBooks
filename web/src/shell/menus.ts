@@ -11,6 +11,8 @@ export interface MenuItem {
   path?: string;
   /** Not built yet: shown dimmed, opens a placeholder explaining so. */
   todo?: boolean;
+  /** Server admins only: hidden from everyone else (the server refuses anyway). */
+  admin?: boolean;
   keywords?: string[];
 }
 
@@ -21,7 +23,7 @@ export interface Menu {
   entries: MenuEntry[];
 }
 
-/** Forms not built yet; each opens a placeholder window naming it. */
+/** Every form slug (`/forms/<slug>/new`) and its menu label. */
 export const FORM_LABELS: Record<string, string> = {
   invoice: 'Create Invoices',
   'sales-receipt': 'Enter Sales Receipts',
@@ -30,21 +32,43 @@ export const FORM_LABELS: Record<string, string> = {
   estimate: 'Create Estimates',
   bill: 'Enter Bills',
   'pay-bills': 'Pay Bills',
+  'vendor-credit': 'Enter Vendor Credits',
   'purchase-order': 'Create Purchase Orders',
   'receive-items': 'Receive Items',
   deposit: 'Make Deposits',
   transfer: 'Transfer Funds',
   'cc-charge': 'Enter Credit Card Charges',
+  'cc-credit': 'Enter Credit Card Credits',
   journal: 'Make General Journal Entries',
   reconcile: 'Reconcile',
+  'bank-feeds': 'Bank Feeds',
   'pay-employees': 'Pay Employees',
   memorized: 'Memorized Transaction List',
 };
 
+/** Slugs with a real form; the rest open a placeholder naming them. */
+const BUILT_FORMS = new Set([
+  'bill',
+  'vendor-credit',
+  'purchase-order',
+  'receive-items',
+  'cc-charge',
+  'cc-credit',
+  'invoice',
+  'sales-receipt',
+  'credit-memo',
+  'estimate',
+  'receive-payment',
+  'pay-bills',
+  'deposit',
+  'transfer',
+  'journal',
+]);
+
 const form = (key: keyof typeof FORM_LABELS & string, extra: Partial<MenuItem> = {}): MenuItem => ({
   label: FORM_LABELS[key]!,
   path: paths.form(key),
-  todo: true,
+  todo: !BUILT_FORMS.has(key),
   ...extra,
 });
 
@@ -53,10 +77,25 @@ export const MENUS: Menu[] = [
     label: 'Company',
     entries: [
       { label: 'Home Page', command: 'nav.home', path: paths.home() },
-      { label: 'Company Information', path: paths.company() },
+      { label: 'Company Information', path: paths.company(), keywords: ['closing date', 'preferences'] },
+      { label: 'Set Closing Date', path: paths.company(), admin: true, keywords: ['lock', 'period'] },
       { divider: true },
       { label: 'Chart of Accounts', command: 'nav.chartOfAccounts', path: paths.accounts() },
-      form('journal'),
+      form('journal', { command: 'form.journal' }),
+      { label: 'Attachments', path: paths.attachments(), keywords: ['receipt', 'document', 'photo', 'inbox'] },
+      { divider: true },
+      {
+        label: 'Administration',
+        children: [
+          { label: 'Users and Roles', path: paths.users(), admin: true, keywords: ['people', 'access'] },
+          { label: 'Enrolment Links', path: paths.enrollments(), admin: true, keywords: ['invite', 'passkey', 'qr'] },
+          { label: 'Server Settings', path: paths.server(), admin: true, keywords: ['update', 'tunnel', 'cloudflare', 'secrets'] },
+          { label: 'Backups', path: paths.backups(), admin: true, keywords: ['restore', 'export', 'verify'] },
+          { label: 'Import from QuickBooks', path: paths.qbdImport(), admin: true, keywords: ['qbd', 'sync', 'parity', 'web connector'] },
+          { label: 'Merge…', path: paths.merge(), admin: true, keywords: ['duplicate', 'combine'] },
+        ],
+      },
+      { label: 'My Account', path: paths.account(), keywords: ['passkeys', 'sessions', 'devices', 'sign out'] },
       { divider: true },
       { label: 'Find…', command: 'nav.find', path: paths.find() },
       { label: 'Search / Go To…', command: 'palette.open' },
@@ -68,10 +107,10 @@ export const MENUS: Menu[] = [
       { label: 'Customer Center', command: 'nav.customerCenter', path: paths.customers() },
       { divider: true },
       form('invoice', { command: 'form.invoice' }),
-      form('sales-receipt'),
-      form('receive-payment'),
-      form('credit-memo'),
-      form('estimate'),
+      form('sales-receipt', { command: 'form.salesReceipt' }),
+      form('receive-payment', { command: 'form.receivePayment' }),
+      form('credit-memo', { command: 'form.creditMemo' }),
+      form('estimate', { command: 'form.estimate' }),
     ],
   },
   {
@@ -79,9 +118,10 @@ export const MENUS: Menu[] = [
     entries: [
       { label: 'Vendor Center', command: 'nav.vendorCenter', path: paths.vendors() },
       { divider: true },
-      form('bill'),
-      form('pay-bills'),
-      form('purchase-order'),
+      form('bill', { command: 'form.bill', keywords: ['payable', 'vendor'] }),
+      form('pay-bills', { command: 'form.payBills' }),
+      form('vendor-credit', { command: 'form.vendorCredit' }),
+      form('purchase-order', { command: 'form.purchaseOrder', keywords: ['po'] }),
       form('receive-items'),
     ],
   },
@@ -93,13 +133,15 @@ export const MENUS: Menu[] = [
     label: 'Banking',
     entries: [
       { label: 'Write Checks', command: 'form.writeChecks', path: paths.newCheck(), keywords: ['check', 'pay', 'expense'] },
-      form('deposit'),
-      form('transfer'),
-      form('cc-charge'),
+      form('deposit', { command: 'form.deposit' }),
+      form('transfer', { command: 'form.transfer' }),
+      form('cc-charge', { command: 'form.ccCharge', keywords: ['credit card', 'visa'] }),
+      form('cc-credit'),
       { divider: true },
       { label: 'Use Register', command: 'nav.useRegister' },
       { label: 'Banking Overview', path: paths.banking() },
-      form('reconcile'),
+      form('reconcile', { command: 'nav.reconcile' }),
+      { label: FORM_LABELS['bank-feeds']!, command: 'nav.bankFeeds', path: paths.feeds(), keywords: ['download', 'online banking', 'import'] },
     ],
   },
   {
@@ -110,20 +152,46 @@ export const MENUS: Menu[] = [
       {
         label: 'Company & Financial',
         children: [
-          { label: 'Profit & Loss Standard', path: paths.report('profit_and_loss'), keywords: ['p&l', 'income statement'] },
-          { label: 'Balance Sheet Standard', path: paths.report('balance_sheet') },
+          { label: 'Profit & Loss Standard', path: paths.report('ProfitAndLoss'), keywords: ['p&l', 'income statement'] },
+          { label: 'Profit & Loss Detail', path: paths.report('ProfitAndLossDetail') },
+          { label: 'Profit & Loss by Class', path: paths.report('ProfitAndLossByClass') },
+          { label: 'Balance Sheet Standard', path: paths.report('BalanceSheet') },
+          { label: 'Statement of Cash Flows', path: paths.report('StatementOfCashFlows') },
+        ],
+      },
+      {
+        label: 'Customers & Receivables',
+        children: [
+          { label: 'A/R Aging Summary', path: paths.report('ArAgingSummary') },
+          { label: 'Customer Balance Summary', path: paths.report('CustomerBalanceSummary') },
+          { label: 'Open Invoices', path: paths.report('OpenInvoices') },
+        ],
+      },
+      {
+        label: 'Vendors & Payables',
+        children: [
+          { label: 'A/P Aging Summary', path: paths.report('ApAgingSummary') },
+          { label: 'Vendor Balance Summary', path: paths.report('VendorBalanceSummary') },
+          { label: 'Unpaid Bills Detail', path: paths.report('UnpaidBillsDetail') },
+        ],
+      },
+      {
+        label: 'Banking',
+        children: [
+          { label: 'Deposit Detail', path: paths.report('DepositDetail') },
+          { label: 'Check Detail', path: paths.report('CheckDetail') },
+          { label: 'Missing Checks', path: paths.report('MissingChecks') },
         ],
       },
       {
         label: 'Accountant & Taxes',
         children: [
-          { label: 'Trial Balance', path: paths.report('trial_balance') },
-          { label: 'Transaction List by Date', path: paths.report('transaction_list_by_date') },
+          { label: 'Trial Balance', path: paths.report('TrialBalance') },
+          { label: 'General Ledger', path: paths.report('GeneralLedger') },
+          { label: 'Journal', path: paths.report('Journal') },
+          { label: 'Transaction List by Date', path: paths.report('TransactionListByDate') },
+          { label: 'Audit Trail', path: paths.report('AuditTrail') },
         ],
-      },
-      {
-        label: 'Customers & Receivables',
-        children: [{ label: 'Customer Balance Summary', path: paths.report('customer_balance_summary') }],
       },
     ],
   },
@@ -137,13 +205,13 @@ export const MENUS: Menu[] = [
       { label: 'Payment Method List', path: paths.list('payment-methods') },
       { label: 'Other Names List', path: paths.list('other-names') },
       { divider: true },
-      form('memorized', { command: 'nav.memorizedTxns' }),
+      { label: FORM_LABELS.memorized!, command: 'nav.memorizedTxns', path: paths.memorized(), keywords: ['recurring', 'scheduled'] },
     ],
   },
 ];
 
-/** Every leaf item, flattened (for the palette). */
-export function allMenuItems(): Array<MenuItem & { menu: string }> {
+/** Every leaf item, flattened (for the palette); admin items only for admins. */
+export function allMenuItems(admin = true): Array<MenuItem & { menu: string }> {
   const out: Array<MenuItem & { menu: string }> = [];
   for (const m of MENUS) {
     for (const e of m.entries) {
@@ -152,7 +220,27 @@ export function allMenuItems(): Array<MenuItem & { menu: string }> {
       else out.push({ ...e, menu: m.label });
     }
   }
-  return out;
+  return admin ? out : out.filter((i) => !i.admin);
+}
+
+/** A menu's entries as this person should see them: admin items dropped, and submenus/dividers that become empty with them. */
+export function visibleEntries(entries: MenuEntry[], admin: boolean): MenuEntry[] {
+  if (admin) return entries;
+  const kept: MenuEntry[] = [];
+  for (const e of entries) {
+    if ('divider' in e) {
+      if (kept.length && !('divider' in kept[kept.length - 1]!)) kept.push(e);
+      continue;
+    }
+    if ('children' in e) {
+      const children = e.children.filter((c) => !c.admin);
+      if (children.length) kept.push({ ...e, children });
+      continue;
+    }
+    if (!e.admin) kept.push(e);
+  }
+  while (kept.length && 'divider' in kept[kept.length - 1]!) kept.pop();
+  return kept;
 }
 
 /** Desktop left navigation (QBD's icon bar), also the mobile "More" sheet. */

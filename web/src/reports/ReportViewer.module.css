@@ -10,6 +10,15 @@
   padding: var(--mantine-spacing-sm) 0;
 }
 
+.notes {
+  margin: 4px auto 0;
+  padding: 0 0 0 1.2em;
+  max-width: 640px;
+  text-align: left;
+  font-size: var(--mantine-font-size-xs);
+  color: var(--mantine-color-dimmed);
+}
+
 .scroll {
   flex: 1;
   min-height: 200px;
@@ -41,15 +50,25 @@
   min-width: 0;
 }
 
+/* The column headings (and the group headings above them) stay put. */
 .head {
   position: sticky;
   top: 0;
   z-index: 3;
-  height: 28px;
   background: var(--mantine-color-body);
   border-bottom: 2px solid var(--mantine-color-default-border);
   font-weight: 700;
   font-size: var(--mantine-font-size-xs);
+}
+
+.head .row {
+  height: 28px;
+}
+
+.group {
+  text-align: center;
+  border-bottom: 1px solid var(--mantine-color-default-border);
+  color: var(--mantine-color-dimmed);
 }
 
 .sticky {
@@ -80,27 +99,28 @@
   cursor: zoom-in;
 }
 
-.row[data-kind='section'] {
+.cellDrill:hover {
+  text-decoration: underline;
+  cursor: zoom-in;
+}
+
+.row[data-kind='Header'] {
   font-weight: 600;
 }
 
-.row[data-kind='section'][data-collapsed] {
-  font-weight: 600;
-}
-
-.row[data-kind='subtotal'] .num {
+.row[data-kind='Subtotal'] .num {
   border-top: 1px solid var(--mantine-color-text);
 }
 
-.row[data-kind='subtotal'] {
+.row[data-kind='Subtotal'] {
   font-weight: 600;
 }
 
-.row[data-kind='total'] {
+.row[data-kind='Total'] {
   font-weight: 700;
 }
 
-.row[data-kind='total'] .num {
+.row[data-kind='Total'] .num {
   border-top: 1px solid var(--mantine-color-text);
   border-bottom: 3px double var(--mantine-color-text);
 }
@@ -108,6 +128,10 @@
 .num {
   text-align: right;
   font-variant-numeric: tabular-nums;
+}
+
+.center {
+  text-align: center;
 }
 
 .num[data-negative] {

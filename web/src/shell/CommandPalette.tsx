@@ -5,7 +5,7 @@
 import { Spotlight, type SpotlightActionData, type SpotlightActionGroupData } from '@mantine/spotlight';
 import { IconSearch } from '@tabler/icons-react';
 import { useMemo, useState } from 'react';
-import { useAccounts, useEntities, useItems, useReportCatalog } from '~/api/hooks';
+import { useAccounts, useEntities, useIsAdmin, useItems, useReportCatalog } from '~/api/hooks';
 import { ACCOUNT_TYPE_LABEL, hasRegister } from '~/lib/accountTypes';
 import { prepare, search } from '~/lib/quickfill';
 import { ITEM_TYPE_LABEL } from '~/lib/txnTypes';
@@ -35,6 +35,7 @@ export function CommandPalette({ run }: { run: RunCommand }) {
   const { data: entities = [] } = useEntities();
   const { data: items = [] } = useItems();
   const { data: reports = [] } = useReportCatalog();
+  const admin = useIsAdmin();
   const [query, setQuery] = useState('');
 
   const entries = useMemo<Entry[]>(() => {
@@ -42,7 +43,7 @@ export function CommandPalette({ run }: { run: RunCommand }) {
     for (const w of windows.state.windows) {
       out.push({ id: `win:${w.key}`, label: windowTitle(w, windows.state.titles), description: 'Open window', group: 'Open windows', run: () => windows.activate(w.key) });
     }
-    for (const m of allMenuItems()) {
+    for (const m of allMenuItems(admin)) {
       const key = m.command ? format(m.command)[0] : undefined;
       out.push({
         id: `menu:${m.menu}:${m.label}`,
@@ -54,8 +55,9 @@ export function CommandPalette({ run }: { run: RunCommand }) {
       });
     }
     for (const r of reports) {
-      if (r.params.includes('account')) continue;
-      out.push({ id: `report:${r.id}`, label: r.name, description: `Report · ${r.category}`, group: 'Reports', run: () => windows.open(paths.report(r.id, { macro: r.default_macro })) });
+      // The QuickReport needs an account; it's reached from the accounts below.
+      if (r.id === 'AccountQuickReport') continue;
+      out.push({ id: `report:${r.id}`, label: r.name, description: `Report · ${r.category_label}`, group: 'Reports', keys: [r.description], run: () => windows.open(paths.report(r.id)) });
     }
     for (const a of accounts) {
       if (!a.is_active) continue;
@@ -65,7 +67,7 @@ export function CommandPalette({ run }: { run: RunCommand }) {
         description: `${ACCOUNT_TYPE_LABEL[a.account_type]} · ${hasRegister(a.account_type) ? 'register' : 'QuickReport'}`,
         group: 'Accounts',
         keys: a.number ? [a.number] : undefined,
-        run: () => windows.open(hasRegister(a.account_type) ? paths.register(a.id) : paths.report('account_quickreport', { account: a.id, macro: 'ThisFiscalYearToDate' })),
+        run: () => windows.open(hasRegister(a.account_type) ? paths.register(a.id) : paths.report('AccountQuickReport', { acct: a.id, dates: 'ThisFiscalYearToDate' })),
       });
     }
     for (const e of entities) {
@@ -84,7 +86,7 @@ export function CommandPalette({ run }: { run: RunCommand }) {
       out.push({ id: `item:${i.id}`, label: i.full_name, description: `Item · ${ITEM_TYPE_LABEL[i.item_type]}`, group: 'Items', keys: i.sku ? [i.sku] : undefined, run: () => windows.open(paths.list('items')) });
     }
     return out;
-  }, [windows, accounts, entities, items, reports, format, run]);
+  }, [windows, accounts, entities, items, reports, format, run, admin]);
 
   const prepared = useMemo(() => prepare(entries.map((e) => ({ fullName: e.label, keys: e.keys }))), [entries]);
 

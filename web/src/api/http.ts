@@ -8,15 +8,63 @@
 //   instead; pass it as `token`.
 // - Non-2xx answers become a typed `ApiError` from the error envelope.
 
-import type { Report, ReportCatalogEntry, ReportRequest } from '~/reports/types';
-import { type ApiClient, type EventHandlers, type EventSubscription, type TxnQuery, txnQueryParams } from './client';
+import { type ApiClient, type EventHandlers, type EventSubscription, type FileDownload, type TxnQuery, txnQueryParams } from './client';
 import { ApiError, apiErrorFromBody } from './errors';
 import { parseApiJson, stringifyApiJson } from './json';
 import type {
   AccountBalance,
+  AttachmentMeta,
+  AttachmentQuery,
+  AttachmentRecord,
+  BackupList,
+  BackupRecord,
+  CompanyBackupsStatus,
+  DeviceKeyInfo,
+  EnrolmentInfo,
+  ImportSettings,
+  MergeRequest,
+  MintedEnrolmentLink,
+  NewEnrolment,
+  ParityReport,
+  PasskeyInfo,
+  QbdImportStatus,
+  QbdSyncOptions,
+  QbwcPassword,
+  RestoreRequest,
+  Restored,
+  Role,
+  SecretInfo,
+  ServerBackupsStatus,
+  ServerSettings,
+  ServerView,
+  SessionInfo,
+  TunnelUpdate,
+  TunnelView,
+  UpdateInstalled,
+  UpdateView,
+  UserDetail,
+  UserUpdate,
+  VerifyReport,
+  AddOutcome,
+  AddRequest,
+  AmazonPreview,
   AuditEntry,
+  BatchOutcome,
+  CatalogEntry,
   ChangeEvent,
   ClearedStatus,
+  FeedAccountSummary,
+  FeedAddPreview,
+  FeedConnection,
+  FeedDetection,
+  FeedImportRequest,
+  FeedQuery,
+  FeedRule,
+  FeedTxn,
+  IngestReport,
+  MatchCandidate,
+  SimpleFinClaim,
+  StatementAccount,
   CompanyId,
   CompanyInfo,
   CompanySummary,
@@ -30,17 +78,32 @@ import type {
   ListRecords,
   LoginFinish,
   LoginStart,
-  OpenTxn,
+  MemorizedDue,
   PreviewOutcome,
+  ReconcileOverview,
+  ReconcileStatus,
+  Reconciliation,
+  ReconciliationView,
   RegisterResponse,
+  Report,
+  ReportRequest,
+  Saved,
+  SavedKind,
   SaveOutcome,
   Session,
+  StartReconcile,
   Txn,
   TxnSummary,
   TxnType,
   TxnWithPostings,
   User,
 } from './types';
+
+/** The filename a `Content-Disposition: attachment; filename="…"` header names. */
+export function dispositionFilename(header: string | null, fallback: string): string {
+  const m = header ? /filename\*?=(?:UTF-8''|")?([^";]+)"?/i.exec(header) : null;
+  return m?.[1] ? decodeURIComponent(m[1]) : fallback;
+}
 
 type Method = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
 
@@ -73,12 +136,18 @@ export class HttpApiClient implements ApiClient {
     this.doFetch = opts.fetch ?? ((url, init) => fetch(url, init));
   }
 
-  private async request<T>(method: Method, path: string, opts: { query?: URLSearchParams; body?: unknown } = {}): Promise<T> {
+  /**
+   * One request, with the auth and CSRF headers, raising `ApiError` on a non-2xx
+   * answer. `body` is JSON unless it's a `FormData` (multipart uploads), whose
+   * content type the browser sets (it carries the boundary).
+   */
+  private async raw(method: Method, path: string, opts: { query?: URLSearchParams; body?: unknown; accept?: string } = {}): Promise<Response> {
     const qs = opts.query?.toString();
     const url = `${this.base}${path}${qs ? `?${qs}` : ''}`;
-    const headers: Record<string, string> = { Accept: 'application/json' };
+    const headers: Record<string, string> = { Accept: opts.accept ?? 'application/json' };
     if (method !== 'GET') headers['X-LibreBooks'] = '1';
-    if (opts.body !== undefined) headers['Content-Type'] = 'application/json';
+    const multipart = typeof FormData !== 'undefined' && opts.body instanceof FormData;
+    if (opts.body !== undefined && !multipart) headers['Content-Type'] = 'application/json';
     if (this.token) headers.Authorization = `Bearer ${this.token}`;
     let res: Response;
     try {
@@ -86,13 +155,13 @@ export class HttpApiClient implements ApiClient {
         method,
         headers,
         credentials: 'include',
-        body: opts.body === undefined ? undefined : stringifyApiJson(opts.body),
+        body: opts.body === undefined ? undefined : multipart ? (opts.body as FormData) : stringifyApiJson(opts.body),
       });
     } catch (e) {
       throw new ApiError(0, 'network', (e as Error).message || 'Network error');
     }
-    const text = res.status === 204 ? '' : await res.text();
     if (!res.ok) {
+      const text = await res.text();
       let parsed: unknown;
       try {
         parsed = text ? JSON.parse(text) : undefined;
@@ -101,12 +170,24 @@ export class HttpApiClient implements ApiClient {
       }
       throw apiErrorFromBody(res.status, text, parsed);
     }
+    return res;
+  }
+
+  private async request<T>(method: Method, path: string, opts: { query?: URLSearchParams; body?: unknown } = {}): Promise<T> {
+    const res = await this.raw(method, path, opts);
+    const text = res.status === 204 ? '' : await res.text();
     if (text === '') return undefined as T;
     try {
       return parseApiJson<T>(text);
     } catch {
       throw new ApiError(res.status, 'bad_response', 'The server sent something that is not JSON.');
     }
+  }
+
+  /** A file the server produced, named by its Content-Disposition. */
+  private async download(method: Method, path: string, fallback: string, opts: { query?: URLSearchParams; body?: unknown } = {}): Promise<FileDownload> {
+    const res = await this.raw(method, path, { ...opts, accept: '*/*' });
+    return { blob: await res.blob(), filename: dispositionFilename(res.headers.get('content-disposition'), fallback) };
   }
 
   private co(co: CompanyId, path: string): string {
@@ -214,16 +295,374 @@ export class HttpApiClient implements ApiClient {
     return this.request<AccountBalance[]>('GET', this.co(co, '/balances'), { query: rangeParams(range) });
   }
   open(co: CompanyId, entityId: string, kind: 'receivable' | 'payable') {
-    return this.request<OpenTxn[]>('GET', this.co(co, '/open'), {
+    return this.request<TxnSummary[]>('GET', this.co(co, '/open'), {
       query: new URLSearchParams({ entity_id: entityId, kind }),
     });
   }
+  undeposited(co: CompanyId) {
+    return this.request<TxnSummary[]>('GET', this.co(co, '/undeposited'));
+  }
 
   reportCatalog(co: CompanyId) {
-    return this.request<ReportCatalogEntry[]>('GET', this.co(co, '/reports'));
+    return this.request<CatalogEntry[]>('GET', this.co(co, '/reports'));
   }
   runReport(co: CompanyId, request: ReportRequest) {
     return this.request<Report>('POST', this.co(co, '/reports/run'), { body: request });
+  }
+  exportReport(co: CompanyId, request: ReportRequest, format: 'csv') {
+    return this.download('POST', this.co(co, '/reports/export'), `${request.title ?? request.report}.${format}`, {
+      query: new URLSearchParams({ format }),
+      body: request,
+    });
+  }
+
+  saved(co: CompanyId, kind: SavedKind) {
+    return this.request<Saved[]>('GET', this.co(co, `/saved/${kind}`));
+  }
+  createSaved(co: CompanyId, kind: SavedKind, name: string, doc: unknown) {
+    return this.request<Saved>('POST', this.co(co, `/saved/${kind}`), { body: { name, doc } });
+  }
+  updateSaved(co: CompanyId, kind: SavedKind, id: string, name: string, doc: unknown) {
+    return this.request<Saved>('PUT', this.co(co, `/saved/${kind}/${encodeURIComponent(id)}`), { body: { name, doc } });
+  }
+  deleteSaved(co: CompanyId, kind: SavedKind, id: string) {
+    return this.request<void>('DELETE', this.co(co, `/saved/${kind}/${encodeURIComponent(id)}`));
+  }
+  memorizedDue(co: CompanyId) {
+    return this.request<MemorizedDue[]>('GET', this.co(co, '/memorized/due'));
+  }
+  useMemorized(co: CompanyId, id: string, date?: string | null) {
+    const p = new URLSearchParams();
+    if (date) p.set('date', date);
+    return this.request<Txn>('GET', this.co(co, `/memorized/${encodeURIComponent(id)}/use`), { query: p });
+  }
+
+  reconcileOverview(co: CompanyId, accountId: string) {
+    return this.request<ReconcileOverview>('GET', this.co(co, `/accounts/${encodeURIComponent(accountId)}/reconcile`));
+  }
+  startReconcile(co: CompanyId, accountId: string, body: StartReconcile) {
+    return this.request<Reconciliation>('POST', this.co(co, `/accounts/${encodeURIComponent(accountId)}/reconcile`), { body });
+  }
+  reconciliation(co: CompanyId, id: string) {
+    return this.request<ReconciliationView>('GET', this.co(co, `/reconciliations/${encodeURIComponent(id)}`));
+  }
+  markReconcile(co: CompanyId, id: string, txnIds: string[], marked: boolean) {
+    return this.request<ReconcileStatus>('POST', this.co(co, `/reconciliations/${encodeURIComponent(id)}/mark`), { body: { txn_ids: txnIds, marked } });
+  }
+  finishReconcile(co: CompanyId, id: string, adjust: boolean) {
+    return this.request<Reconciliation>('POST', this.co(co, `/reconciliations/${encodeURIComponent(id)}/finish`), { body: { adjust } });
+  }
+  discardReconcile(co: CompanyId, id: string) {
+    return this.request<void>('DELETE', this.co(co, `/reconciliations/${encodeURIComponent(id)}`));
+  }
+  async undoReconcile(co: CompanyId, accountId: string) {
+    const r = await this.request<{ undone: Reconciliation | null }>('POST', this.co(co, `/accounts/${encodeURIComponent(accountId)}/reconcile/undo`));
+    return r.undone;
+  }
+
+  // ---- bank feeds -----------------------------------------------------------
+
+  private feedQuery(q: FeedQuery = {}): URLSearchParams {
+    const p = new URLSearchParams();
+    for (const [k, v] of Object.entries(q)) {
+      if (v === null || v === undefined) continue;
+      if (Array.isArray(v)) {
+        if (v.length) p.set(k, v.join(','));
+      } else if (typeof v === 'boolean') {
+        if (v) p.set(k, 'true');
+      } else p.set(k, String(v));
+    }
+    return p;
+  }
+  feedsSummary(co: CompanyId) {
+    return this.request<FeedAccountSummary[]>('GET', this.co(co, '/feeds'));
+  }
+  feedTxns(co: CompanyId, query?: FeedQuery) {
+    return this.request<FeedTxn[]>('GET', this.co(co, '/feeds/txns'), { query: this.feedQuery(query) });
+  }
+  feedTxn(co: CompanyId, id: string) {
+    return this.request<FeedTxn>('GET', this.co(co, `/feeds/txns/${encodeURIComponent(id)}`));
+  }
+  feedDetect(co: CompanyId, file: File) {
+    const body = new FormData();
+    body.append('file', file, file.name);
+    return this.request<FeedDetection>('POST', this.co(co, '/feeds/detect'), { body });
+  }
+  feedImport(co: CompanyId, req: FeedImportRequest) {
+    const body = new FormData();
+    body.append('file', req.file, req.file.name);
+    if (req.account_id) body.append('account_id', req.account_id);
+    if (req.connection_id) body.append('connection_id', req.connection_id);
+    if (req.mapping) body.append('mapping', JSON.stringify(req.mapping));
+    if (req.statement !== null && req.statement !== undefined) body.append('statement', String(req.statement));
+    return this.request<IngestReport>('POST', this.co(co, '/feeds/import'), { body });
+  }
+  feedCandidates(co: CompanyId, id: string, days?: number) {
+    const p = new URLSearchParams();
+    if (days) p.set('days', String(days));
+    return this.request<MatchCandidate[]>('GET', this.co(co, `/feeds/txns/${encodeURIComponent(id)}/candidates`), { query: p });
+  }
+  feedMatch(co: CompanyId, id: string, txnId: string) {
+    return this.request<void>('POST', this.co(co, `/feeds/txns/${encodeURIComponent(id)}/match`), { body: { txn_id: txnId } });
+  }
+  feedPreview(co: CompanyId, id: string, req: AddRequest) {
+    return this.request<FeedAddPreview>('POST', this.co(co, `/feeds/txns/${encodeURIComponent(id)}/preview`), { body: req });
+  }
+  feedAdd(co: CompanyId, id: string, req: AddRequest) {
+    return this.request<AddOutcome>('POST', this.co(co, `/feeds/txns/${encodeURIComponent(id)}/add`), { body: req });
+  }
+  feedAddAll(co: CompanyId, ids: string[], req?: AddRequest) {
+    return this.request<BatchOutcome>('POST', this.co(co, '/feeds/txns/add-all'), { body: { ids, request: req ?? null } });
+  }
+  async feedIgnore(co: CompanyId, ids: string[]) {
+    const r = await this.request<{ ignored: number }>('POST', this.co(co, '/feeds/txns/ignore'), { body: { ids } });
+    return r.ignored;
+  }
+  feedUndo(co: CompanyId, id: string) {
+    return this.request<FeedTxn>('POST', this.co(co, `/feeds/txns/${encodeURIComponent(id)}/undo`));
+  }
+  feedConnections(co: CompanyId) {
+    return this.request<FeedConnection[]>('GET', this.co(co, '/feeds/connections'));
+  }
+  createFeedConnection(co: CompanyId, c: FeedConnection) {
+    return this.request<FeedConnection>('POST', this.co(co, '/feeds/connections'), { body: c });
+  }
+  updateFeedConnection(co: CompanyId, c: FeedConnection) {
+    return this.request<FeedConnection>('PUT', this.co(co, `/feeds/connections/${encodeURIComponent(c.id)}`), { body: c });
+  }
+  deleteFeedConnection(co: CompanyId, id: string, editSeq: number) {
+    return this.request<void>('DELETE', this.co(co, `/feeds/connections/${encodeURIComponent(id)}`), { query: new URLSearchParams({ edit_seq: String(editSeq) }) });
+  }
+  setFeedCredentials(co: CompanyId, id: string, value: string) {
+    return this.request<FeedConnection>('PUT', this.co(co, `/feeds/connections/${encodeURIComponent(id)}/credentials`), { body: { value } });
+  }
+  syncFeedConnection(co: CompanyId, id: string) {
+    return this.request<IngestReport>('POST', this.co(co, `/feeds/connections/${encodeURIComponent(id)}/sync`));
+  }
+  feedRemoteAccounts(co: CompanyId, id: string) {
+    return this.request<StatementAccount[]>('POST', this.co(co, `/feeds/connections/${encodeURIComponent(id)}/remote-accounts`));
+  }
+  simplefinClaim(co: CompanyId, setupToken: string) {
+    return this.request<SimpleFinClaim>('POST', this.co(co, '/feeds/simplefin/claim'), { body: { setup_token: setupToken } });
+  }
+  feedRules(co: CompanyId) {
+    return this.request<FeedRule[]>('GET', this.co(co, '/feeds/rules'));
+  }
+  createFeedRule(co: CompanyId, r: FeedRule) {
+    return this.request<FeedRule>('POST', this.co(co, '/feeds/rules'), { body: r });
+  }
+  updateFeedRule(co: CompanyId, r: FeedRule) {
+    return this.request<FeedRule>('PUT', this.co(co, `/feeds/rules/${encodeURIComponent(r.id)}`), { body: r });
+  }
+  deleteFeedRule(co: CompanyId, id: string) {
+    return this.request<void>('DELETE', this.co(co, `/feeds/rules/${encodeURIComponent(id)}`));
+  }
+  reorderFeedRules(co: CompanyId, ids: string[]) {
+    return this.request<FeedRule[]>('POST', this.co(co, '/feeds/rules/reorder'), { body: { ids } });
+  }
+  async applyFeedRules(co: CompanyId, ids?: string[], accountId?: string | null) {
+    const r = await this.request<{ applied: number }>('POST', this.co(co, '/feeds/rules/apply'), { body: { ids: ids ?? null, account_id: accountId ?? null } });
+    return r.applied;
+  }
+  amazonOrders(co: CompanyId, file: File, accountId?: string | null) {
+    const body = new FormData();
+    body.append('file', file, file.name);
+    if (accountId) body.append('account_id', accountId);
+    return this.request<AmazonPreview>('POST', this.co(co, '/feeds/amazon/orders'), { body });
+  }
+  async amazonApply(co: CompanyId, preview: AmazonPreview) {
+    const r = await this.request<{ annotated: number }>('POST', this.co(co, '/feeds/amazon/apply'), { body: preview });
+    return r.annotated;
+  }
+
+  // ---- users and enrolment ----------------------------------------------------
+
+  users() {
+    return this.request<User[]>('GET', '/users');
+  }
+  user(id: string) {
+    return this.request<UserDetail>('GET', `/users/${encodeURIComponent(id)}`);
+  }
+  updateUser(id: string, update: UserUpdate) {
+    return this.request<User>('PATCH', `/users/${encodeURIComponent(id)}`, { body: update });
+  }
+  deleteUser(id: string) {
+    return this.request<void>('DELETE', `/users/${encodeURIComponent(id)}`);
+  }
+  grantAccess(userId: string, co: CompanyId, role: Role) {
+    return this.request<void>('PUT', `/users/${encodeURIComponent(userId)}/companies/${encodeURIComponent(co)}`, { body: { role } });
+  }
+  revokeAccess(userId: string, co: CompanyId) {
+    return this.request<void>('DELETE', `/users/${encodeURIComponent(userId)}/companies/${encodeURIComponent(co)}`);
+  }
+  enrollments() {
+    return this.request<EnrolmentInfo[]>('GET', '/auth/enrollments');
+  }
+  createEnrollment(body: NewEnrolment) {
+    return this.request<MintedEnrolmentLink>('POST', '/auth/enrollments', { body });
+  }
+  revokeEnrollment(id: string) {
+    return this.request<void>('DELETE', `/auth/enrollments/${encodeURIComponent(id)}`);
+  }
+
+  // ---- my account -------------------------------------------------------------
+
+  passkeys() {
+    return this.request<PasskeyInfo[]>('GET', '/auth/passkeys');
+  }
+  renamePasskey(id: string, name: string) {
+    return this.request<void>('PATCH', `/auth/passkeys/${encodeURIComponent(id)}`, { body: { name } });
+  }
+  deletePasskey(id: string) {
+    return this.request<void>('DELETE', `/auth/passkeys/${encodeURIComponent(id)}`);
+  }
+  devices() {
+    return this.request<DeviceKeyInfo[]>('GET', '/auth/devices');
+  }
+  revokeDevice(id: string) {
+    return this.request<void>('DELETE', `/auth/devices/${encodeURIComponent(id)}`);
+  }
+  sessions() {
+    return this.request<SessionInfo[]>('GET', '/auth/sessions');
+  }
+  revokeSession(id: string) {
+    return this.request<void>('DELETE', `/auth/sessions/${encodeURIComponent(id)}`);
+  }
+
+  // ---- server administration --------------------------------------------------
+
+  server() {
+    return this.request<ServerView>('GET', '/server');
+  }
+  putServer(settings: ServerSettings) {
+    return this.request<ServerView>('PUT', '/server', { body: settings });
+  }
+  secrets() {
+    return this.request<SecretInfo[]>('GET', '/server/secrets');
+  }
+  putSecret(name: string, value: string) {
+    return this.request<void>('PUT', `/server/secrets/${encodeURIComponent(name)}`, { body: { value } });
+  }
+  deleteSecret(name: string) {
+    return this.request<void>('DELETE', `/server/secrets/${encodeURIComponent(name)}`);
+  }
+  update() {
+    return this.request<UpdateView>('GET', '/server/update');
+  }
+  checkUpdate() {
+    return this.request<UpdateView>('POST', '/server/update/check');
+  }
+  installUpdate(restart: boolean) {
+    return this.request<UpdateInstalled>('POST', '/server/update/install', { body: { restart } });
+  }
+  tunnel() {
+    return this.request<TunnelView>('GET', '/server/tunnel');
+  }
+  putTunnel(update: TunnelUpdate) {
+    return this.request<TunnelView>('PUT', '/server/tunnel', { body: update });
+  }
+  serverBackupsStatus() {
+    return this.request<ServerBackupsStatus>('GET', '/server/backups/status');
+  }
+
+  // ---- company: info, closing date, backups, attachments, merge ---------------
+
+  putCompanyInfo(co: CompanyId, info: CompanyInfo) {
+    return this.request<CompanyInfo>('PUT', this.co(co, '/info'), { body: info });
+  }
+  async closingDate(co: CompanyId) {
+    const r = await this.request<{ closing_date: string | null }>('GET', this.co(co, '/closing-date'));
+    return r.closing_date;
+  }
+  async putClosingDate(co: CompanyId, date: string | null) {
+    const r = await this.request<{ closing_date: string | null }>('PUT', this.co(co, '/closing-date'), { body: { closing_date: date } });
+    return r.closing_date;
+  }
+  backups(co: CompanyId) {
+    return this.request<BackupList>('GET', this.co(co, '/backups'));
+  }
+  backupsStatus(co: CompanyId) {
+    return this.request<CompanyBackupsStatus>('GET', this.co(co, '/backups/status'));
+  }
+  runBackup(co: CompanyId) {
+    return this.request<BackupRecord>('POST', this.co(co, '/backups/run'));
+  }
+  verifyBackup(co: CompanyId, id: string, destination: number, unlock: RestoreRequest = {}) {
+    return this.request<VerifyReport>('POST', this.co(co, `/backups/${encodeURIComponent(id)}/verify`), {
+      query: new URLSearchParams({ destination: String(destination) }),
+      body: unlock,
+    });
+  }
+  restoreBackup(co: CompanyId, id: string, destination: number, body: RestoreRequest) {
+    return this.request<Restored>('POST', this.co(co, `/backups/${encodeURIComponent(id)}/restore`), {
+      query: new URLSearchParams({ destination: String(destination) }),
+      body,
+    });
+  }
+  exportCompany(co: CompanyId) {
+    return this.download('GET', this.co(co, '/backups/export'), 'company.lbk');
+  }
+  attachments(co: CompanyId, query: AttachmentQuery = {}) {
+    const p = new URLSearchParams();
+    if (query.record_kind) p.set('record_kind', query.record_kind);
+    if (query.record_id) p.set('record_id', query.record_id);
+    return this.request<AttachmentMeta[]>('GET', this.co(co, '/attachments'), { query: p });
+  }
+  uploadAttachment(co: CompanyId, file: File, record?: AttachmentRecord) {
+    const body = new FormData();
+    body.append('file', file, file.name);
+    if (record) {
+      body.append('record_kind', record.record_kind);
+      body.append('record_id', record.record_id);
+    }
+    return this.request<AttachmentMeta>('POST', this.co(co, '/attachments'), { body });
+  }
+  attachRecord(co: CompanyId, id: string, record: AttachmentRecord) {
+    return this.request<AttachmentMeta>('PUT', this.co(co, `/attachments/${encodeURIComponent(id)}`), {
+      body: { record_kind: record?.record_kind ?? null, record_id: record?.record_id ?? null },
+    });
+  }
+  deleteAttachment(co: CompanyId, id: string) {
+    return this.request<void>('DELETE', this.co(co, `/attachments/${encodeURIComponent(id)}`));
+  }
+  attachmentUrl(co: CompanyId, id: string) {
+    // The cookie rides along with an <img>/<a>; the desktop app's token can't, so it gets the query form.
+    return `${this.base}${this.co(co, `/attachments/${encodeURIComponent(id)}`)}${this.token ? `?token=${encodeURIComponent(this.token)}` : ''}`;
+  }
+  merge(co: CompanyId, req: MergeRequest) {
+    return this.request<void>('POST', this.co(co, '/merge'), { body: req });
+  }
+
+  // ---- QuickBooks import -----------------------------------------------------
+
+  qbdSettings(co: CompanyId) {
+    return this.request<ImportSettings>('GET', this.co(co, '/import/qbd'));
+  }
+  putQbdSettings(co: CompanyId, settings: ImportSettings) {
+    return this.request<ImportSettings>('PUT', this.co(co, '/import/qbd'), { body: settings });
+  }
+  qbdStatus(co: CompanyId, wait?: number) {
+    const p = new URLSearchParams();
+    if (wait) p.set('wait', String(wait));
+    return this.request<QbdImportStatus>('GET', this.co(co, '/import/qbd/status'), { query: p });
+  }
+  async qbdParity(co: CompanyId, wait?: number) {
+    const p = new URLSearchParams();
+    if (wait) p.set('wait', String(wait));
+    const r = await this.request<ParityReport | null | undefined>('GET', this.co(co, '/import/qbd/parity'), { query: p });
+    return r ?? null;
+  }
+  qbdSync(co: CompanyId, opts: QbdSyncOptions = {}) {
+    return this.request<void>('POST', this.co(co, '/import/qbd/sync'), { body: opts });
+  }
+  qbdParityRun(co: CompanyId) {
+    return this.request<void>('POST', this.co(co, '/import/qbd/parity'));
+  }
+  qbwcFile(co: CompanyId) {
+    return this.download('GET', this.co(co, '/import/qbd/qbwc.qwc'), 'librebooks.qwc');
+  }
+  qbwcPassword(co: CompanyId, password?: string | null) {
+    return this.request<QbwcPassword>('POST', this.co(co, '/import/qbd/qbwc/password'), { body: password ? { password } : {} });
   }
 
   /**

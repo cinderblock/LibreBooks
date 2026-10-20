@@ -1,22 +1,28 @@
 // TanStack Query hooks, one per resource. Screens use these, never the client
 // directly, so caching, invalidation and the SSE refresh are uniform.
 
+import { useDebouncedValue } from '@mantine/hooks';
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useMemo } from 'react';
-import type { ReportRequest } from '~/reports/types';
 import type { TxnQuery } from './client';
 import { useApi, useCompanyId } from './context';
-import { invalidateTxnDerived, qk } from './keys';
+import { invalidateTxnDerived, qk, sk } from './keys';
 import type {
   Account,
+  AttachmentQuery,
   ClearedStatus,
   DateRange,
   Entity,
+  FeedQuery,
   Item,
   ListName,
   ListQuery,
   ListRecords,
+  ReconciliationView,
   RegisterResponse,
+  ReportRequest,
+  SavedKind,
+  StartReconcile,
   Txn,
   TxnType,
   TxnWithPostings,
@@ -27,7 +33,138 @@ const LIST_STALE = 60_000;
 /** Who's signed in, and to which companies. */
 export function useSession() {
   const api = useApi();
-  return useQuery({ queryKey: ['session'], queryFn: () => api.session(), retry: false, staleTime: 5 * 60_000 });
+  return useQuery({ queryKey: sk.session, queryFn: () => api.session(), retry: false, staleTime: 5 * 60_000 });
+}
+
+/** Server-wide admin: sees the Users, Enrolment, Server and Import windows. */
+export function useIsAdmin(): boolean {
+  return useSession().data?.user.role === 'admin';
+}
+
+/** Invalidate a set of keys after a mutation; the screens' one-liner. */
+export function useInvalidate(): (...keys: ReadonlyArray<readonly unknown[]>) => void {
+  const qc = useQueryClient();
+  return (...keys) => {
+    for (const k of keys) void qc.invalidateQueries({ queryKey: k as unknown[] });
+  };
+}
+
+// ---- users, enrolment, my account, server ---------------------------------------
+
+export function useUsers(enabled = true) {
+  const api = useApi();
+  return useQuery({ queryKey: sk.users, queryFn: () => api.users(), enabled, staleTime: 30_000 });
+}
+
+export function useUser(id: string | null) {
+  const api = useApi();
+  return useQuery({ queryKey: sk.user(id ?? ''), queryFn: () => api.user(id!), enabled: !!id, staleTime: 30_000 });
+}
+
+export function useEnrollments(enabled = true) {
+  const api = useApi();
+  // Links expire on their own; keep the list honest while the window is open.
+  return useQuery({ queryKey: sk.enrollments, queryFn: () => api.enrollments(), enabled, staleTime: 10_000, refetchInterval: 60_000 });
+}
+
+export function usePasskeys() {
+  const api = useApi();
+  return useQuery({ queryKey: sk.passkeys, queryFn: () => api.passkeys(), staleTime: 30_000 });
+}
+
+export function useDevices() {
+  const api = useApi();
+  return useQuery({ queryKey: sk.devices, queryFn: () => api.devices(), staleTime: 30_000 });
+}
+
+export function useSessions() {
+  const api = useApi();
+  return useQuery({ queryKey: sk.sessions, queryFn: () => api.sessions(), staleTime: 10_000 });
+}
+
+export function useServer(enabled = true) {
+  const api = useApi();
+  return useQuery({ queryKey: sk.serverView, queryFn: () => api.server(), enabled, staleTime: 15_000 });
+}
+
+export function useUpdate(enabled = true) {
+  const api = useApi();
+  return useQuery({ queryKey: sk.update, queryFn: () => api.update(), enabled, staleTime: 15_000 });
+}
+
+export function useTunnel(enabled = true) {
+  const api = useApi();
+  return useQuery({
+    queryKey: sk.tunnel,
+    queryFn: () => api.tunnel(),
+    enabled,
+    staleTime: 5_000,
+    // cloudflared connects in the background; watch it while it's getting there.
+    refetchInterval: (q) => {
+      const st = q.state.data?.status.state.state;
+      return st === 'starting' || st === 'reconnecting' ? 2_000 : false;
+    },
+  });
+}
+
+// ---- company: closing date, backups, attachments, QuickBooks import -------------
+
+export function useClosingDate() {
+  const api = useApi();
+  const co = useCompanyId();
+  return useQuery({ queryKey: qk.closingDate(co), queryFn: () => api.closingDate(co), staleTime: 60_000 });
+}
+
+export function useBackups(enabled = true) {
+  const api = useApi();
+  const co = useCompanyId();
+  return useQuery({ queryKey: qk.backups(co), queryFn: () => api.backups(co), enabled, staleTime: 15_000 });
+}
+
+export function useBackupsStatus(enabled = true) {
+  const api = useApi();
+  const co = useCompanyId();
+  return useQuery({ queryKey: qk.backupsStatus(co), queryFn: () => api.backupsStatus(co), enabled, staleTime: 15_000 });
+}
+
+/** The inbox (no record), or what's attached to one record. */
+export function useAttachments(query: AttachmentQuery = {}, enabled = true) {
+  const api = useApi();
+  const co = useCompanyId();
+  return useQuery({ queryKey: qk.attachments(co, query), queryFn: () => api.attachments(co, query), enabled, staleTime: 15_000 });
+}
+
+export function useQbdSettings(enabled = true) {
+  const api = useApi();
+  const co = useCompanyId();
+  return useQuery({ queryKey: qk.qbdSettings(co), queryFn: () => api.qbdSettings(co), enabled, staleTime: 30_000 });
+}
+
+/**
+ * Where the import is. While a sync runs the server long-polls (`wait`) and
+ * we ask again as soon as it answers, so the progress bar moves without a
+ * fast timer; idle, a plain fetch now and then.
+ */
+export function useQbdStatus(enabled = true) {
+  const api = useApi();
+  const co = useCompanyId();
+  const qc = useQueryClient();
+  return useQuery({
+    queryKey: qk.qbdStatus(co),
+    queryFn: () => {
+      const running = qc.getQueryData<{ running: boolean }>(qk.qbdStatus(co))?.running;
+      return api.qbdStatus(co, running ? 20 : undefined);
+    },
+    enabled,
+    staleTime: 2_000,
+    refetchInterval: (q) => (q.state.data?.running ? 400 : false),
+  });
+}
+
+export function useQbdParity(enabled = true) {
+  const api = useApi();
+  const co = useCompanyId();
+  return useQuery({ queryKey: qk.qbdParity(co), queryFn: () => api.qbdParity(co), enabled, staleTime: 30_000 });
 }
 
 export function useCompanyInfo() {
@@ -123,13 +260,15 @@ export function useBalanceMap(): Map<string, number> {
   return useMemo(() => new Map((data ?? []).map((b) => [b.account_id, b.debit_positive])), [data]);
 }
 
+/** The next number in a series: per bank account for checks, per type otherwise. */
 export function useNextNumber(type: TxnType, accountId: string | null, enabled = true) {
   const api = useApi();
   const co = useCompanyId();
+  const perAccount = type === 'Check' || type === 'BillPaymentCheck';
   return useQuery({
-    queryKey: qk.nextNumber(co, type, accountId),
-    queryFn: () => api.nextNumber(co, type, accountId),
-    enabled: enabled && !!accountId,
+    queryKey: qk.nextNumber(co, type, perAccount ? accountId : null),
+    queryFn: () => api.nextNumber(co, type, perAccount ? accountId : null),
+    enabled: enabled && (!perAccount || !!accountId),
     staleTime: 0,
   });
 }
@@ -144,12 +283,184 @@ export function useReport(req: ReportRequest | null) {
   const api = useApi();
   const co = useCompanyId();
   return useQuery({
-    queryKey: qk.report(co, req ?? { report: '' }),
+    queryKey: req ? qk.report(co, req) : [...qk.reportsAll(co), 'none'],
     queryFn: () => api.runReport(co, req!),
-    enabled: !!req?.report,
+    enabled: !!req,
     staleTime: 30_000,
     placeholderData: keepPreviousData,
   });
+}
+
+/** Open invoices/credits or bills/credits for a name (Receive Payments, Pay Bills). */
+export function useOpenItems(entityId: string | null, kind: 'receivable' | 'payable') {
+  const api = useApi();
+  const co = useCompanyId();
+  return useQuery({
+    queryKey: qk.open(co, entityId ?? '', kind),
+    queryFn: () => api.open(co, entityId!, kind),
+    enabled: !!entityId,
+    staleTime: 10_000,
+  });
+}
+
+/** Payments waiting in Undeposited Funds (Make Deposits). */
+export function useUndeposited(enabled = true) {
+  const api = useApi();
+  const co = useCompanyId();
+  return useQuery({ queryKey: qk.undeposited(co), queryFn: () => api.undeposited(co), enabled, staleTime: 10_000 });
+}
+
+export function useSaved(kind: SavedKind) {
+  const api = useApi();
+  const co = useCompanyId();
+  return useQuery({ queryKey: qk.saved(co, kind), queryFn: () => api.saved(co, kind), staleTime: 60_000 });
+}
+
+/** Create (no id) or replace (with id) a saved document. */
+export function useSaveSaved(kind: SavedKind) {
+  const api = useApi();
+  const co = useCompanyId();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, name, doc }: { id?: string | null; name: string; doc: unknown }) =>
+      id ? api.updateSaved(co, kind, id, name, doc) : api.createSaved(co, kind, name, doc),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: qk.savedAll(co) });
+      void qc.invalidateQueries({ queryKey: qk.memorizedDue(co) });
+    },
+  });
+}
+
+export function useDeleteSaved(kind: SavedKind) {
+  const api = useApi();
+  const co = useCompanyId();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.deleteSaved(co, kind, id),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: qk.savedAll(co) });
+      void qc.invalidateQueries({ queryKey: qk.memorizedDue(co) });
+    },
+  });
+}
+
+export function useMemorizedDue() {
+  const api = useApi();
+  const co = useCompanyId();
+  return useQuery({ queryKey: qk.memorizedDue(co), queryFn: () => api.memorizedDue(co), staleTime: 60_000 });
+}
+
+export function useSalesTaxCodes() {
+  return useList('sales-tax-codes', { include_inactive: true });
+}
+export function useSalesReps() {
+  return useList('sales-reps');
+}
+
+/**
+ * `POST /txns/preview` for a form as it stands: the server's postings, total
+ * and sales tax (the truth for totals) without saving. Debounced, so typing
+ * doesn't flood the server; keyed by the transaction's content.
+ */
+export function useTxnPreview(txn: Txn | null, enabled = true) {
+  const api = useApi();
+  const co = useCompanyId();
+  const [debounced] = useDebouncedValue(txn, 400);
+  const key = useMemo(() => (debounced ? JSON.stringify([debounced.txn_type, debounced.entity_id, debounced.account_id, debounced.sales_tax_item_id, debounced.customer_tax_code_id, debounced.lines, debounced.applications, debounced.amount]) : ''), [debounced]);
+  return useQuery({
+    queryKey: ['c', co, 'preview', key],
+    queryFn: () => api.previewTxn(co, debounced!),
+    enabled: enabled && !!debounced && debounced.lines.some((l) => l.kind !== 'Text' && (l.amount !== 0 || l.item_id || l.account_id)),
+    staleTime: 60_000,
+    retry: false,
+    placeholderData: keepPreviousData,
+  });
+}
+
+export function useReconcileOverview(accountId: string | null) {
+  const api = useApi();
+  const co = useCompanyId();
+  return useQuery({ queryKey: qk.reconcileOverview(co, accountId ?? ''), queryFn: () => api.reconcileOverview(co, accountId!), enabled: !!accountId, staleTime: 10_000 });
+}
+
+export function useReconciliation(id: string | null) {
+  const api = useApi();
+  const co = useCompanyId();
+  return useQuery({ queryKey: qk.reconciliation(co, id ?? ''), queryFn: () => api.reconciliation(co, id!), enabled: !!id, staleTime: 5_000 });
+}
+
+/** Start, mark, finish, discard and undo; each refreshes the reconcile queries and the register. */
+export function useReconcileActions(accountId: string | null) {
+  const api = useApi();
+  const co = useCompanyId();
+  const qc = useQueryClient();
+  const refresh = () => {
+    void qc.invalidateQueries({ queryKey: qk.reconcileAll(co) });
+    void qc.invalidateQueries({ queryKey: qk.registerAll(co) });
+  };
+  const start = useMutation({ mutationFn: (body: StartReconcile) => api.startReconcile(co, accountId!, body), onSuccess: refresh });
+  const mark = useMutation({
+    mutationFn: ({ id, txnIds, marked }: { id: string; txnIds: string[]; marked: boolean }) => api.markReconcile(co, id, txnIds, marked),
+    // The ✓ flips at once; the server's status replaces ours when it answers.
+    onMutate: async ({ id, txnIds, marked }) => {
+      await qc.cancelQueries({ queryKey: qk.reconciliation(co, id) });
+      const before = qc.getQueryData<ReconciliationView>(qk.reconciliation(co, id));
+      if (before) qc.setQueryData<ReconciliationView>(qk.reconciliation(co, id), { ...before, lines: before.lines.map((l) => (txnIds.includes(l.txn_id) ? { ...l, marked } : l)) });
+      return { before };
+    },
+    onError: (_e, { id }, ctx) => {
+      if (ctx?.before) qc.setQueryData(qk.reconciliation(co, id), ctx.before);
+    },
+    onSuccess: (status, { id }) => {
+      qc.setQueryData<ReconciliationView>(qk.reconciliation(co, id), (old) => (old ? { ...old, status } : old));
+    },
+  });
+  const finish = useMutation({ mutationFn: ({ id, adjust }: { id: string; adjust: boolean }) => api.finishReconcile(co, id, adjust), onSuccess: () => { refresh(); invalidateTxnDerived(qc, co); } });
+  const discard = useMutation({ mutationFn: (id: string) => api.discardReconcile(co, id), onSuccess: refresh });
+  const undo = useMutation({ mutationFn: () => api.undoReconcile(co, accountId!), onSuccess: refresh });
+  return { start, mark, finish, discard, undo };
+}
+
+// ---- bank feeds ---------------------------------------------------------------
+
+export function useFeedsSummary() {
+  const api = useApi();
+  const co = useCompanyId();
+  return useQuery({ queryKey: qk.feedsSummary(co), queryFn: () => api.feedsSummary(co), staleTime: 10_000 });
+}
+
+export function useFeedTxns(q: FeedQuery, enabled = true) {
+  const api = useApi();
+  const co = useCompanyId();
+  return useQuery({ queryKey: qk.feedTxns(co, q), queryFn: () => api.feedTxns(co, q), enabled, staleTime: 10_000, placeholderData: keepPreviousData });
+}
+
+export function useFeedCandidates(id: string | null) {
+  const api = useApi();
+  const co = useCompanyId();
+  return useQuery({ queryKey: qk.feedCandidates(co, id ?? ''), queryFn: () => api.feedCandidates(co, id!), enabled: !!id, staleTime: 10_000 });
+}
+
+export function useFeedConnections() {
+  const api = useApi();
+  const co = useCompanyId();
+  return useQuery({ queryKey: qk.feedConnections(co), queryFn: () => api.feedConnections(co), staleTime: 30_000 });
+}
+
+export function useFeedRules() {
+  const api = useApi();
+  const co = useCompanyId();
+  return useQuery({ queryKey: qk.feedRules(co), queryFn: () => api.feedRules(co), staleTime: 30_000 });
+}
+
+/** Every feed write refreshes the feed queries and the registers (downloaded marks). */
+export function useFeedInvalidate() {
+  const co = useCompanyId();
+  const qc = useQueryClient();
+  return () => {
+    void qc.invalidateQueries({ queryKey: qk.feedsAll(co) });
+    invalidateTxnDerived(qc, co);
+  };
 }
 
 /** Create (edit_seq 0) or update a transaction; refreshes everything it touches. */

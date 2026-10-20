@@ -5,14 +5,29 @@
 // events after every write, and a little latency so loading states are real.
 // State lives only in memory: a reload starts over.
 
-import { blankLine } from '../blank';
+import { blankLine, blankTxn } from '../blank';
 import { ApiError } from '../errors';
-import type { ApiClient, EventHandlers, EventSubscription, TxnQuery } from '../client';
+import type { ApiClient, EventHandlers, EventSubscription, FileDownload, TxnQuery } from '../client';
 import { clone } from '../json';
 import type {
   Account,
   AccountBalance,
+  AddRequest,
+  AmazonPreview,
+  AttachmentQuery,
+  AttachmentRecord,
   AuditEntry,
+  ImportSettings,
+  Item,
+  MergeRequest,
+  NewEnrolment,
+  QbdSyncOptions,
+  RestoreRequest,
+  Role,
+  ServerSettings,
+  TunnelUpdate,
+  UserUpdate,
+  CatalogEntry,
   ChangeEvent,
   ClearedStatus,
   CompanyId,
@@ -20,29 +35,47 @@ import type {
   CompanySummary,
   DateRange,
   Entity,
+  FeedConnection,
+  FeedImportRequest,
+  FeedQuery,
+  FeedRule,
   Health,
   ListName,
   ListQuery,
   ListRecords,
-  OpenTxn,
+  Memorized,
+  MemorizedDue,
   Posting,
   PreviewOutcome,
+  ReconcileLine,
+  ReconcileOverview,
+  ReconcileStatus,
+  Reconciliation,
+  ReconciliationView,
   RegisterLine,
   RegisterResponse,
+  Report,
+  ReportRequest,
+  Saved,
+  SavedKind,
   SaveOutcome,
   Session,
+  StartReconcile,
+  StatementCharge,
   Txn,
   TxnSummary,
   TxnType,
   TxnWithPostings,
 } from '../types';
-import type { Report, ReportCatalogEntry, ReportRequest } from '~/reports/types';
-import { accountTypeOrder } from '~/lib/accountTypes';
-import { addDays, todayIso } from '~/lib/dates';
+import { accountTypeOrder, naturalBalance } from '~/lib/accountTypes';
+import { addDays, addMonths, todayIso } from '~/lib/dates';
 import { hierarchicalCompare } from '~/lib/tree';
+import { reportToCsv } from '~/reports/rows';
+import { FixtureAdmin } from './admin';
+import { FixtureFeeds } from './feeds';
 import { fixturePost, type PostingBooks } from './post';
 import { FIXTURE_COMPANY_ID, buildSeed, stressNames } from './seed';
-import { FIXTURE_REPORTS, runFixtureReport } from './reports';
+import { fixtureCatalog, runFixtureReport } from './reports';
 
 export interface StoredTxn {
   txn: Txn;
@@ -65,6 +98,7 @@ type Lists = { [L in ListName]: ListRecords[L][] };
 const STRESS_ACCOUNT_ID = '00000000-0000-4000-9fff-000000000001';
 const AR_TYPES: TxnType[] = ['Invoice', 'CreditMemo', 'StatementCharge'];
 const AP_TYPES: TxnType[] = ['Bill', 'VendorCredit'];
+const PAYMENT_TYPES: TxnType[] = ['ReceivePayment', 'BillPaymentCheck', 'BillPaymentCreditCard'];
 
 export class FixtureApiClient implements ApiClient {
   readonly mode = 'fixtures' as const;
@@ -77,6 +111,16 @@ export class FixtureApiClient implements ApiClient {
   private listeners = new Set<EventHandlers>();
   private audit: AuditEntry[] = [];
   private stressLines: RegisterLine[] | null = null;
+  /** Memorized transactions and reports (`/saved/:kind`). */
+  private savedDocs: Saved[] = [];
+  /** Reconciliations, in progress (finished_at null) and finished. */
+  private reconciliations: Reconciliation[] = [];
+  /** Register lines a bank feed matched or added (txn id → accounts). */
+  private downloaded = new Map<string, Set<string>>();
+  private feeds: FixtureFeeds;
+  private admin: FixtureAdmin;
+  /** Transactions dated on or before this are locked (`closed_period`). */
+  private closing: string | null = null;
 
   constructor(opts: FixtureOptions = {}) {
     this.latency = opts.latencyMs ?? 90;
@@ -107,6 +151,55 @@ export class FixtureApiClient implements ApiClient {
       });
     }
     for (const t of seed.txns) this.loadSeedTxn(t);
+    this.feeds = new FixtureFeeds({
+      today: this.today,
+      accounts: () => this.lists.accounts,
+      entities: () => this.lists.entities,
+      roleAccount: (role) => this.lists.accounts.find((a) => a.role === role),
+      txns: () => [...this.txnStore.values()],
+      txn: (id) => this.txnStore.get(id),
+      createTxn: (txn) => {
+        this.validate(txn);
+        const posted = this.post(txn);
+        const now = new Date().toISOString();
+        const saved: Txn = { ...clone(txn), amount: posted.total, edit_seq: 1, created_at: now, modified_at: now, created_by: 'fixture-user', modified_by: 'fixture-user' };
+        const stored = { txn: saved, postings: posted.postings, total: posted.total, seq: this.seq++ };
+        this.txnStore.set(saved.id, stored);
+        this.record('created', null, saved);
+        this.emit('txn', saved.id, 'created');
+        return stored;
+      },
+      deleteTxn: (id) => {
+        const s = this.txnStore.get(id);
+        if (!s) return;
+        this.txnStore.delete(id);
+        this.record('deleted', s.txn, null);
+        this.emit('txn', id, 'deleted');
+      },
+      setDownloaded: (txnId, accountId, on) => {
+        const set = this.downloaded.get(txnId) ?? new Set<string>();
+        if (on) set.add(accountId);
+        else set.delete(accountId);
+        this.downloaded.set(txnId, set);
+        this.emit('txn', txnId, 'updated');
+      },
+      emit: (kind, id, action) => this.emit(kind, id, action),
+    });
+    this.admin = new FixtureAdmin({
+      today: this.today,
+      companyId: FIXTURE_COMPANY_ID,
+      companyName: () => this.info.name,
+      accounts: () => this.lists.accounts,
+      balances: () => this.balanceRows(),
+      emit: (kind, id, action) => this.emit(kind, id, action),
+    });
+  }
+
+  /** The books' closing date lock, as the server applies it to every write. */
+  private checkClosed(date: string) {
+    if (this.closing && date <= this.closing) {
+      throw new ApiError(409, 'closed_period', `The books are closed through ${this.closing}; this transaction is dated inside the closed period.`, { closing_date: this.closing });
+    }
   }
 
   // ---- plumbing -------------------------------------------------------------
@@ -355,14 +448,18 @@ export class FixtureApiClient implements ApiClient {
       if (s.txn.is_void) continue;
       for (const a of s.txn.applications) {
         m.set(a.target_txn_id, (m.get(a.target_txn_id) ?? 0) + a.amount + a.discount + a.credit_amount);
+        // A credit used against the target is used up by that much.
+        if (a.credit_txn_id && a.credit_amount) m.set(a.credit_txn_id, (m.get(a.credit_txn_id) ?? 0) + a.credit_amount);
       }
     }
     return m;
   }
 
   private openBalance(s: StoredTxn, applied: Map<string, number>): number | null {
-    if (![...AR_TYPES, ...AP_TYPES].includes(s.txn.txn_type)) return null;
     if (s.txn.is_void) return 0;
+    // A payment's open balance is what it hasn't applied yet (an unapplied credit).
+    if (PAYMENT_TYPES.includes(s.txn.txn_type)) return s.txn.amount - s.txn.applications.reduce((t, a) => t + a.amount + a.discount, 0);
+    if (![...AR_TYPES, ...AP_TYPES].includes(s.txn.txn_type)) return null;
     return s.total - (applied.get(s.txn.id) ?? 0);
   }
 
@@ -481,6 +578,7 @@ export class FixtureApiClient implements ApiClient {
     this.checkCompany(co);
     try {
       this.validate(txn);
+      this.checkClosed(txn.date);
       if (this.txnStore.has(txn.id)) throw new ApiError(409, 'conflict', 'That transaction already exists', { expected: 0, actual: 1 });
       const posted = this.post(txn);
       const now = new Date().toISOString();
@@ -505,6 +603,9 @@ export class FixtureApiClient implements ApiClient {
     }
     try {
       this.validate(txn);
+      // Moving a transaction into or out of the closed period is both locked.
+      this.checkClosed(current.txn.date);
+      this.checkClosed(txn.date);
       const posted = this.post(txn);
       // Keep cleared marks on the accounts that still have a posting.
       const cleared = new Map(current.postings.map((p) => [p.account_id, p.cleared]));
@@ -544,6 +645,11 @@ export class FixtureApiClient implements ApiClient {
     }
     if ([...this.txnStore.values()].some((o) => o.txn.applications.some((a) => a.target_txn_id === id) || o.txn.lines.some((l) => l.linked_txn_id === id))) {
       return Promise.reject(new ApiError(409, 'in_use', 'Payments are applied to it; delete those first.'));
+    }
+    try {
+      this.checkClosed(s.txn.date);
+    } catch (e) {
+      return Promise.reject(e);
     }
     this.txnStore.delete(id);
     this.record('deleted', s.txn, null);
@@ -622,7 +728,9 @@ export class FixtureApiClient implements ApiClient {
         edit_seq: s.txn.edit_seq,
         due_date: s.txn.due_date,
         open_balance: this.openBalance(s, applied),
-      });
+        // QBD's lightning bolt: a bank feed matched or added this line (not yet in the generated type).
+        ...(this.downloaded.get(s.txn.id)?.has(accountId) ? { downloaded: true } : {}),
+      } as RegisterLine);
     }
     return { opening, lines };
   }
@@ -673,69 +781,735 @@ export class FixtureApiClient implements ApiClient {
     return this.delay(() => undefined);
   }
 
-  balances(co: CompanyId, range: Partial<DateRange> = {}): Promise<AccountBalance[]> {
-    this.checkCompany(co);
-    return this.delay(() => {
-      const sums = new Map<string, number>();
-      for (const s of this.txnStore.values()) {
-        if (range.from && s.txn.date < range.from) continue;
-        if (range.to && s.txn.date > range.to) continue;
-        for (const p of s.postings) sums.set(p.account_id, (sums.get(p.account_id) ?? 0) + p.amount);
-      }
-      if (this.stressLines || this.lists.accounts.some((a) => a.id === STRESS_ACCOUNT_ID)) {
-        const lines = this.stressRegister();
-        sums.set(STRESS_ACCOUNT_ID, lines[lines.length - 1]?.balance ?? 0);
-      }
-      return [...sums].map(([account_id, debit_positive]) => ({ account_id, debit_positive }));
-    });
+  private balanceRows(range: Partial<DateRange> = {}): AccountBalance[] {
+    const sums = new Map<string, number>();
+    for (const s of this.txnStore.values()) {
+      if (range.from && s.txn.date < range.from) continue;
+      if (range.to && s.txn.date > range.to) continue;
+      for (const p of s.postings) sums.set(p.account_id, (sums.get(p.account_id) ?? 0) + p.amount);
+    }
+    if (this.stressLines || this.lists.accounts.some((a) => a.id === STRESS_ACCOUNT_ID)) {
+      const lines = this.stressRegister();
+      sums.set(STRESS_ACCOUNT_ID, lines[lines.length - 1]?.balance ?? 0);
+    }
+    return [...sums].map(([account_id, debit_positive]) => ({ account_id, debit_positive }));
   }
 
-  open(co: CompanyId, entityId: string, kind: 'receivable' | 'payable'): Promise<OpenTxn[]> {
+  balances(co: CompanyId, range: Partial<DateRange> = {}): Promise<AccountBalance[]> {
+    this.checkCompany(co);
+    return this.delay(() => this.balanceRows(range));
+  }
+
+  /**
+   * Open items for a name and its jobs, as `TxnSummary` rows whose
+   * `open_balance` is what is left: invoices/bills still owed, and credits and
+   * unapplied payments still unused (so a payment form can apply them).
+   */
+  open(co: CompanyId, entityId: string, kind: 'receivable' | 'payable'): Promise<TxnSummary[]> {
     this.checkCompany(co);
     const applied = this.appliedTo();
-    const types = kind === 'receivable' ? AR_TYPES : AP_TYPES;
+    const types: TxnType[] = kind === 'receivable' ? [...AR_TYPES, 'ReceivePayment'] : [...AP_TYPES, 'BillPaymentCheck', 'BillPaymentCreditCard'];
     const family = this.entityFamily(entityId);
     return this.delay(() =>
       [...this.txnStore.values()]
-        .filter((s) => types.includes(s.txn.txn_type) && s.txn.entity_id && family.has(s.txn.entity_id))
+        .filter((s) => types.includes(s.txn.txn_type) && s.txn.entity_id && family.has(s.txn.entity_id) && !s.txn.is_void)
+        .sort((a, b) => (a.txn.date < b.txn.date ? -1 : a.txn.date > b.txn.date ? 1 : a.seq - b.seq))
         .map((s) => ({ s, open: this.openBalance(s, applied) ?? 0 }))
         .filter(({ open }) => open > 0)
-        .map(({ s, open }) => ({
-          txn_id: s.txn.id,
-          txn_type: s.txn.txn_type,
-          date: s.txn.date,
-          number: s.txn.number,
-          due_date: s.txn.due_date,
-          amount: s.total,
-          open_balance: open,
-        })),
+        .map(({ s, open }) => ({ ...this.summaryOf(s, applied), open_balance: open })),
+    );
+  }
+
+  /** Payments (and sales receipts) sitting in Undeposited Funds, not yet on a deposit. */
+  undeposited(co: CompanyId): Promise<TxnSummary[]> {
+    this.checkCompany(co);
+    const applied = this.appliedTo();
+    const uf = this.lists.accounts.find((a) => a.role === 'UndepositedFunds');
+    if (!uf) return this.delay(() => []);
+    const deposited = new Set([...this.txnStore.values()].flatMap((s) => (s.txn.txn_type === 'Deposit' && !s.txn.is_void ? s.txn.lines.map((l) => l.linked_txn_id).filter(Boolean) : [])));
+    return this.delay(() =>
+      [...this.txnStore.values()]
+        .filter((s) => !s.txn.is_void && s.txn.txn_type !== 'Deposit' && !deposited.has(s.txn.id) && s.postings.some((p) => p.account_id === uf.id && p.amount > 0))
+        .sort((a, b) => (a.txn.date < b.txn.date ? -1 : a.txn.date > b.txn.date ? 1 : a.seq - b.seq))
+        .map((s) => ({ ...this.summaryOf(s, applied), account_id: uf.id, account_name: uf.full_name, amount: s.postings.filter((p) => p.account_id === uf.id).reduce((t, p) => t + p.amount, 0) })),
     );
   }
 
   // ---- reports --------------------------------------------------------------
 
-  reportCatalog(co: CompanyId): Promise<ReportCatalogEntry[]> {
+  reportCatalog(co: CompanyId): Promise<CatalogEntry[]> {
     this.checkCompany(co);
-    return this.delay(() => FIXTURE_REPORTS);
+    return this.delay(() => fixtureCatalog());
+  }
+
+  private buildReport(request: ReportRequest): Report {
+    return runFixtureReport(
+      {
+        info: this.info,
+        accounts: this.sorted('accounts'),
+        entities: this.lists.entities,
+        items: this.lists.items,
+        classes: this.lists.classes,
+        txns: [...this.txnStore.values()],
+        audit: this.audit,
+        today: this.today,
+      },
+      request,
+    );
   }
 
   runReport(co: CompanyId, request: ReportRequest): Promise<Report> {
     this.checkCompany(co);
     try {
-      const report = runFixtureReport(
-        {
-          info: this.info,
-          accounts: this.sorted('accounts'),
-          entities: this.lists.entities,
-          txns: [...this.txnStore.values()],
-          today: this.today,
-        },
-        request,
-      );
+      const report = this.buildReport(request);
       return this.delay(() => report);
     } catch (e) {
       return Promise.reject(e);
     }
+  }
+
+  exportReport(co: CompanyId, request: ReportRequest, format: 'csv'): Promise<FileDownload> {
+    this.checkCompany(co);
+    try {
+      const report = this.buildReport(request);
+      const name = `${report.title.replace(/[^\w -]+/g, '').trim() || 'report'}.${format}`;
+      return this.delay(() => ({ blob: new Blob([reportToCsv(report)], { type: 'text/csv;charset=utf-8' }), filename: name }));
+    } catch (e) {
+      return Promise.reject(e);
+    }
+  }
+
+  // ---- saved documents ------------------------------------------------------
+
+  saved(co: CompanyId, kind: SavedKind): Promise<Saved[]> {
+    this.checkCompany(co);
+    return this.delay(() => this.savedDocs.filter((s) => s.kind === kind).sort((a, b) => a.name.localeCompare(b.name)));
+  }
+
+  createSaved(co: CompanyId, kind: SavedKind, name: string, doc: unknown): Promise<Saved> {
+    this.checkCompany(co);
+    if (!name.trim()) return Promise.reject(new ApiError(400, 'invalid', 'A name is required', { field: 'name' }));
+    const now = new Date().toISOString();
+    const s: Saved = { id: crypto.randomUUID(), kind, name: name.trim(), doc: clone(doc), created_at: now, modified_at: now };
+    this.savedDocs.push(s);
+    this.emit('saved', s.id, 'created');
+    return this.delay(() => s);
+  }
+
+  updateSaved(co: CompanyId, kind: SavedKind, id: string, name: string, doc: unknown): Promise<Saved> {
+    this.checkCompany(co);
+    const i = this.savedDocs.findIndex((s) => s.id === id && s.kind === kind);
+    if (i < 0) return Promise.reject(new ApiError(404, 'not_found', 'Not found'));
+    const s: Saved = { ...this.savedDocs[i]!, name: name.trim(), doc: clone(doc), modified_at: new Date().toISOString() };
+    this.savedDocs[i] = s;
+    this.emit('saved', s.id, 'updated');
+    return this.delay(() => s);
+  }
+
+  deleteSaved(co: CompanyId, kind: SavedKind, id: string): Promise<void> {
+    this.checkCompany(co);
+    const i = this.savedDocs.findIndex((s) => s.id === id && s.kind === kind);
+    if (i < 0) return Promise.reject(new ApiError(404, 'not_found', 'Not found'));
+    this.savedDocs.splice(i, 1);
+    this.emit('saved', id, 'deleted');
+    return this.delay(() => undefined);
+  }
+
+  memorizedDue(co: CompanyId): Promise<MemorizedDue[]> {
+    this.checkCompany(co);
+    return this.delay(() =>
+      this.savedDocs
+        .filter((s) => s.kind === 'memorized_txn')
+        .flatMap((s) => {
+          const m = s.doc as Memorized;
+          if (m.repeat === 'Never' || m.remaining === 0 || !m.next_date) return [];
+          const horizon = addDays(this.today, m.days_in_advance);
+          return m.next_date <= horizon ? [{ id: s.id, name: s.name, due: m.next_date, repeat: m.repeat }] : [];
+        })
+        .sort((a, b) => a.due.localeCompare(b.due)),
+    );
+  }
+
+  useMemorized(co: CompanyId, id: string, date?: string | null): Promise<Txn> {
+    this.checkCompany(co);
+    const s = this.savedDocs.find((d) => d.id === id && d.kind === 'memorized_txn');
+    if (!s) return Promise.reject(new ApiError(404, 'not_found', 'No such memorized transaction'));
+    const m = s.doc as Memorized;
+    const t: Txn = {
+      ...clone(m.template),
+      id: crypto.randomUUID(),
+      date: date ?? this.today,
+      number: null,
+      edit_seq: 0,
+      created_at: null,
+      modified_at: null,
+      created_by: null,
+      modified_by: null,
+      is_void: false,
+      due_date: null,
+      discount_date: null,
+    };
+    t.lines = t.lines.map((l) => ({ ...l, id: crypto.randomUUID() }));
+    return this.delay(() => t);
+  }
+
+  /** The store advances a memorized transaction's schedule after it's entered. */
+  advanceMemorized(id: string) {
+    const s = this.savedDocs.find((d) => d.id === id && d.kind === 'memorized_txn');
+    if (!s) return;
+    const m = s.doc as Memorized;
+    if (!m.next_date || !m.interval) return;
+    const months: Partial<Record<NonNullable<Memorized['interval']>, number>> = { Monthly: 1, Quarterly: 3, SemiAnnually: 6, Annually: 12 };
+    const days: Partial<Record<NonNullable<Memorized['interval']>, number>> = { Daily: 1, Weekly: 7, BiWeekly: 14, SemiMonthly: 15 };
+    const next = months[m.interval] ? addMonths(m.next_date, months[m.interval]!) : addDays(m.next_date, days[m.interval] ?? 30);
+    s.doc = { ...m, next_date: next, remaining: m.remaining === null ? null : Math.max(0, m.remaining - 1) };
+    s.modified_at = new Date().toISOString();
+    this.emit('saved', s.id, 'updated');
+  }
+
+  // ---- reconciliation --------------------------------------------------------
+  //
+  // While a reconciliation is in progress its marked lines are Pending in the
+  // account; finishing makes them Cleared and records them on it; undoing the
+  // last one makes them Uncleared again.
+
+  private reconcileStatus(rec: Reconciliation): ReconcileStatus {
+    const lines = this.reconcileLines(rec);
+    let inc = 0;
+    let dec = 0;
+    let count = 0;
+    for (const l of lines) {
+      if (!l.marked) continue;
+      count++;
+      if (l.amount < 0) dec += l.amount;
+      else inc += l.amount;
+    }
+    const cleared = rec.beginning_balance + inc + dec;
+    return { beginning_balance: rec.beginning_balance, marked_increases: inc, marked_decreases: dec, cleared_balance: cleared, ending_balance: rec.ending_balance, difference: rec.ending_balance - cleared, marked_count: count };
+  }
+
+  private reconcileLines(rec: Reconciliation): ReconcileLine[] {
+    const type = this.lists.accounts.find((a) => a.id === rec.account_id)?.account_type ?? 'Bank';
+    const names = new Map(this.lists.entities.map((e) => [e.id, e.full_name]));
+    return [...this.txnStore.values()]
+      .filter((s) => !s.txn.is_void && s.postings.some((p) => p.account_id === rec.account_id && p.cleared !== 'Cleared' && (s.txn.date <= rec.statement_date || p.cleared === 'Pending')))
+      .sort((a, b) => (a.txn.date < b.txn.date ? -1 : a.txn.date > b.txn.date ? 1 : a.seq - b.seq))
+      .map((s) => {
+        const mine = s.postings.filter((p) => p.account_id === rec.account_id);
+        const amount = mine.reduce((t, p) => t + p.amount, 0);
+        return {
+          txn_id: s.txn.id,
+          txn_type: s.txn.txn_type,
+          date: s.txn.date,
+          number: s.txn.number,
+          payee: s.txn.entity_id ? (names.get(s.txn.entity_id) ?? null) : null,
+          memo: s.txn.memo,
+          amount: naturalBalance(type, amount),
+          marked: mine.some((p) => p.cleared === 'Pending'),
+        };
+      })
+      .filter((l) => l.amount !== 0);
+  }
+
+  private beginningBalance(accountId: string): number {
+    const type = this.lists.accounts.find((a) => a.id === accountId)?.account_type ?? 'Bank';
+    let sum = 0;
+    for (const s of this.txnStore.values()) for (const p of s.postings) if (p.account_id === accountId && p.cleared === 'Cleared') sum += p.amount;
+    return naturalBalance(type, sum);
+  }
+
+  reconcileOverview(co: CompanyId, accountId: string): Promise<ReconcileOverview> {
+    this.checkCompany(co);
+    if (!this.lists.accounts.some((a) => a.id === accountId)) return Promise.reject(new ApiError(404, 'not_found', 'No such account'));
+    return this.delay(() => ({
+      in_progress: this.reconciliations.find((r) => r.account_id === accountId && !r.finished_at) ?? null,
+      history: this.reconciliations.filter((r) => r.account_id === accountId && r.finished_at).sort((a, b) => b.statement_date.localeCompare(a.statement_date)),
+      beginning_balance: this.beginningBalance(accountId),
+    }));
+  }
+
+  startReconcile(co: CompanyId, accountId: string, body: StartReconcile): Promise<Reconciliation> {
+    this.checkCompany(co);
+    if (this.reconciliations.some((r) => r.account_id === accountId && !r.finished_at)) return Promise.reject(new ApiError(409, 'conflict', 'A reconciliation of this account is already in progress'));
+    const charge = (c: StatementCharge | null, memo: string, sign: 1 | -1): string | null => {
+      if (!c || !c.amount) return null;
+      const t = blankTxn(sign < 0 ? 'Check' : 'Deposit', c.date);
+      t.account_id = accountId;
+      t.memo = memo;
+      t.amount = c.amount;
+      t.lines = [{ ...blankLine(sign < 0 ? 'Account' : 'DepositLine'), account_id: c.account_id, amount: c.amount, description: memo }];
+      const posted = this.post(t);
+      const saved: Txn = { ...t, amount: posted.total, edit_seq: 1, created_at: new Date().toISOString(), modified_at: new Date().toISOString() };
+      this.txnStore.set(saved.id, { txn: saved, postings: posted.postings, total: posted.total, seq: this.seq++ });
+      this.emit('txn', saved.id, 'created');
+      return saved.id;
+    };
+    const rec: Reconciliation = {
+      id: crypto.randomUUID(),
+      account_id: accountId,
+      statement_date: body.statement_date,
+      beginning_balance: this.beginningBalance(accountId),
+      ending_balance: body.ending_balance,
+      service_charge_txn_id: charge(body.service_charge, 'Service Charge', -1),
+      interest_txn_id: charge(body.interest, 'Interest Earned', 1),
+      adjustment_txn_id: null,
+      finished_at: null,
+      finished_by: null,
+      cleared_txn_ids: [],
+    };
+    this.reconciliations.push(rec);
+    this.emit('reconciliation', rec.id, 'created');
+    return this.delay(() => rec);
+  }
+
+  reconciliation(co: CompanyId, id: string): Promise<ReconciliationView> {
+    this.checkCompany(co);
+    const rec = this.reconciliations.find((r) => r.id === id);
+    if (!rec) return Promise.reject(new ApiError(404, 'not_found', 'No such reconciliation'));
+    return this.delay(() => ({ reconciliation: rec, lines: this.reconcileLines(rec), status: this.reconcileStatus(rec) }));
+  }
+
+  markReconcile(co: CompanyId, id: string, txnIds: string[], marked: boolean): Promise<ReconcileStatus> {
+    this.checkCompany(co);
+    const rec = this.reconciliations.find((r) => r.id === id && !r.finished_at);
+    if (!rec) return Promise.reject(new ApiError(404, 'not_found', 'No reconciliation in progress'));
+    for (const txnId of txnIds) {
+      const s = this.txnStore.get(txnId);
+      if (!s) continue;
+      s.postings = s.postings.map((p) => (p.account_id === rec.account_id && p.cleared !== 'Cleared' ? { ...p, cleared: marked ? 'Pending' : 'Uncleared' } : p));
+    }
+    this.emit('reconciliation', id, 'updated');
+    return this.delay(() => this.reconcileStatus(rec));
+  }
+
+  finishReconcile(co: CompanyId, id: string, adjust: boolean): Promise<Reconciliation> {
+    this.checkCompany(co);
+    const rec = this.reconciliations.find((r) => r.id === id && !r.finished_at);
+    if (!rec) return Promise.reject(new ApiError(404, 'not_found', 'No reconciliation in progress'));
+    const status = this.reconcileStatus(rec);
+    if (status.difference !== 0 && !adjust) return Promise.reject(new ApiError(400, 'invalid', `The difference is ${(status.difference / 100).toFixed(2)}; mark more lines or enter an adjustment.`));
+    if (status.difference !== 0) {
+      const disc = this.lists.accounts.find((a) => a.role === 'ReconciliationDiscrepancies') ?? this.lists.accounts.find((a) => a.full_name === 'Ask My Accountant')!;
+      const t = blankTxn('JournalEntry', rec.statement_date);
+      const type = this.lists.accounts.find((a) => a.id === rec.account_id)?.account_type ?? 'Bank';
+      const here = naturalBalance(type, status.difference); // debit-positive effect that brings the account to the statement
+      t.memo = 'Balance Adjustment';
+      t.amount = Math.abs(here);
+      t.lines = [
+        { ...blankLine('Journal'), account_id: rec.account_id, amount: here, description: t.memo },
+        { ...blankLine('Journal'), account_id: disc.id, amount: -here, description: t.memo },
+      ];
+      const posted = this.post(t);
+      const saved: Txn = { ...t, edit_seq: 1, created_at: new Date().toISOString(), modified_at: new Date().toISOString() };
+      this.txnStore.set(saved.id, { txn: saved, postings: posted.postings.map((p) => (p.account_id === rec.account_id ? { ...p, cleared: 'Pending' as const } : p)), total: posted.total, seq: this.seq++ });
+      this.emit('txn', saved.id, 'created');
+      rec.adjustment_txn_id = saved.id;
+    }
+    const cleared: string[] = [];
+    for (const s of this.txnStore.values()) {
+      if (s.postings.some((p) => p.account_id === rec.account_id && p.cleared === 'Pending')) {
+        s.postings = s.postings.map((p) => (p.account_id === rec.account_id && p.cleared === 'Pending' ? { ...p, cleared: 'Cleared' } : p));
+        cleared.push(s.txn.id);
+      }
+    }
+    rec.cleared_txn_ids = cleared;
+    rec.finished_at = new Date().toISOString();
+    rec.finished_by = 'Demo User';
+    this.emit('reconciliation', id, 'finished');
+    return this.delay(() => rec);
+  }
+
+  discardReconcile(co: CompanyId, id: string): Promise<void> {
+    this.checkCompany(co);
+    const i = this.reconciliations.findIndex((r) => r.id === id && !r.finished_at);
+    if (i < 0) return Promise.reject(new ApiError(404, 'not_found', 'No reconciliation in progress'));
+    const rec = this.reconciliations[i]!;
+    for (const s of this.txnStore.values()) s.postings = s.postings.map((p) => (p.account_id === rec.account_id && p.cleared === 'Pending' ? { ...p, cleared: 'Uncleared' } : p));
+    this.reconciliations.splice(i, 1);
+    this.emit('reconciliation', id, 'deleted');
+    return this.delay(() => undefined);
+  }
+
+  undoReconcile(co: CompanyId, accountId: string): Promise<Reconciliation | null> {
+    this.checkCompany(co);
+    if (this.reconciliations.some((r) => r.account_id === accountId && !r.finished_at)) return Promise.reject(new ApiError(400, 'invalid', 'Finish or discard the reconciliation in progress first'));
+    const done = this.reconciliations.filter((r) => r.account_id === accountId && r.finished_at).sort((a, b) => b.statement_date.localeCompare(a.statement_date));
+    const last = done[0];
+    if (!last) return this.delay(() => null);
+    for (const id of last.cleared_txn_ids) {
+      const s = this.txnStore.get(id);
+      if (s) s.postings = s.postings.map((p) => (p.account_id === accountId && p.cleared === 'Cleared' ? { ...p, cleared: 'Uncleared' } : p));
+    }
+    this.reconciliations = this.reconciliations.filter((r) => r.id !== last.id);
+    this.emit('reconciliation', last.id, 'undone');
+    return this.delay(() => last);
+  }
+
+  // ---- bank feeds (FIXTURE: ./feeds.ts) --------------------------------------
+
+  private feed<T>(co: CompanyId, f: () => T): Promise<T> {
+    this.checkCompany(co);
+    try {
+      const v = f();
+      return this.delay(() => v);
+    } catch (e) {
+      return Promise.reject(e);
+    }
+  }
+  feedsSummary(co: CompanyId) {
+    return this.feed(co, () => this.feeds.summary());
+  }
+  feedTxns(co: CompanyId, query?: FeedQuery) {
+    return this.feed(co, () => this.feeds.list(query));
+  }
+  feedTxn(co: CompanyId, id: string) {
+    return this.feed(co, () => this.feeds.get(id));
+  }
+  async feedDetect(co: CompanyId, file: File) {
+    const text = await file.text();
+    return this.feed(co, () => this.feeds.detect(file.name, text));
+  }
+  async feedImport(co: CompanyId, req: FeedImportRequest) {
+    const text = await req.file.text();
+    return this.feed(co, () => this.feeds.import(req, req.file.name, text));
+  }
+  feedCandidates(co: CompanyId, id: string, days?: number) {
+    return this.feed(co, () => this.feeds.candidates(id, days));
+  }
+  feedMatch(co: CompanyId, id: string, txnId: string) {
+    return this.feed(co, () => this.feeds.match(id, txnId));
+  }
+  feedPreview(co: CompanyId, id: string, req: AddRequest) {
+    return this.feed(co, () => {
+      const p = this.feeds.preview(id, req);
+      const posted = this.post(p.txn);
+      return { ...p, postings: posted.postings, total: posted.total, sales_tax: posted.sales_tax };
+    });
+  }
+  feedAdd(co: CompanyId, id: string, req: AddRequest) {
+    return this.feed(co, () => this.feeds.add(id, req));
+  }
+  feedAddAll(co: CompanyId, ids: string[], req?: AddRequest) {
+    return this.feed(co, () => this.feeds.addAll(ids, req));
+  }
+  feedIgnore(co: CompanyId, ids: string[]) {
+    return this.feed(co, () => this.feeds.ignore(ids));
+  }
+  feedUndo(co: CompanyId, id: string) {
+    return this.feed(co, () => this.feeds.undo(id));
+  }
+  feedConnections(co: CompanyId) {
+    return this.feed(co, () => this.feeds.connections);
+  }
+  createFeedConnection(co: CompanyId, c: FeedConnection) {
+    return this.feed(co, () => this.feeds.createConnection(c));
+  }
+  updateFeedConnection(co: CompanyId, c: FeedConnection) {
+    return this.feed(co, () => this.feeds.updateConnection(c));
+  }
+  deleteFeedConnection(co: CompanyId, id: string, editSeq: number) {
+    return this.feed(co, () => this.feeds.deleteConnection(id, editSeq));
+  }
+  setFeedCredentials(co: CompanyId, id: string, value: string) {
+    return this.feed(co, () => this.feeds.setCredentials(id, value));
+  }
+  syncFeedConnection(co: CompanyId, id: string) {
+    return this.feed(co, () => this.feeds.sync(id));
+  }
+  feedRemoteAccounts(co: CompanyId, id: string) {
+    return this.feed(co, () => this.feeds.remoteAccounts(id));
+  }
+  simplefinClaim(co: CompanyId, setupToken: string) {
+    return this.feed(co, () => this.feeds.simplefinClaim(setupToken));
+  }
+  feedRules(co: CompanyId) {
+    return this.feed(co, () => [...this.feeds.rules].sort((a, b) => Number(a.priority) - Number(b.priority)));
+  }
+  createFeedRule(co: CompanyId, r: FeedRule) {
+    return this.feed(co, () => this.feeds.createRule(r));
+  }
+  updateFeedRule(co: CompanyId, r: FeedRule) {
+    return this.feed(co, () => this.feeds.updateRule(r));
+  }
+  deleteFeedRule(co: CompanyId, id: string) {
+    return this.feed(co, () => this.feeds.deleteRule(id));
+  }
+  reorderFeedRules(co: CompanyId, ids: string[]) {
+    return this.feed(co, () => this.feeds.reorderRules(ids));
+  }
+  applyFeedRules(co: CompanyId, ids?: string[], accountId?: string | null) {
+    return this.feed(co, () => this.feeds.applyRules(ids, accountId));
+  }
+  async amazonOrders(co: CompanyId, file: File, accountId?: string | null) {
+    const text = await file.text();
+    return this.feed(co, () => this.feeds.amazonOrders(text, accountId));
+  }
+  amazonApply(co: CompanyId, preview: AmazonPreview) {
+    return this.feed(co, () => this.feeds.amazonApply(preview));
+  }
+
+  // ---- company: info, closing date, merge ------------------------------------
+
+  putCompanyInfo(co: CompanyId, info: CompanyInfo): Promise<CompanyInfo> {
+    this.checkCompany(co);
+    if (!info.name.trim()) return Promise.reject(new ApiError(400, 'invalid', 'The company needs a name', { field: 'name' }));
+    if (info.fiscal_year_start_month < 1 || info.fiscal_year_start_month > 12) return Promise.reject(new ApiError(400, 'invalid', 'Month is 1–12', { field: 'fiscal_year_start_month' }));
+    this.info = clone(info);
+    this.emit('company', FIXTURE_COMPANY_ID, 'updated');
+    return this.delay(() => this.info);
+  }
+
+  closingDate(co: CompanyId): Promise<string | null> {
+    this.checkCompany(co);
+    return this.delay(() => this.closing);
+  }
+
+  putClosingDate(co: CompanyId, date: string | null): Promise<string | null> {
+    this.checkCompany(co);
+    if (date !== null && !/^\d{4}-\d{2}-\d{2}$/.test(date)) return Promise.reject(new ApiError(400, 'invalid', 'Enter a valid date', { field: 'closing_date' }));
+    this.closing = date;
+    this.emit('company', FIXTURE_COMPANY_ID, 'updated');
+    return this.delay(() => this.closing);
+  }
+
+  /**
+   * Merge `from` into `into`: every reference moves, then `from` is gone. As the
+   * server's lb-store does it: same list, same type (accounts), neither a
+   * parent of the other, and the survivor keeps its own name.
+   */
+  merge(co: CompanyId, req: MergeRequest): Promise<void> {
+    this.checkCompany(co);
+    try {
+      if (req.from === req.into) throw new ApiError(400, 'invalid', 'Choose two different records');
+      const list: ListName = req.kind === 'account' ? 'accounts' : req.kind === 'entity' ? 'entities' : 'items';
+      const rows = this.lists[list] as Array<Account | Entity | Item>;
+      const from = rows.find((r) => r.id === req.from);
+      const into = rows.find((r) => r.id === req.into);
+      if (!from || !into) throw new ApiError(404, 'not_found', 'No such record');
+      if (req.kind === 'account' && (from as Account).account_type !== (into as Account).account_type) throw new ApiError(400, 'invalid', 'Accounts must be the same type to merge');
+      if (req.kind === 'entity' && (from as Entity).kind !== (into as Entity).kind) throw new ApiError(400, 'invalid', 'Names must be the same kind (customer, vendor…) to merge');
+      if (req.kind === 'item' && (from as Item).item_type !== (into as Item).item_type) throw new ApiError(400, 'invalid', 'Items must be the same type to merge');
+      const isAncestor = (a: string, b: string) => {
+        for (let cur = rows.find((r) => r.id === b); cur; cur = rows.find((r) => r.id === cur!.parent_id)) if (cur.parent_id === a) return true;
+        return false;
+      };
+      if (isAncestor(req.from, req.into) || isAncestor(req.into, req.from)) throw new ApiError(400, 'invalid', "One is the other's parent; move the subrecords first");
+      const swap = <T extends string | null>(v: T): T => (v === req.from ? (req.into as T) : v);
+      for (const s of this.txnStore.values()) {
+        const t = s.txn;
+        if (req.kind === 'account') {
+          t.account_id = swap(t.account_id);
+          t.to_account_id = swap(t.to_account_id);
+          t.ar_ap_account_id = swap(t.ar_ap_account_id);
+        }
+        if (req.kind === 'entity') t.entity_id = swap(t.entity_id);
+        if (req.kind === 'item') t.sales_tax_item_id = swap(t.sales_tax_item_id);
+        for (const l of t.lines) {
+          if (req.kind === 'account') l.account_id = swap(l.account_id);
+          if (req.kind === 'entity') l.entity_id = swap(l.entity_id);
+          if (req.kind === 'item') l.item_id = swap(l.item_id);
+        }
+        for (const p of s.postings) {
+          if (req.kind === 'account') p.account_id = swap(p.account_id);
+          if (req.kind === 'entity') p.entity_id = swap(p.entity_id);
+          if (req.kind === 'item') p.item_id = swap(p.item_id);
+        }
+      }
+      // Postings to the same account on one transaction collapse (as the server's reposting would).
+      for (const s of this.txnStore.values()) {
+        if (req.kind !== 'account') break;
+        const merged = new Map<string, Posting>();
+        for (const p of s.postings) {
+          const key = `${p.account_id}|${p.entity_id ?? ''}|${p.item_id ?? ''}|${p.class_id ?? ''}`;
+          const prev = merged.get(key);
+          if (prev) prev.amount += p.amount;
+          else merged.set(key, { ...p });
+        }
+        s.postings = [...merged.values()].filter((p) => p.amount !== 0);
+      }
+      for (const r of rows) if (r.parent_id === req.from) r.parent_id = req.into;
+      if (req.kind === 'account') {
+        for (const e of this.lists.entities) e.default_expense_account_id = swap(e.default_expense_account_id);
+        for (const i of this.lists.items) {
+          i.income_account_id = swap(i.income_account_id);
+          i.expense_account_id = swap(i.expense_account_id);
+          i.asset_account_id = swap(i.asset_account_id);
+          i.deposit_account_id = swap(i.deposit_account_id);
+        }
+      }
+      if (req.kind === 'entity') {
+        for (const i of this.lists.items) {
+          i.preferred_vendor_id = swap(i.preferred_vendor_id);
+          i.tax_agency_id = swap(i.tax_agency_id);
+        }
+      }
+      rows.splice(rows.indexOf(from), 1);
+      into.edit_seq += 1;
+      this.emit(kindOfList(list), req.from, 'deleted');
+      this.emit(kindOfList(list), req.into, 'updated');
+      return this.delay(() => undefined);
+    } catch (e) {
+      return Promise.reject(e);
+    }
+  }
+
+  // ---- users, enrolment, my account, server, backups, attachments, import ----
+  //
+  // Server-level calls take no company; the ones that do are checked like the rest.
+
+  private adm<T>(f: () => T, co?: CompanyId): Promise<T> {
+    if (co !== undefined) this.checkCompany(co);
+    try {
+      const v = f();
+      return this.delay(() => v);
+    } catch (e) {
+      return Promise.reject(e);
+    }
+  }
+  users() {
+    return this.adm(() => this.admin.listUsers());
+  }
+  user(id: string) {
+    return this.adm(() => this.admin.user(id));
+  }
+  updateUser(id: string, update: UserUpdate) {
+    return this.adm(() => this.admin.updateUser(id, update));
+  }
+  deleteUser(id: string) {
+    return this.adm(() => this.admin.deleteUser(id));
+  }
+  grantAccess(userId: string, co: CompanyId, role: Role) {
+    return this.adm(() => this.admin.grantAccess(userId, co, role), co);
+  }
+  revokeAccess(userId: string, co: CompanyId) {
+    return this.adm(() => this.admin.revokeAccess(userId, co), co);
+  }
+  enrollments() {
+    return this.adm(() => this.admin.listEnrollments());
+  }
+  createEnrollment(body: NewEnrolment) {
+    return this.adm(() => this.admin.createEnrollment(body));
+  }
+  revokeEnrollment(id: string) {
+    return this.adm(() => this.admin.revokeEnrollment(id));
+  }
+  passkeys() {
+    return this.adm(() => this.admin.myPasskeys());
+  }
+  renamePasskey(id: string, name: string) {
+    return this.adm(() => this.admin.renamePasskey(id, name));
+  }
+  deletePasskey(id: string) {
+    return this.adm(() => this.admin.deletePasskey(id));
+  }
+  devices() {
+    return this.adm(() => this.admin.myDevices());
+  }
+  revokeDevice(id: string) {
+    return this.adm(() => this.admin.revokeDevice(id));
+  }
+  sessions() {
+    return this.adm(() => this.admin.mySessions());
+  }
+  revokeSession(id: string) {
+    return this.adm(() => this.admin.revokeSession(id));
+  }
+  server() {
+    return this.adm(() => this.admin.serverView());
+  }
+  putServer(settings: ServerSettings) {
+    return this.adm(() => this.admin.putServer(settings));
+  }
+  secrets() {
+    return this.adm(() => this.admin.secrets());
+  }
+  putSecret(name: string, value: string) {
+    return this.adm(() => this.admin.putSecret(name, value));
+  }
+  deleteSecret(name: string) {
+    return this.adm(() => this.admin.deleteSecret(name));
+  }
+  update() {
+    return this.adm(() => this.admin.update());
+  }
+  checkUpdate() {
+    return this.adm(() => this.admin.checkUpdate());
+  }
+  installUpdate(restart: boolean) {
+    return this.adm(() => this.admin.installUpdate(restart));
+  }
+  tunnel() {
+    return this.adm(() => this.admin.tunnel());
+  }
+  putTunnel(update: TunnelUpdate) {
+    return this.adm(() => this.admin.putTunnel(update));
+  }
+  serverBackupsStatus() {
+    return this.adm(() => this.admin.serverBackupsStatus());
+  }
+  backups(co: CompanyId) {
+    return this.adm(() => this.admin.backups(), co);
+  }
+  backupsStatus(co: CompanyId) {
+    return this.adm(() => this.admin.backupsStatus(), co);
+  }
+  runBackup(co: CompanyId) {
+    return this.adm(() => this.admin.runBackup(), co);
+  }
+  verifyBackup(co: CompanyId, id: string, _destination: number, unlock?: RestoreRequest) {
+    return this.adm(() => this.admin.verifyBackup(id, unlock), co);
+  }
+  restoreBackup(co: CompanyId, id: string, _destination: number, body: RestoreRequest) {
+    return this.adm(() => this.admin.restoreBackup(id, body), co);
+  }
+  exportCompany(co: CompanyId): Promise<FileDownload> {
+    this.checkCompany(co);
+    const json = JSON.stringify({ format: 'librebooks-fixture-export', company: this.info, lists: this.lists, txns: [...this.txnStore.values()].map((s) => s.txn) });
+    return this.delay(() => ({ blob: new Blob([json], { type: 'application/zip' }), filename: 'juniper-hill-woodworks.lbk' }));
+  }
+  attachments(co: CompanyId, query?: AttachmentQuery) {
+    return this.adm(() => this.admin.attachments(query), co);
+  }
+  uploadAttachment(co: CompanyId, file: File, record?: AttachmentRecord) {
+    return this.adm(() => this.admin.upload(file, record), co);
+  }
+  attachRecord(co: CompanyId, id: string, record: AttachmentRecord) {
+    return this.adm(() => this.admin.attach(id, record), co);
+  }
+  deleteAttachment(co: CompanyId, id: string) {
+    return this.adm(() => this.admin.deleteAttachment(id), co);
+  }
+  attachmentUrl(_co: CompanyId, id: string) {
+    return this.admin.attachmentUrl(id);
+  }
+  qbdSettings(co: CompanyId) {
+    return this.adm(() => this.admin.qbdSettings(), co);
+  }
+  putQbdSettings(co: CompanyId, settings: ImportSettings) {
+    return this.adm(() => this.admin.putQbdSettings(settings), co);
+  }
+  qbdStatus(co: CompanyId, _wait?: number) {
+    return this.adm(() => this.admin.qbdStatus(), co);
+  }
+  qbdParity(co: CompanyId, _wait?: number) {
+    return this.adm(() => this.admin.qbdParity(), co);
+  }
+  qbdSync(co: CompanyId, opts?: QbdSyncOptions) {
+    return this.adm(() => this.admin.qbdSync(opts), co);
+  }
+  qbdParityRun(co: CompanyId) {
+    return this.adm(() => this.admin.qbdParityRun(), co);
+  }
+  qbwcFile(co: CompanyId): Promise<FileDownload> {
+    return this.adm(() => ({ blob: this.admin.qbwcFile(), filename: 'librebooks.qwc' }), co);
+  }
+  qbwcPassword(co: CompanyId, password?: string | null) {
+    return this.adm(() => this.admin.qbwcPassword(password), co);
+  }
+
+  /** Tests: stop a running fixture sync's timers. */
+  dispose() {
+    this.admin.dispose();
   }
 
   // ---- events ---------------------------------------------------------------

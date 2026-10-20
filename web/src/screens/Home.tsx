@@ -52,11 +52,11 @@ export function Home() {
       {!mobile && <Title order={3}>{info?.name ?? 'Home'}</Title>}
       <SimpleGrid cols={{ base: 3, sm: 4, lg: 8 }} spacing="xs">
         <Action icon={<IconChecks size={22} />} label="Write Checks" path={paths.newCheck()} command="form.writeChecks" />
-        <Action icon={<IconFileInvoice size={22} />} label="Invoice" path={paths.form('invoice')} command="form.invoice" todo />
-        <Action icon={<IconCash size={22} />} label="Receive Payment" path={paths.form('receive-payment')} todo />
-        <Action icon={<IconReceipt size={22} />} label="Enter Bills" path={paths.form('bill')} todo />
-        <Action icon={<IconBuildingBank size={22} />} label="Deposit" path={paths.form('deposit')} todo />
-        <Action icon={<IconCreditCard size={22} />} label="Card Charge" path={paths.form('cc-charge')} todo />
+        <Action icon={<IconFileInvoice size={22} />} label="Invoice" path={paths.form('invoice')} command="form.invoice" />
+        <Action icon={<IconCash size={22} />} label="Receive Payment" path={paths.form('receive-payment')} command="form.receivePayment" />
+        <Action icon={<IconReceipt size={22} />} label="Enter Bills" path={paths.form('bill')} command="form.bill" />
+        <Action icon={<IconBuildingBank size={22} />} label="Deposit" path={paths.form('deposit')} command="form.deposit" />
+        <Action icon={<IconCreditCard size={22} />} label="Card Charge" path={paths.form('cc-charge')} command="form.ccCharge" />
         <Action icon={<IconListTree size={22} />} label="Accounts" path={paths.accounts()} command="nav.chartOfAccounts" />
         <Action icon={<IconReportMoney size={22} />} label="Reports" path={paths.reports()} />
       </SimpleGrid>
@@ -93,7 +93,7 @@ export function Home() {
         </Card>
         <Stack gap="md">
           <SimpleGrid cols={2} spacing="md">
-            <Card withBorder padding="sm" className={classes.clickable} onClick={() => open(paths.report('customer_balance_summary'))}>
+            <Card withBorder padding="sm" className={classes.clickable} onClick={() => open(paths.report('CustomerBalanceSummary'))}>
               <Text size="sm" c="dimmed">
                 Customers owe you
               </Text>
@@ -113,7 +113,7 @@ export function Home() {
           <Card withBorder padding="sm">
             <Group justify="space-between" mb="xs">
               <Text fw={600}>Recent transactions</Text>
-              <Badge variant="light" className={classes.clickable} onClick={() => open(paths.report('transaction_list_by_date'))}>
+              <Badge variant="light" className={classes.clickable} onClick={() => open(paths.report('TransactionListByDate', { dates: 'ThisMonthToDate' }))}>
                 All
               </Badge>
             </Group>

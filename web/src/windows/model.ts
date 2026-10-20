@@ -21,7 +21,18 @@ export type WindowKind =
   | 'find'
   | 'list'
   | 'company'
-  | 'form';
+  | 'form'
+  | 'reconcile'
+  | 'feeds'
+  | 'memorized'
+  | 'attachments'
+  | 'merge'
+  | 'account'
+  | 'users'
+  | 'enrollments'
+  | 'server'
+  | 'backups'
+  | 'import';
 
 export interface WindowDesc {
   key: string;
