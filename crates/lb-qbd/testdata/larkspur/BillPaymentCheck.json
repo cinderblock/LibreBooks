@@ -1,0 +1,8 @@
+[
+  {"TxnID": "6100-1700007100", "TimeCreated": "2026-03-20T09:00:00-08:00", "TimeModified": "2026-03-31T12:00:00-08:00", "EditSequence": "1700007100",
+   "TxnNumber": "51", "PayeeEntityRef": {"ListID": "80000040-1700000000", "FullName": "Pacific Power"},
+   "APAccountRef": {"ListID": "80000016-1700000000", "FullName": "Accounts Payable"},
+   "TxnDate": "2026-03-20", "BankAccountRef": {"ListID": "80000010-1700000000", "FullName": "Checking"},
+   "Amount": "120.00", "RefNumber": "1004", "IsToBePrinted": "false",
+   "AppliedToTxnRet": {"TxnID": "6000-1700007000", "TxnType": "Bill", "TxnDate": "2026-03-01", "RefNumber": "PP-0301", "BalanceRemaining": "0.00", "Amount": "120.00"}}
+]

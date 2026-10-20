@@ -1,0 +1,8 @@
+[
+  {"ListID": "80000002-1700000000", "TimeCreated": "2023-11-14T22:13:20-08:00", "TimeModified": "2026-03-31T12:00:00-08:00", "EditSequence": "1700000000",
+   "Name": "Net 30", "IsActive": "true", "StdDueDays": "30", "StdDiscountDays": "0", "DiscountPct": "0.00"},
+  {"ListID": "80000003-1700000000", "TimeCreated": "2023-11-14T22:13:20-08:00", "TimeModified": "2026-03-31T12:00:00-08:00", "EditSequence": "1700000000",
+   "Name": "2% 10 Net 30", "IsActive": "true", "StdDueDays": "30", "StdDiscountDays": "10", "DiscountPct": "2.00"},
+  {"ListID": "80000004-1700000000", "TimeCreated": "2023-11-14T22:13:20-08:00", "TimeModified": "2026-03-31T12:00:00-08:00", "EditSequence": "1700000000",
+   "Name": "15th of the month", "IsActive": "false", "DayOfMonthDue": "15", "DueNextMonthDays": "5", "DiscountPct": "0.00"}
+]

@@ -1,0 +1,8 @@
+[
+  {"TxnID": "6000-1700007000", "TimeCreated": "2026-03-01T09:00:00-08:00", "TimeModified": "2026-03-31T12:00:00-08:00", "EditSequence": "1700007000",
+   "TxnNumber": "50", "VendorRef": {"ListID": "80000040-1700000000", "FullName": "Pacific Power"},
+   "APAccountRef": {"ListID": "80000016-1700000000", "FullName": "Accounts Payable"},
+   "TxnDate": "2026-03-01", "DueDate": "2026-03-31", "AmountDue": "120.00", "RefNumber": "PP-0301",
+   "TermsRef": {"ListID": "80000002-1700000000", "FullName": "Net 30"}, "IsPaid": "true", "OpenAmount": "0.00",
+   "ExpenseLineRet": {"TxnLineID": "6001-1700007000", "AccountRef": {"ListID": "8000001E-1700000000", "FullName": "Utilities"}, "Amount": "120.00", "Memo": "Power, February"}}
+]

@@ -1,0 +1,6 @@
+[
+  {"ListID": "80000002-1700000080", "TimeCreated": "2023-11-14T22:13:20-08:00", "TimeModified": "2026-03-31T12:00:00-08:00", "EditSequence": "1700000080",
+   "Name": "East", "FullName": "Lab:East", "IsActive": "true", "ParentRef": {"ListID": "80000001-1700000080", "FullName": "Lab"}, "Sublevel": "1"},
+  {"ListID": "80000001-1700000080", "TimeCreated": "2023-11-14T22:13:20-08:00", "TimeModified": "2026-03-31T12:00:00-08:00", "EditSequence": "1700000080",
+   "Name": "Lab", "FullName": "Lab", "IsActive": "true", "Sublevel": "0"}
+]

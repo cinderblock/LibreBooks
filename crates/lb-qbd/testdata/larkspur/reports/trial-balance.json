@@ -1,0 +1,30 @@
+{
+  "title": "Trial Balance",
+  "subtitle": "As of March 31, 2026",
+  "basis": "Accrual",
+  "columns": [
+    {"id": 1, "type": "STRTYPE", "title": ""},
+    {"id": 2, "type": "AMTTYPE", "title": ""},
+    {"id": 3, "type": "AMTTYPE", "title": ""}
+  ],
+  "rows": [
+    {"type": "DataRow", "label": "Checking", "values": {"0": "Checking", "1": "Checking", "2": "9685.00"}},
+    {"type": "DataRow", "label": "Accounts Receivable", "values": {"0": "Accounts Receivable", "1": "Accounts Receivable", "2": "567.25"}},
+    {"type": "DataRow", "label": "Equipment:Computers", "values": {"0": "Equipment:Computers", "1": "Equipment:Computers", "2": "1200.00"}},
+    {"type": "DataRow", "label": "Visa x1234", "values": {"0": "Visa x1234", "1": "Visa x1234", "3": "89.99"}},
+    {"type": "DataRow", "label": "Sales Tax Payable", "values": {"0": "Sales Tax Payable", "1": "Sales Tax Payable", "3": "8.25"}},
+    {"type": "DataRow", "label": "Opening Balance Equity", "values": {"0": "Opening Balance Equity", "1": "Opening Balance Equity", "3": "11500.00"}},
+    {"type": "DataRow", "label": "Retained Earnings", "values": {"0": "Retained Earnings", "1": "Retained Earnings", "3": "500.00"}},
+    {"type": "DataRow", "label": "Sales:Engineering", "values": {"0": "Sales:Engineering", "1": "Sales:Engineering", "3": "2185.00"}},
+    {"type": "DataRow", "label": "Sales:Hardware", "values": {"0": "Sales:Hardware", "1": "Sales:Hardware", "3": "115.00"}},
+    {"type": "DataRow", "label": "Discounts Given", "values": {"0": "Discounts Given", "1": "Discounts Given", "2": "176.00"}},
+    {"type": "DataRow", "label": "Subcontractors", "values": {"0": "Subcontractors", "1": "Subcontractors", "2": "240.00"}},
+    {"type": "DataRow", "label": "Rent", "values": {"0": "Rent", "1": "Rent", "2": "2300.00"}},
+    {"type": "DataRow", "label": "Utilities", "values": {"0": "Utilities", "1": "Utilities", "2": "120.00"}},
+    {"type": "DataRow", "label": "Utilities:Internet", "values": {"0": "Utilities:Internet", "1": "Utilities:Internet", "2": "169.99"}},
+    {"type": "DataRow", "label": "Bank Service Charges", "values": {"0": "Bank Service Charges", "1": "Bank Service Charges", "2": "40.00"}},
+    {"type": "DataRow", "label": "Payroll Expenses", "values": {"0": "Payroll Expenses", "1": "Payroll Expenses", "2": "50.00"}},
+    {"type": "DataRow", "label": "Interest Income", "values": {"0": "Interest Income", "1": "Interest Income", "3": "150.00"}},
+    {"type": "TotalRow", "label": "TOTAL", "values": {"1": "TOTAL", "2": "14548.24", "3": "14548.24"}}
+  ]
+}

@@ -22,10 +22,12 @@ reqwest.workspace = true
 tokio.workspace = true
 url.workspace = true
 quick-xml.workspace = true
+ts-rs.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
 pretty_assertions.workspace = true
+axum.workspace = true
 
 [lints]
 workspace = true

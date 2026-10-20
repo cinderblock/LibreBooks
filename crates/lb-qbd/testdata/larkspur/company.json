@@ -1,0 +1,30 @@
+{
+  "IsSampleCompany": "false",
+  "CompanyName": "Larkspur Robotics",
+  "LegalCompanyName": "Larkspur Robotics, Inc.",
+  "Address": {
+    "Addr1": "100 Example Way ",
+    "Addr2": "Suite 5",
+    "City": "Springfield",
+    "State": "CA",
+    "PostalCode": "90000",
+    "Country": "US"
+  },
+  "AddressBlock": {
+    "Addr1": "100 Example Way ",
+    "Addr2": "Suite 5",
+    "Addr3": "Springfield, CA 90000"
+  },
+  "LegalAddress": {
+    "Addr1": "100 Example Way ",
+    "City": "Springfield",
+    "State": "CA",
+    "PostalCode": "90000"
+  },
+  "Email": "books@larkspur.example",
+  "FirstMonthFiscalYear": "January",
+  "FirstMonthIncomeTaxYear": "January",
+  "CompanyType": "GeneralServicebasedBusiness",
+  "EIN": "00-0000042",
+  "TaxForm": "Form1120"
+}

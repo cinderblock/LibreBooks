@@ -1,0 +1,16 @@
+[
+  {"ListID": "80000040-1700000000", "TimeCreated": "2023-11-14T22:13:20-08:00", "TimeModified": "2026-03-31T12:00:00-08:00", "EditSequence": "1700000000",
+   "Name": "Pacific Power", "IsActive": "true", "CompanyName": "Pacific Power Co.",
+   "VendorAddress": {"Addr1": "Pacific Power Co.", "Addr2": "PO Box 1", "City": "Springfield", "State": "CA", "PostalCode": "90001"},
+   "VendorAddressBlock": {"Addr1": "Pacific Power Co.", "Addr2": "PO Box 1", "Addr3": "Springfield, CA 90001"},
+   "Phone": "555-0100", "AccountNumber": "PP-77", "TermsRef": {"ListID": "80000002-1700000000", "FullName": "Net 30"},
+   "IsVendorEligibleFor1099": "false", "Balance": "0.00",
+   "PrefillAccountRef": {"ListID": "8000001E-1700000000", "FullName": "Utilities"}},
+  {"ListID": "80000041-1700000000", "TimeCreated": "2023-11-14T22:13:20-08:00", "TimeModified": "2026-03-31T12:00:00-08:00", "EditSequence": "1700000000",
+   "Name": "Landlord LLC", "IsActive": "true", "NameOnCheck": "Landlord, LLC", "VendorTaxIdent": "00-1111111",
+   "IsVendorEligibleFor1099": "true", "Balance": "0.00", "PriceLevelRef": {"ListID": "80000001-1700000400", "FullName": "Friends"}},
+  {"ListID": "80000042-1700000000", "TimeCreated": "2023-11-14T22:13:20-08:00", "TimeModified": "2026-03-31T12:00:00-08:00", "EditSequence": "1700000000",
+   "Name": "Office Mart", "IsActive": "true", "VendorTypeRef": {"ListID": "80000001-1700000061", "FullName": "Supplies"},
+   "IsVendorEligibleFor1099": "false", "Balance": "0.00",
+   "AdditionalContactRef": [{"ContactName": "Mobile", "ContactValue": "555-0199"}, {"ContactName": "Pager", "ContactValue": "555-0198"}]}
+]

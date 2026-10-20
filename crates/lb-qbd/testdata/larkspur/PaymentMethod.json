@@ -1,0 +1,6 @@
+[
+  {"ListID": "80000003-1700000000", "TimeCreated": "2023-11-14T22:13:20-08:00", "TimeModified": "2026-03-31T12:00:00-08:00", "EditSequence": "1700000000",
+   "Name": "Check", "IsActive": "true", "PaymentMethodType": "Check"},
+  {"ListID": "80000009-1700000000", "TimeCreated": "2023-11-14T22:13:20-08:00", "TimeModified": "2026-03-31T12:00:00-08:00", "EditSequence": "1700000000",
+   "Name": "ACH", "IsActive": "true", "PaymentMethodType": "Other"}
+]
