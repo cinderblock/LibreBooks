@@ -14,7 +14,19 @@ import type {
   AccountBalance,
   AddRequest,
   AmazonPreview,
+  AttachmentQuery,
+  AttachmentRecord,
   AuditEntry,
+  ImportSettings,
+  Item,
+  MergeRequest,
+  NewEnrolment,
+  QbdSyncOptions,
+  RestoreRequest,
+  Role,
+  ServerSettings,
+  TunnelUpdate,
+  UserUpdate,
   CatalogEntry,
   ChangeEvent,
   ClearedStatus,
@@ -59,6 +71,7 @@ import { accountTypeOrder, naturalBalance } from '~/lib/accountTypes';
 import { addDays, addMonths, todayIso } from '~/lib/dates';
 import { hierarchicalCompare } from '~/lib/tree';
 import { reportToCsv } from '~/reports/rows';
+import { FixtureAdmin } from './admin';
 import { FixtureFeeds } from './feeds';
 import { fixturePost, type PostingBooks } from './post';
 import { FIXTURE_COMPANY_ID, buildSeed, stressNames } from './seed';
@@ -105,6 +118,9 @@ export class FixtureApiClient implements ApiClient {
   /** Register lines a bank feed matched or added (txn id → accounts). */
   private downloaded = new Map<string, Set<string>>();
   private feeds: FixtureFeeds;
+  private admin: FixtureAdmin;
+  /** Transactions dated on or before this are locked (`closed_period`). */
+  private closing: string | null = null;
 
   constructor(opts: FixtureOptions = {}) {
     this.latency = opts.latencyMs ?? 90;
@@ -169,6 +185,21 @@ export class FixtureApiClient implements ApiClient {
       },
       emit: (kind, id, action) => this.emit(kind, id, action),
     });
+    this.admin = new FixtureAdmin({
+      today: this.today,
+      companyId: FIXTURE_COMPANY_ID,
+      companyName: () => this.info.name,
+      accounts: () => this.lists.accounts,
+      balances: () => this.balanceRows(),
+      emit: (kind, id, action) => this.emit(kind, id, action),
+    });
+  }
+
+  /** The books' closing date lock, as the server applies it to every write. */
+  private checkClosed(date: string) {
+    if (this.closing && date <= this.closing) {
+      throw new ApiError(409, 'closed_period', `The books are closed through ${this.closing}; this transaction is dated inside the closed period.`, { closing_date: this.closing });
+    }
   }
 
   // ---- plumbing -------------------------------------------------------------
@@ -547,6 +578,7 @@ export class FixtureApiClient implements ApiClient {
     this.checkCompany(co);
     try {
       this.validate(txn);
+      this.checkClosed(txn.date);
       if (this.txnStore.has(txn.id)) throw new ApiError(409, 'conflict', 'That transaction already exists', { expected: 0, actual: 1 });
       const posted = this.post(txn);
       const now = new Date().toISOString();
@@ -571,6 +603,9 @@ export class FixtureApiClient implements ApiClient {
     }
     try {
       this.validate(txn);
+      // Moving a transaction into or out of the closed period is both locked.
+      this.checkClosed(current.txn.date);
+      this.checkClosed(txn.date);
       const posted = this.post(txn);
       // Keep cleared marks on the accounts that still have a posting.
       const cleared = new Map(current.postings.map((p) => [p.account_id, p.cleared]));
@@ -610,6 +645,11 @@ export class FixtureApiClient implements ApiClient {
     }
     if ([...this.txnStore.values()].some((o) => o.txn.applications.some((a) => a.target_txn_id === id) || o.txn.lines.some((l) => l.linked_txn_id === id))) {
       return Promise.reject(new ApiError(409, 'in_use', 'Payments are applied to it; delete those first.'));
+    }
+    try {
+      this.checkClosed(s.txn.date);
+    } catch (e) {
+      return Promise.reject(e);
     }
     this.txnStore.delete(id);
     this.record('deleted', s.txn, null);
@@ -739,21 +779,23 @@ export class FixtureApiClient implements ApiClient {
     return this.delay(() => undefined);
   }
 
+  private balanceRows(range: Partial<DateRange> = {}): AccountBalance[] {
+    const sums = new Map<string, number>();
+    for (const s of this.txnStore.values()) {
+      if (range.from && s.txn.date < range.from) continue;
+      if (range.to && s.txn.date > range.to) continue;
+      for (const p of s.postings) sums.set(p.account_id, (sums.get(p.account_id) ?? 0) + p.amount);
+    }
+    if (this.stressLines || this.lists.accounts.some((a) => a.id === STRESS_ACCOUNT_ID)) {
+      const lines = this.stressRegister();
+      sums.set(STRESS_ACCOUNT_ID, lines[lines.length - 1]?.balance ?? 0);
+    }
+    return [...sums].map(([account_id, debit_positive]) => ({ account_id, debit_positive }));
+  }
+
   balances(co: CompanyId, range: Partial<DateRange> = {}): Promise<AccountBalance[]> {
     this.checkCompany(co);
-    return this.delay(() => {
-      const sums = new Map<string, number>();
-      for (const s of this.txnStore.values()) {
-        if (range.from && s.txn.date < range.from) continue;
-        if (range.to && s.txn.date > range.to) continue;
-        for (const p of s.postings) sums.set(p.account_id, (sums.get(p.account_id) ?? 0) + p.amount);
-      }
-      if (this.stressLines || this.lists.accounts.some((a) => a.id === STRESS_ACCOUNT_ID)) {
-        const lines = this.stressRegister();
-        sums.set(STRESS_ACCOUNT_ID, lines[lines.length - 1]?.balance ?? 0);
-      }
-      return [...sums].map(([account_id, debit_positive]) => ({ account_id, debit_positive }));
-    });
+    return this.delay(() => this.balanceRows(range));
   }
 
   /**
@@ -1202,6 +1244,270 @@ export class FixtureApiClient implements ApiClient {
   }
   amazonApply(co: CompanyId, preview: AmazonPreview) {
     return this.feed(co, () => this.feeds.amazonApply(preview));
+  }
+
+  // ---- company: info, closing date, merge ------------------------------------
+
+  putCompanyInfo(co: CompanyId, info: CompanyInfo): Promise<CompanyInfo> {
+    this.checkCompany(co);
+    if (!info.name.trim()) return Promise.reject(new ApiError(400, 'invalid', 'The company needs a name', { field: 'name' }));
+    if (info.fiscal_year_start_month < 1 || info.fiscal_year_start_month > 12) return Promise.reject(new ApiError(400, 'invalid', 'Month is 1–12', { field: 'fiscal_year_start_month' }));
+    this.info = clone(info);
+    this.emit('company', FIXTURE_COMPANY_ID, 'updated');
+    return this.delay(() => this.info);
+  }
+
+  closingDate(co: CompanyId): Promise<string | null> {
+    this.checkCompany(co);
+    return this.delay(() => this.closing);
+  }
+
+  putClosingDate(co: CompanyId, date: string | null): Promise<string | null> {
+    this.checkCompany(co);
+    if (date !== null && !/^\d{4}-\d{2}-\d{2}$/.test(date)) return Promise.reject(new ApiError(400, 'invalid', 'Enter a valid date', { field: 'closing_date' }));
+    this.closing = date;
+    this.emit('company', FIXTURE_COMPANY_ID, 'updated');
+    return this.delay(() => this.closing);
+  }
+
+  /**
+   * Merge `from` into `into`: every reference moves, then `from` is gone. As the
+   * server's lb-store does it: same list, same type (accounts), neither a
+   * parent of the other, and the survivor keeps its own name.
+   */
+  merge(co: CompanyId, req: MergeRequest): Promise<void> {
+    this.checkCompany(co);
+    try {
+      if (req.from === req.into) throw new ApiError(400, 'invalid', 'Choose two different records');
+      const list: ListName = req.kind === 'account' ? 'accounts' : req.kind === 'entity' ? 'entities' : 'items';
+      const rows = this.lists[list] as Array<Account | Entity | Item>;
+      const from = rows.find((r) => r.id === req.from);
+      const into = rows.find((r) => r.id === req.into);
+      if (!from || !into) throw new ApiError(404, 'not_found', 'No such record');
+      if (req.kind === 'account' && (from as Account).account_type !== (into as Account).account_type) throw new ApiError(400, 'invalid', 'Accounts must be the same type to merge');
+      if (req.kind === 'entity' && (from as Entity).kind !== (into as Entity).kind) throw new ApiError(400, 'invalid', 'Names must be the same kind (customer, vendor…) to merge');
+      if (req.kind === 'item' && (from as Item).item_type !== (into as Item).item_type) throw new ApiError(400, 'invalid', 'Items must be the same type to merge');
+      const isAncestor = (a: string, b: string) => {
+        for (let cur = rows.find((r) => r.id === b); cur; cur = rows.find((r) => r.id === cur!.parent_id)) if (cur.parent_id === a) return true;
+        return false;
+      };
+      if (isAncestor(req.from, req.into) || isAncestor(req.into, req.from)) throw new ApiError(400, 'invalid', "One is the other's parent; move the subrecords first");
+      const swap = <T extends string | null>(v: T): T => (v === req.from ? (req.into as T) : v);
+      for (const s of this.txnStore.values()) {
+        const t = s.txn;
+        if (req.kind === 'account') {
+          t.account_id = swap(t.account_id);
+          t.to_account_id = swap(t.to_account_id);
+          t.ar_ap_account_id = swap(t.ar_ap_account_id);
+        }
+        if (req.kind === 'entity') t.entity_id = swap(t.entity_id);
+        if (req.kind === 'item') t.sales_tax_item_id = swap(t.sales_tax_item_id);
+        for (const l of t.lines) {
+          if (req.kind === 'account') l.account_id = swap(l.account_id);
+          if (req.kind === 'entity') l.entity_id = swap(l.entity_id);
+          if (req.kind === 'item') l.item_id = swap(l.item_id);
+        }
+        for (const p of s.postings) {
+          if (req.kind === 'account') p.account_id = swap(p.account_id);
+          if (req.kind === 'entity') p.entity_id = swap(p.entity_id);
+          if (req.kind === 'item') p.item_id = swap(p.item_id);
+        }
+      }
+      // Postings to the same account on one transaction collapse (as the server's reposting would).
+      for (const s of this.txnStore.values()) {
+        if (req.kind !== 'account') break;
+        const merged = new Map<string, Posting>();
+        for (const p of s.postings) {
+          const key = `${p.account_id}|${p.entity_id ?? ''}|${p.item_id ?? ''}|${p.class_id ?? ''}`;
+          const prev = merged.get(key);
+          if (prev) prev.amount += p.amount;
+          else merged.set(key, { ...p });
+        }
+        s.postings = [...merged.values()].filter((p) => p.amount !== 0);
+      }
+      for (const r of rows) if (r.parent_id === req.from) r.parent_id = req.into;
+      if (req.kind === 'account') {
+        for (const e of this.lists.entities) e.default_expense_account_id = swap(e.default_expense_account_id);
+        for (const i of this.lists.items) {
+          i.income_account_id = swap(i.income_account_id);
+          i.expense_account_id = swap(i.expense_account_id);
+          i.asset_account_id = swap(i.asset_account_id);
+          i.deposit_account_id = swap(i.deposit_account_id);
+        }
+      }
+      if (req.kind === 'entity') {
+        for (const i of this.lists.items) {
+          i.preferred_vendor_id = swap(i.preferred_vendor_id);
+          i.tax_agency_id = swap(i.tax_agency_id);
+        }
+      }
+      rows.splice(rows.indexOf(from), 1);
+      into.edit_seq += 1;
+      this.emit(kindOfList(list), req.from, 'deleted');
+      this.emit(kindOfList(list), req.into, 'updated');
+      return this.delay(() => undefined);
+    } catch (e) {
+      return Promise.reject(e);
+    }
+  }
+
+  // ---- users, enrolment, my account, server, backups, attachments, import ----
+  //
+  // Server-level calls take no company; the ones that do are checked like the rest.
+
+  private adm<T>(f: () => T, co?: CompanyId): Promise<T> {
+    if (co !== undefined) this.checkCompany(co);
+    try {
+      const v = f();
+      return this.delay(() => v);
+    } catch (e) {
+      return Promise.reject(e);
+    }
+  }
+  users() {
+    return this.adm(() => this.admin.listUsers());
+  }
+  user(id: string) {
+    return this.adm(() => this.admin.user(id));
+  }
+  updateUser(id: string, update: UserUpdate) {
+    return this.adm(() => this.admin.updateUser(id, update));
+  }
+  deleteUser(id: string) {
+    return this.adm(() => this.admin.deleteUser(id));
+  }
+  grantAccess(userId: string, co: CompanyId, role: Role) {
+    return this.adm(() => this.admin.grantAccess(userId, co, role), co);
+  }
+  revokeAccess(userId: string, co: CompanyId) {
+    return this.adm(() => this.admin.revokeAccess(userId, co), co);
+  }
+  enrollments() {
+    return this.adm(() => this.admin.listEnrollments());
+  }
+  createEnrollment(body: NewEnrolment) {
+    return this.adm(() => this.admin.createEnrollment(body));
+  }
+  revokeEnrollment(id: string) {
+    return this.adm(() => this.admin.revokeEnrollment(id));
+  }
+  passkeys() {
+    return this.adm(() => this.admin.myPasskeys());
+  }
+  renamePasskey(id: string, name: string) {
+    return this.adm(() => this.admin.renamePasskey(id, name));
+  }
+  deletePasskey(id: string) {
+    return this.adm(() => this.admin.deletePasskey(id));
+  }
+  devices() {
+    return this.adm(() => this.admin.myDevices());
+  }
+  revokeDevice(id: string) {
+    return this.adm(() => this.admin.revokeDevice(id));
+  }
+  sessions() {
+    return this.adm(() => this.admin.mySessions());
+  }
+  revokeSession(id: string) {
+    return this.adm(() => this.admin.revokeSession(id));
+  }
+  server() {
+    return this.adm(() => this.admin.serverView());
+  }
+  putServer(settings: ServerSettings) {
+    return this.adm(() => this.admin.putServer(settings));
+  }
+  secrets() {
+    return this.adm(() => this.admin.secrets());
+  }
+  putSecret(name: string, value: string) {
+    return this.adm(() => this.admin.putSecret(name, value));
+  }
+  deleteSecret(name: string) {
+    return this.adm(() => this.admin.deleteSecret(name));
+  }
+  update() {
+    return this.adm(() => this.admin.update());
+  }
+  checkUpdate() {
+    return this.adm(() => this.admin.checkUpdate());
+  }
+  installUpdate(restart: boolean) {
+    return this.adm(() => this.admin.installUpdate(restart));
+  }
+  tunnel() {
+    return this.adm(() => this.admin.tunnel());
+  }
+  putTunnel(update: TunnelUpdate) {
+    return this.adm(() => this.admin.putTunnel(update));
+  }
+  serverBackupsStatus() {
+    return this.adm(() => this.admin.serverBackupsStatus());
+  }
+  backups(co: CompanyId) {
+    return this.adm(() => this.admin.backups(), co);
+  }
+  backupsStatus(co: CompanyId) {
+    return this.adm(() => this.admin.backupsStatus(), co);
+  }
+  runBackup(co: CompanyId) {
+    return this.adm(() => this.admin.runBackup(), co);
+  }
+  verifyBackup(co: CompanyId, id: string, _destination: number, unlock?: RestoreRequest) {
+    return this.adm(() => this.admin.verifyBackup(id, unlock), co);
+  }
+  restoreBackup(co: CompanyId, id: string, _destination: number, body: RestoreRequest) {
+    return this.adm(() => this.admin.restoreBackup(id, body), co);
+  }
+  exportCompany(co: CompanyId): Promise<FileDownload> {
+    this.checkCompany(co);
+    const json = JSON.stringify({ format: 'librebooks-fixture-export', company: this.info, lists: this.lists, txns: [...this.txnStore.values()].map((s) => s.txn) });
+    return this.delay(() => ({ blob: new Blob([json], { type: 'application/zip' }), filename: 'juniper-hill-woodworks.lbk' }));
+  }
+  attachments(co: CompanyId, query?: AttachmentQuery) {
+    return this.adm(() => this.admin.attachments(query), co);
+  }
+  uploadAttachment(co: CompanyId, file: File, record?: AttachmentRecord) {
+    return this.adm(() => this.admin.upload(file, record), co);
+  }
+  attachRecord(co: CompanyId, id: string, record: AttachmentRecord) {
+    return this.adm(() => this.admin.attach(id, record), co);
+  }
+  deleteAttachment(co: CompanyId, id: string) {
+    return this.adm(() => this.admin.deleteAttachment(id), co);
+  }
+  attachmentUrl(_co: CompanyId, id: string) {
+    return this.admin.attachmentUrl(id);
+  }
+  qbdSettings(co: CompanyId) {
+    return this.adm(() => this.admin.qbdSettings(), co);
+  }
+  putQbdSettings(co: CompanyId, settings: ImportSettings) {
+    return this.adm(() => this.admin.putQbdSettings(settings), co);
+  }
+  qbdStatus(co: CompanyId, _wait?: number) {
+    return this.adm(() => this.admin.qbdStatus(), co);
+  }
+  qbdParity(co: CompanyId, _wait?: number) {
+    return this.adm(() => this.admin.qbdParity(), co);
+  }
+  qbdSync(co: CompanyId, opts?: QbdSyncOptions) {
+    return this.adm(() => this.admin.qbdSync(opts), co);
+  }
+  qbdParityRun(co: CompanyId) {
+    return this.adm(() => this.admin.qbdParityRun(), co);
+  }
+  qbwcFile(co: CompanyId): Promise<FileDownload> {
+    return this.adm(() => ({ blob: this.admin.qbwcFile(), filename: 'librebooks.qwc' }), co);
+  }
+  qbwcPassword(co: CompanyId, password?: string | null) {
+    return this.adm(() => this.admin.qbwcPassword(password), co);
+  }
+
+  /** Tests: stop a running fixture sync's timers. */
+  dispose() {
+    this.admin.dispose();
   }
 
   // ---- events ---------------------------------------------------------------

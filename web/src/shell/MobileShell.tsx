@@ -18,6 +18,7 @@ import {
   IconReceipt,
   IconSearch,
   IconTruck,
+  IconUserCircle,
   IconUserPlus,
   IconUsers,
 } from '@tabler/icons-react';
@@ -142,6 +143,7 @@ export function MobileShell({ live, onShortcuts }: { live: LiveStatus; onShortcu
               <SheetItem key={n.label} icon={NAV_ICONS[n.icon]!(26)} label={n.label === 'Lists' ? 'Accounts' : n.label} onClick={() => go(n.path)} />
             ))}
             <SheetItem icon={<IconSearch size={26} />} label="Find" onClick={() => go(paths.find())} />
+            <SheetItem icon={<IconUserCircle size={26} />} label="My Account" onClick={() => go(paths.account())} />
           </div>
           {state.windows.length > 1 && (
             <div>

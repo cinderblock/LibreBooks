@@ -4,6 +4,38 @@
 
 import type {
   AccountBalance,
+  AttachmentMeta,
+  AttachmentQuery,
+  AttachmentRecord,
+  BackupList,
+  BackupRecord,
+  CompanyBackupsStatus,
+  DeviceKeyInfo,
+  EnrolmentInfo,
+  ImportSettings,
+  MergeRequest,
+  MintedEnrolmentLink,
+  NewEnrolment,
+  ParityReport,
+  PasskeyInfo,
+  QbdImportStatus,
+  QbdSyncOptions,
+  QbwcPassword,
+  RestoreRequest,
+  Restored,
+  Role,
+  SecretInfo,
+  ServerBackupsStatus,
+  ServerSettings,
+  ServerView,
+  SessionInfo,
+  TunnelUpdate,
+  TunnelView,
+  UpdateInstalled,
+  UpdateView,
+  UserDetail,
+  UserUpdate,
+  VerifyReport,
   AddOutcome,
   AddRequest,
   AmazonPreview,
@@ -177,6 +209,76 @@ export interface ApiClient {
   applyFeedRules(co: CompanyId, ids?: string[], accountId?: string | null): Promise<number>;
   amazonOrders(co: CompanyId, file: File, accountId?: string | null): Promise<AmazonPreview>;
   amazonApply(co: CompanyId, preview: AmazonPreview): Promise<number>;
+
+  // ---- users and enrolment (admin; plans/api.md "Server-level") ----
+  users(): Promise<User[]>;
+  user(id: string): Promise<UserDetail>;
+  updateUser(id: string, update: UserUpdate): Promise<User>;
+  deleteUser(id: string): Promise<void>;
+  grantAccess(userId: string, co: CompanyId, role: Role): Promise<void>;
+  revokeAccess(userId: string, co: CompanyId): Promise<void>;
+  enrollments(): Promise<EnrolmentInfo[]>;
+  /** Mint a link; `token` and `url` are shown once and never stored. */
+  createEnrollment(body: NewEnrolment): Promise<MintedEnrolmentLink>;
+  revokeEnrollment(id: string): Promise<void>;
+
+  // ---- my account ----
+  passkeys(): Promise<PasskeyInfo[]>;
+  renamePasskey(id: string, name: string): Promise<void>;
+  deletePasskey(id: string): Promise<void>;
+  devices(): Promise<DeviceKeyInfo[]>;
+  revokeDevice(id: string): Promise<void>;
+  sessions(): Promise<SessionInfo[]>;
+  revokeSession(id: string): Promise<void>;
+
+  // ---- server administration (plans/server-ops.md) ----
+  server(): Promise<ServerView>;
+  /** The whole settings document; 400 `invalid` with `detail.problems` when something must be fixed first. */
+  putServer(settings: ServerSettings): Promise<ServerView>;
+  secrets(): Promise<SecretInfo[]>;
+  /** Write-only: the value is never returned. */
+  putSecret(name: string, value: string): Promise<void>;
+  deleteSecret(name: string): Promise<void>;
+  update(): Promise<UpdateView>;
+  checkUpdate(): Promise<UpdateView>;
+  installUpdate(restart: boolean): Promise<UpdateInstalled>;
+  tunnel(): Promise<TunnelView>;
+  putTunnel(update: TunnelUpdate): Promise<TunnelView>;
+  serverBackupsStatus(): Promise<ServerBackupsStatus>;
+
+  // ---- company: info, closing date, backups, attachments, merge ----
+  putCompanyInfo(co: CompanyId, info: CompanyInfo): Promise<CompanyInfo>;
+  closingDate(co: CompanyId): Promise<string | null>;
+  putClosingDate(co: CompanyId, date: string | null): Promise<string | null>;
+  backups(co: CompanyId): Promise<BackupList>;
+  backupsStatus(co: CompanyId): Promise<CompanyBackupsStatus>;
+  runBackup(co: CompanyId): Promise<BackupRecord>;
+  verifyBackup(co: CompanyId, id: string, destination: number, unlock?: RestoreRequest): Promise<VerifyReport>;
+  /** Restores into a NEW company; nothing existing is replaced. */
+  restoreBackup(co: CompanyId, id: string, destination: number, body: RestoreRequest): Promise<Restored>;
+  exportCompany(co: CompanyId): Promise<FileDownload>;
+  /** The inbox (nothing attached yet) or what's attached to one record. */
+  attachments(co: CompanyId, query?: AttachmentQuery): Promise<AttachmentMeta[]>;
+  uploadAttachment(co: CompanyId, file: File, record?: AttachmentRecord): Promise<AttachmentMeta>;
+  /** Attach to a record, or detach (null) back into the inbox. */
+  attachRecord(co: CompanyId, id: string, record: AttachmentRecord): Promise<AttachmentMeta>;
+  deleteAttachment(co: CompanyId, id: string): Promise<void>;
+  /** Where the browser can fetch the file itself (an <img src>, a link). */
+  attachmentUrl(co: CompanyId, id: string): string;
+  merge(co: CompanyId, req: MergeRequest): Promise<void>;
+
+  // ---- QuickBooks import (`/import/qbd/*`, admin) ----
+  qbdSettings(co: CompanyId): Promise<ImportSettings>;
+  putQbdSettings(co: CompanyId, settings: ImportSettings): Promise<ImportSettings>;
+  /** `wait` seconds: long-poll until the running sync moves or finishes. */
+  qbdStatus(co: CompanyId, wait?: number): Promise<QbdImportStatus>;
+  qbdParity(co: CompanyId, wait?: number): Promise<ParityReport | null>;
+  /** 202; 409 `running` while one is going. */
+  qbdSync(co: CompanyId, opts?: QbdSyncOptions): Promise<void>;
+  qbdParityRun(co: CompanyId): Promise<void>;
+  qbwcFile(co: CompanyId): Promise<FileDownload>;
+  /** Set the Web Connector password, or let the server make one; shown once. */
+  qbwcPassword(co: CompanyId, password?: string | null): Promise<QbwcPassword>;
 
   /** Live changes (SSE `/events?company=`); the fixture client emits its own. */
   subscribe(co: CompanyId, handlers: EventHandlers): EventSubscription;

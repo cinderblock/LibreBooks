@@ -465,6 +465,24 @@ export interface Restored {
   from: BackupManifest;
 }
 
+/** `POST /backups/:id/restore` body: the new company's name plus how to unlock the backup. */
+export interface RestoreRequest extends UnlockRequest {
+  name?: string;
+}
+
+/** `POST /server/update/install` → what was installed and whether the server is restarting into it. */
+export interface UpdateInstalled {
+  installed: unknown;
+  restarting: boolean;
+}
+
+/** `GET /server/backups/status`: every company's scheduler at a glance. */
+export interface ServerBackupsStatus {
+  enabled: boolean;
+  running: boolean;
+  companies: CompanyBackupStatus[];
+}
+
 // ---------------------------------------------------------------------------
 // Company
 
@@ -596,6 +614,18 @@ export interface AttachmentQuery {
 export type AttachmentRecord = { record_kind: string; record_id: string } | null;
 
 // ---------------------------------------------------------------------------
+// Merge (`POST /merge`): QBD's rename-to-merge, as an explicit action.
+
+export type MergeKind = 'account' | 'entity' | 'item';
+
+export interface MergeRequest {
+  kind: MergeKind;
+  /** The record that disappears; everything that pointed at it points at `into`. */
+  from: string;
+  into: string;
+}
+
+// ---------------------------------------------------------------------------
 // Bank feeds (request shapes not in the generated types)
 
 export type FeedQuery = Partial<FeedFilter>;
@@ -637,7 +667,35 @@ export interface AmazonPreview {
 // ---------------------------------------------------------------------------
 // QuickBooks import (`/import/qbd/*`; routes being added server-side)
 
-/** `GET /import/qbd/status`: local stand-in until lb-server exports one. */
+// LOCAL STAND-INS for lb-qbd's `ImportSettings`, `QbdTransport`, `BridgeSettings`,
+// `QbwcSettings` and `FileMode` (generated after the server merge lands; swap
+// these for the generated files then and fix what the compiler flags).
+export type QbdTransport = 'bridge' | 'qbwc' | 'sdk';
+export type FileMode = 'ReadOnly' | 'ReadWrite';
+export interface BridgeSettings {
+  url: string;
+  /** Write-only: set to replace; never returned. */
+  bridge_key?: string | null;
+  key_set: boolean;
+}
+export interface QbwcSettings {
+  username: string;
+  password_set: boolean;
+  file_mode: FileMode;
+  company_file: string | null;
+}
+export interface ImportSettings {
+  transport: QbdTransport;
+  bridge: BridgeSettings;
+  qbwc: QbwcSettings;
+  /** Pause between requests to the bridge, ms. */
+  pause_ms: number;
+  auto_sync: boolean;
+  /** ISO 8601 duration. */
+  every: string;
+}
+
+/** `GET /import/qbd/status`: where a sync is, and the last report. */
 export interface QbdImportStatus {
   /** `qbd:ein-…` once the books are bound to a QBD company; null before any import. */
   source_id: string | null;
@@ -650,4 +708,9 @@ export interface QbdImportStatus {
 export interface QbdSyncOptions {
   full?: boolean;
   sweep?: boolean;
+}
+
+/** `POST /import/qbd/qbwc/password`: the Web Connector password, shown once. */
+export interface QbwcPassword {
+  password: string;
 }

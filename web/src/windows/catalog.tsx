@@ -8,7 +8,16 @@ import { FORMS } from '~/forms/registry';
 import { FormLoader } from '~/forms/useTxnForm';
 import { AccountQuickFill } from '~/inputs/pickers';
 import { Reconcile } from '~/screens/Reconcile';
+import { Attachments } from '~/screens/Attachments';
+import { BackupsWindow } from '~/screens/admin/Backups';
+import { EnrollmentsWindow } from '~/screens/admin/Enrollments';
+import { ImportWindow } from '~/screens/admin/Import';
+import { ServerWindow } from '~/screens/admin/Server';
+import { UsersWindow } from '~/screens/admin/Users';
 import { BankFeeds } from '~/screens/feeds/BankFeeds';
+import { MemorizedList } from '~/screens/Memorized';
+import { MergeWindow } from '~/screens/Merge';
+import { MyAccount } from '~/screens/MyAccount';
 import { Banking } from '~/screens/Banking';
 import { Center } from '~/screens/Centers';
 import { ChartOfAccounts } from '~/screens/ChartOfAccounts';
@@ -87,6 +96,15 @@ export const WINDOW_KINDS: Record<WindowKind, KindDef> = {
   form: { render: () => <FormWindow />, title: (d) => FORMS[d.params.form ?? '']?.label ?? FORM_LABELS[d.params.form ?? ''] ?? 'Form' },
   reconcile: { render: () => <Reconcile />, title: () => 'Reconcile' },
   feeds: { render: () => <BankFeeds />, title: () => 'Bank Feeds' },
+  memorized: { render: () => <MemorizedList />, title: () => 'Memorized Transaction List' },
+  attachments: { render: () => <Attachments />, title: () => 'Attachments' },
+  merge: { render: () => <MergeWindow />, title: () => 'Merge' },
+  account: { render: () => <MyAccount />, title: () => 'My Account' },
+  users: { render: () => <UsersWindow />, title: () => 'Users and Roles' },
+  enrollments: { render: () => <EnrollmentsWindow />, title: () => 'Enrolment Links' },
+  server: { render: () => <ServerWindow />, title: () => 'Server Settings' },
+  backups: { render: () => <BackupsWindow />, title: () => 'Backups' },
+  import: { render: () => <ImportWindow />, title: () => 'Import from QuickBooks' },
 };
 
 export function windowTitle(desc: WindowDesc, titles: Record<string, string>): string {

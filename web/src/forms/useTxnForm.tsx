@@ -7,8 +7,9 @@
 // and the QBD keys for all of it. A form supplies its pure model (`TxnFormSpec`)
 // and renders its own fields.
 
-import { Alert, Badge, Button, Group, Loader } from '@mantine/core';
+import { Alert, Badge, Button, Group, Loader, Tooltip } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
+import { IconPaperclip } from '@tabler/icons-react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useApi, useCompanyId, useRecordChanges } from '~/api/context';
@@ -20,6 +21,7 @@ import { useShortcut } from '~/keyboard/KeyboardProvider';
 import { useEnterBehavior } from '~/lib/prefs';
 import { useIsMobile } from '~/lib/useMobile';
 import { takeTxn } from '~/windows/handoff';
+import { paths } from '~/windows/paths';
 import { useWindow, useWindows } from '~/windows/WindowsProvider';
 import { ConflictModal, flushActiveField, FormActionBar, HistoryModal, PostingsModal, RemoteChangeBanner, ShortcutButton } from './common';
 import { MemorizeModal } from './MemorizeModal';
@@ -280,12 +282,21 @@ function capitalize(s: string): string {
  */
 export function TxnFormActions<D>({ form, extra, hideVoid }: { form: TxnForm<D>; extra?: ReactNode; hideVoid?: boolean }) {
   const { mobile, saved, dirty, saving } = form;
+  const { open } = useWindows();
   return (
     <FormActionBar mobile={mobile}>
       {!mobile && saved && (
         <ShortcutButton variant="subtle" color="red" command="record.delete" onClick={() => void form.remove()}>
           Delete
         </ShortcutButton>
+      )}
+      {saved && (
+        // Receipts go on the saved transaction: the Attachments window scoped to it.
+        <Tooltip label="Attachments (receipts, documents)" openDelay={600}>
+          <Button variant="default" aria-label="Attachments" px="xs" onClick={() => open(paths.attachments({ kind: 'txn', id: saved.id }))}>
+            <IconPaperclip size={16} />
+          </Button>
+        </Tooltip>
       )}
       {!mobile && saved && !hideVoid && !saved.is_void && (
         <Button variant="subtle" color="orange" onClick={() => void form.voidIt()}>

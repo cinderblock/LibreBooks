@@ -64,9 +64,33 @@ export function parseWindowPath(relPath: string): WindowDesc | null {
       return seg.length === 1 ? one('company', 'company') : null;
     case 'forms':
       return seg.length === 3 && b && c === 'new' ? one('form', `form:${b}${q.draft ? `:${q.draft}` : ''}`, { form: b }) : null;
+    case 'memorized':
+      return seg.length === 1 ? one('memorized', 'memorized') : null;
+    // One attachments window per record (and one for the inbox alone).
+    case 'attachments':
+      return seg.length === 1 ? one('attachments', `attachments${q.kind && q.id ? `:${q.kind}:${q.id}` : ''}`) : null;
+    case 'merge':
+      return seg.length === 1 ? one('merge', 'merge') : null;
+    case 'account':
+      return seg.length === 1 ? one('account', 'account') : null;
+    case 'admin':
+      if (seg.length === 2 && b === 'users') return one('users', 'users');
+      if (seg.length === 2 && b === 'enrollments') return one('enrollments', 'enrollments');
+      if (seg.length === 2 && b === 'server') return one('server', 'server');
+      return null;
+    case 'backups':
+      return seg.length === 1 ? one('backups', 'backups') : null;
+    case 'import':
+      return seg.length === 2 && b === 'qbd' ? one('import', 'import:qbd') : null;
     default:
       return null;
   }
+}
+
+function withQuery(path: string, params: Record<string, string | null | undefined>): string {
+  const qs = new URLSearchParams(Object.entries(params).filter((e): e is [string, string] => !!e[1]));
+  const s = qs.toString();
+  return `${path}${s ? `?${s}` : ''}`;
 }
 
 /** Builders, so screens never hand-assemble paths. */
@@ -99,4 +123,14 @@ export const paths = {
   company: () => '/company',
   /** A new form of a kind; `draft` is a hand-off token for a prefilled one. */
   form: (form: string, draft?: string) => `/forms/${encodeURIComponent(form)}/new${draft ? `?draft=${encodeURIComponent(draft)}` : ''}`,
+  memorized: () => '/memorized',
+  /** The inbox, or one record's attachments (`kind` is `txn`, `entity`, `account`, `item`). */
+  attachments: (record?: { kind: string; id: string }) => withQuery('/attachments', { kind: record?.kind, id: record?.id }),
+  merge: () => '/merge',
+  account: () => '/account',
+  users: () => '/admin/users',
+  enrollments: () => '/admin/enrollments',
+  server: (tab?: string) => withQuery('/admin/server', { tab }),
+  backups: () => '/backups',
+  qbdImport: (tab?: string) => withQuery('/import/qbd', { tab }),
 };

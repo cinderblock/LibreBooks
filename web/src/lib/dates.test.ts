@@ -7,6 +7,7 @@ import {
   isIsoDate,
   macroRange,
   parseTypedDate,
+  relativeTime,
   weekStart,
 } from './dates';
 
@@ -108,5 +109,17 @@ describe('helpers', () => {
     expect(dateWarning('2026-06-01', today, 90, 30)).toContain('past');
     expect(dateWarning('2026-12-01', today, 90, 30)).toContain('future');
     expect(dateWarning('2020-01-01', today, null, null)).toBeNull();
+  });
+  test('relativeTime', () => {
+    const now = new Date('2026-10-19T12:00:00Z');
+    expect(relativeTime('2026-10-19T11:59:50Z', now)).toBe('just now');
+    expect(relativeTime('2026-10-19T11:48:00Z', now)).toBe('12 minutes ago');
+    expect(relativeTime('2026-10-19T09:00:00Z', now)).toBe('3 hours ago');
+    expect(relativeTime('2026-10-18T12:00:00Z', now)).toBe('yesterday');
+    expect(relativeTime('2026-10-22T12:00:00Z', now)).toBe('in 3 days');
+    expect(relativeTime('2026-10-19T12:00:30Z', now)).toBe('in a moment');
+    expect(relativeTime('2026-01-19T12:00:00Z', now)).toBe('9 months ago');
+    expect(relativeTime(null, now)).toBe('');
+    expect(relativeTime('garbage', now)).toBe('garbage');
   });
 });

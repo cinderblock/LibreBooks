@@ -51,7 +51,7 @@ export function useGlobalCommands(): { run: RunCommand; overlay: boolean; setOve
     'nav.useRegister': () => setRegisterPicker(true),
     'nav.chartOfAccounts': () => open(paths.accounts()),
     'nav.find': () => open(paths.find()),
-    'nav.memorizedTxns': () => open(paths.form('memorized')),
+    'nav.memorizedTxns': () => open(paths.memorized()),
     'nav.reports': () => open(paths.reports()),
     'theme.toggle': () => toggleColorScheme(),
   };

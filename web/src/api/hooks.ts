@@ -6,9 +6,10 @@ import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tansta
 import { useMemo } from 'react';
 import type { TxnQuery } from './client';
 import { useApi, useCompanyId } from './context';
-import { invalidateTxnDerived, qk } from './keys';
+import { invalidateTxnDerived, qk, sk } from './keys';
 import type {
   Account,
+  AttachmentQuery,
   ClearedStatus,
   DateRange,
   Entity,
@@ -32,7 +33,138 @@ const LIST_STALE = 60_000;
 /** Who's signed in, and to which companies. */
 export function useSession() {
   const api = useApi();
-  return useQuery({ queryKey: ['session'], queryFn: () => api.session(), retry: false, staleTime: 5 * 60_000 });
+  return useQuery({ queryKey: sk.session, queryFn: () => api.session(), retry: false, staleTime: 5 * 60_000 });
+}
+
+/** Server-wide admin: sees the Users, Enrolment, Server and Import windows. */
+export function useIsAdmin(): boolean {
+  return useSession().data?.user.role === 'admin';
+}
+
+/** Invalidate a set of keys after a mutation; the screens' one-liner. */
+export function useInvalidate(): (...keys: ReadonlyArray<readonly unknown[]>) => void {
+  const qc = useQueryClient();
+  return (...keys) => {
+    for (const k of keys) void qc.invalidateQueries({ queryKey: k as unknown[] });
+  };
+}
+
+// ---- users, enrolment, my account, server ---------------------------------------
+
+export function useUsers(enabled = true) {
+  const api = useApi();
+  return useQuery({ queryKey: sk.users, queryFn: () => api.users(), enabled, staleTime: 30_000 });
+}
+
+export function useUser(id: string | null) {
+  const api = useApi();
+  return useQuery({ queryKey: sk.user(id ?? ''), queryFn: () => api.user(id!), enabled: !!id, staleTime: 30_000 });
+}
+
+export function useEnrollments(enabled = true) {
+  const api = useApi();
+  // Links expire on their own; keep the list honest while the window is open.
+  return useQuery({ queryKey: sk.enrollments, queryFn: () => api.enrollments(), enabled, staleTime: 10_000, refetchInterval: 60_000 });
+}
+
+export function usePasskeys() {
+  const api = useApi();
+  return useQuery({ queryKey: sk.passkeys, queryFn: () => api.passkeys(), staleTime: 30_000 });
+}
+
+export function useDevices() {
+  const api = useApi();
+  return useQuery({ queryKey: sk.devices, queryFn: () => api.devices(), staleTime: 30_000 });
+}
+
+export function useSessions() {
+  const api = useApi();
+  return useQuery({ queryKey: sk.sessions, queryFn: () => api.sessions(), staleTime: 10_000 });
+}
+
+export function useServer(enabled = true) {
+  const api = useApi();
+  return useQuery({ queryKey: sk.serverView, queryFn: () => api.server(), enabled, staleTime: 15_000 });
+}
+
+export function useUpdate(enabled = true) {
+  const api = useApi();
+  return useQuery({ queryKey: sk.update, queryFn: () => api.update(), enabled, staleTime: 15_000 });
+}
+
+export function useTunnel(enabled = true) {
+  const api = useApi();
+  return useQuery({
+    queryKey: sk.tunnel,
+    queryFn: () => api.tunnel(),
+    enabled,
+    staleTime: 5_000,
+    // cloudflared connects in the background; watch it while it's getting there.
+    refetchInterval: (q) => {
+      const st = q.state.data?.status.state.state;
+      return st === 'starting' || st === 'reconnecting' ? 2_000 : false;
+    },
+  });
+}
+
+// ---- company: closing date, backups, attachments, QuickBooks import -------------
+
+export function useClosingDate() {
+  const api = useApi();
+  const co = useCompanyId();
+  return useQuery({ queryKey: qk.closingDate(co), queryFn: () => api.closingDate(co), staleTime: 60_000 });
+}
+
+export function useBackups(enabled = true) {
+  const api = useApi();
+  const co = useCompanyId();
+  return useQuery({ queryKey: qk.backups(co), queryFn: () => api.backups(co), enabled, staleTime: 15_000 });
+}
+
+export function useBackupsStatus(enabled = true) {
+  const api = useApi();
+  const co = useCompanyId();
+  return useQuery({ queryKey: qk.backupsStatus(co), queryFn: () => api.backupsStatus(co), enabled, staleTime: 15_000 });
+}
+
+/** The inbox (no record), or what's attached to one record. */
+export function useAttachments(query: AttachmentQuery = {}, enabled = true) {
+  const api = useApi();
+  const co = useCompanyId();
+  return useQuery({ queryKey: qk.attachments(co, query), queryFn: () => api.attachments(co, query), enabled, staleTime: 15_000 });
+}
+
+export function useQbdSettings(enabled = true) {
+  const api = useApi();
+  const co = useCompanyId();
+  return useQuery({ queryKey: qk.qbdSettings(co), queryFn: () => api.qbdSettings(co), enabled, staleTime: 30_000 });
+}
+
+/**
+ * Where the import is. While a sync runs the server long-polls (`wait`) and
+ * we ask again as soon as it answers, so the progress bar moves without a
+ * fast timer; idle, a plain fetch now and then.
+ */
+export function useQbdStatus(enabled = true) {
+  const api = useApi();
+  const co = useCompanyId();
+  const qc = useQueryClient();
+  return useQuery({
+    queryKey: qk.qbdStatus(co),
+    queryFn: () => {
+      const running = qc.getQueryData<{ running: boolean }>(qk.qbdStatus(co))?.running;
+      return api.qbdStatus(co, running ? 20 : undefined);
+    },
+    enabled,
+    staleTime: 2_000,
+    refetchInterval: (q) => (q.state.data?.running ? 400 : false),
+  });
+}
+
+export function useQbdParity(enabled = true) {
+  const api = useApi();
+  const co = useCompanyId();
+  return useQuery({ queryKey: qk.qbdParity(co), queryFn: () => api.qbdParity(co), enabled, staleTime: 30_000 });
 }
 
 export function useCompanyInfo() {

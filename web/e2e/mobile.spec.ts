@@ -131,6 +131,43 @@ test('customers list → detail with transactions', async ({ page }) => {
   await expect(page.getByText('Bank and credit card accounts')).toBeVisible();
 });
 
+test('my account at 375px: passkeys and sessions fit', async ({ page }) => {
+  await start(page, `${CO}/account`);
+  const win = page.getByTestId('my-account');
+  await expect(win.getByTestId('passkey-row')).toHaveCount(2);
+  await expect(win.getByTestId('session-row')).toHaveCount(3);
+  await expectNoSideways(page);
+  await page.screenshot({ path: test.info().outputPath('account-375.png'), fullPage: true });
+});
+
+test('attachments at 375px: a camera button and the inbox as cards', async ({ page }) => {
+  await start(page, `${CO}/attachments`);
+  const win = page.getByTestId('attachments');
+  await expect(win.getByRole('button', { name: 'Take a photo' })).toBeVisible();
+  await expect(win.locator('input[type=file][capture]')).toHaveAttribute('accept', 'image/*');
+  await expect(win.getByTestId('attachment-row')).toHaveCount(2);
+  await expectNoSideways(page);
+  await page.screenshot({ path: test.info().outputPath('attachments-375.png') });
+});
+
+test('users at 375px: the detail drawer fills the screen', async ({ page }) => {
+  await start(page, `${CO}/admin/users`);
+  await page.getByTestId('users').getByRole('row', { name: /Maya Okafor/ }).tap();
+  await expect(page.getByTestId('user-detail')).toBeVisible();
+  await expect(page.getByTestId('user-detail').getByRole('combobox', { name: 'Server role' })).toHaveValue('Bookkeeper');
+  await expectNoSideways(page);
+});
+
+test('memorized list and server settings at 375px', async ({ page }) => {
+  await start(page, `${CO}/memorized`);
+  await expect(page.getByText('Nothing memorized yet')).toBeVisible();
+  await expectNoSideways(page);
+  await page.getByRole('button', { name: 'Back' }).tap();
+  await page.getByRole('navigation', { name: 'Main' }).getByText('More', { exact: true }).tap();
+  await page.getByText('My Account', { exact: true }).tap();
+  await expect(page.getByTestId('my-account')).toBeVisible();
+});
+
 test('a report scrolls sideways inside itself, not the page', async ({ page }) => {
   await start(page, `${CO}/reports/ProfitAndLoss`);
   await page.getByRole('combobox', { name: 'Dates' }).tap();

@@ -305,6 +305,240 @@ describe('bank feeds', () => {
   });
 });
 
+describe('administration', () => {
+  test('users: list, detail, role and disable rules, company access, delete', async () => {
+    const api = make();
+    const users = await api.users();
+    expect(users.length).toBeGreaterThanOrEqual(4);
+    const maya = users.find((u) => u.display_name.startsWith('Maya'))!;
+    const detail = await api.user(maya.id);
+    expect(detail.companies[0]).toMatchObject({ company_id: co, role: 'bookkeeper' });
+    expect(detail.passkeys).toHaveLength(1);
+    const updated = await api.updateUser(maya.id, { role: 'admin', disabled: true });
+    expect(updated.role).toBe('admin');
+    expect(updated.disabled_at).not.toBeNull();
+    expect((await api.updateUser(maya.id, { disabled: false })).disabled_at).toBeNull();
+    // You can't lock yourself out.
+    expect((await rejects(api.updateUser('fixture-user', { disabled: true }))).code).toBe('invalid');
+    expect((await rejects(api.deleteUser('fixture-user'))).code).toBe('invalid');
+    await api.revokeAccess(maya.id, co);
+    expect((await api.user(maya.id)).companies).toHaveLength(0);
+    await api.grantAccess(maya.id, co, 'viewer');
+    expect((await api.user(maya.id)).companies[0]?.role).toBe('viewer');
+    await api.deleteUser(maya.id);
+    expect((await api.users()).some((u) => u.id === maya.id)).toBe(false);
+    expect((await rejects(api.user(maya.id))).status).toBe(404);
+  });
+
+  test('enrolment links: mint (shown once, with a url), list, revoke', async () => {
+    const api = make();
+    const before = (await api.enrollments()).length;
+    const minted = await api.createEnrollment({ purpose: 'new_user', role: 'viewer', display_name: 'Pat', ttl_minutes: 30 });
+    expect(minted.url).toContain(`/enroll#token=${minted.token}`);
+    expect(minted.token.length).toBeGreaterThan(40);
+    const list = await api.enrollments();
+    expect(list).toHaveLength(before + 1);
+    const mine = list.find((e) => e.id === minted.id)!;
+    expect(mine).toMatchObject({ purpose: 'new_user', role: 'viewer', display_name: 'Pat', company_id: null });
+    expect(JSON.stringify(mine)).not.toContain(minted.token);
+    const device = await api.createEnrollment({ purpose: 'add_device' });
+    expect((await api.enrollments()).find((e) => e.id === device.id)).toMatchObject({ purpose: 'add_device', user_id: 'fixture-user', role: null });
+    await api.revokeEnrollment(minted.id);
+    expect((await api.enrollments()).some((e) => e.id === minted.id)).toBe(false);
+    expect((await rejects(api.revokeEnrollment(minted.id))).status).toBe(404);
+    expect((await rejects(api.createEnrollment({ purpose: 'first_admin' }))).code).toBe('invalid');
+  });
+
+  test('my account: passkeys, devices and sessions', async () => {
+    const api = make();
+    const keys = await api.passkeys();
+    expect(keys).toHaveLength(2);
+    await api.renamePasskey(keys[0]!.id, 'Laptop');
+    expect((await api.passkeys())[0]?.name).toBe('Laptop');
+    expect((await rejects(api.renamePasskey(keys[0]!.id, ' '))).code).toBe('invalid');
+    const sessions = await api.sessions();
+    expect(sessions[0]?.current).toBe(true);
+    const other = sessions.find((s) => !s.current)!;
+    await api.revokeSession(other.id);
+    expect((await api.sessions()).some((s) => s.id === other.id)).toBe(false);
+    const devices = await api.devices();
+    expect(devices).toHaveLength(1);
+    await api.revokeDevice(devices[0]!.id);
+    expect(await api.devices()).toHaveLength(0);
+    // The device's session went with it.
+    expect((await api.sessions()).some((s) => s.kind === 'device')).toBe(false);
+    await api.deletePasskey(keys[0]!.id);
+    // The last credential can't go.
+    expect((await rejects(api.deletePasskey(keys[1]!.id))).code).toBe('conflict');
+  });
+
+  test('server settings: the whole document, problems first, secrets write-only', async () => {
+    const api = make();
+    const view = await api.server();
+    expect(view.settings.backups.schedule.daily_at).toBe('02:30:00');
+    expect(view.secrets.map((s) => s.name)).toEqual(['backup-passphrase']);
+    const bad = await rejects(api.putServer({ ...view.settings, public_urls: ['not a url'], tunnel: { ...view.settings.tunnel, enabled: true } }));
+    expect(bad.code).toBe('invalid');
+    expect((bad.detail as { problems: string[] }).problems.length).toBe(2);
+    const saved = await api.putServer({ ...view.settings, public_urls: ['https://books.example.org'], feeds: { auto_sync: false, every: 'PT1H' } });
+    expect(saved.settings.public_urls).toEqual(['https://books.example.org']);
+    expect(saved.restart_required).toContain('public_urls');
+    await api.putSecret('s3-key', 'hunter2');
+    expect((await api.secrets()).map((s) => s.name)).toEqual(['backup-passphrase', 's3-key']);
+    expect(JSON.stringify(await api.server())).not.toContain('hunter2');
+    expect((await rejects(api.deleteSecret('backup-passphrase'))).code).toBe('in_use');
+    await api.deleteSecret('s3-key');
+    expect((await rejects(api.putSecret('bad name!', 'x'))).code).toBe('invalid');
+  });
+
+  test('updates and the tunnel', async () => {
+    const api = make();
+    const u = await api.checkUpdate();
+    expect(u.status?.available?.version).toBe('0.4.2');
+    const installed = await api.installUpdate(false);
+    expect(installed.restarting).toBe(false);
+    expect((await api.update()).status?.available).toBeNull();
+    expect((await rejects(api.installUpdate(true))).code).toBe('up_to_date');
+    let t = await api.tunnel();
+    expect(t.status.state.state).toBe('stopped');
+    expect((await rejects(api.putTunnel({ enabled: true }))).code).toBe('invalid');
+    t = await api.putTunnel({ token: 'cloudflared service install eyJhIjoiYWJjZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXoifQ', public_hostname: 'books.example.com', enabled: true });
+    expect(t.token_set).toBe(true);
+    expect(t.status.state.state).toBe('connected');
+    expect(t.public_url).toBe('https://books.example.com');
+    expect(t.restart_required).toContain('tunnel.public_hostname');
+    expect((await api.server()).secrets.some((s) => s.name === 'tunnel-token')).toBe(true);
+  });
+
+  test('backups: list, run now, verify needs the passphrase for contents, restore makes a new company', async () => {
+    const api = make();
+    const list = await api.backups(co);
+    expect(list.backups).toHaveLength(5);
+    const run = await api.runBackup(co);
+    expect(run.destinations[0]?.stored).toBe(true);
+    expect((await api.backups(co)).backups[0]?.manifest.id).toBe(run.manifest.id);
+    const status = await api.backupsStatus(co);
+    expect(status.scheduler?.last?.record?.manifest.id).toBe(run.manifest.id);
+    const checksum = await api.verifyBackup(co, run.manifest.id, 0);
+    expect(checksum).toMatchObject({ checksum_ok: true, contents_checked: false });
+    const full = await api.verifyBackup(co, run.manifest.id, 0, { passphrase: 'pw' });
+    expect(full).toMatchObject({ checksum_ok: true, contents_checked: true, problems: [] });
+    expect((await rejects(api.restoreBackup(co, run.manifest.id, 0, {}))).code).toBe('invalid');
+    const restored = await api.restoreBackup(co, run.manifest.id, 0, { passphrase: 'pw' });
+    expect(restored.name).toContain('restored from');
+    expect(restored.id).not.toBe(co);
+    expect((await rejects(api.verifyBackup(co, 'nope', 0))).status).toBe(404);
+    const file = await api.exportCompany(co);
+    expect(file.filename.endsWith('.lbk')).toBe(true);
+  });
+
+  test('attachments: inbox, upload, attach to a transaction, detach, delete', async () => {
+    const api = make();
+    const inbox = await api.attachments(co);
+    expect(inbox).toHaveLength(2);
+    const txn = (await api.txns(co, { types: ['Check'], limit: 1 }))[0]!;
+    const meta = await api.uploadAttachment(co, new File(['receipt'], 'receipt.txt', { type: 'text/plain' }), { record_kind: 'txn', record_id: txn.id });
+    expect(meta).toMatchObject({ record_kind: 'txn', record_id: txn.id, filename: 'receipt.txt', mime: 'text/plain' });
+    expect(Number(meta.size)).toBe(7);
+    expect(await api.attachments(co, { record_kind: 'txn', record_id: txn.id })).toHaveLength(1);
+    expect(await api.attachments(co)).toHaveLength(2);
+    const first = inbox[0]!;
+    await api.attachRecord(co, first.id, { record_kind: 'txn', record_id: txn.id });
+    expect(await api.attachments(co, { record_kind: 'txn', record_id: txn.id })).toHaveLength(2);
+    await api.attachRecord(co, first.id, null);
+    expect(await api.attachments(co)).toHaveLength(2);
+    await api.deleteAttachment(co, meta.id);
+    expect(await api.attachments(co, { record_kind: 'txn', record_id: txn.id })).toHaveLength(0);
+    expect((await rejects(api.uploadAttachment(co, new File([], 'empty.txt')))).code).toBe('invalid');
+  });
+
+  test('closing date locks the period', async () => {
+    const api = make();
+    expect(await api.closingDate(co)).toBeNull();
+    const txns = await api.txns(co, { types: ['Check'] });
+    const oldest = [...txns].sort((a, b) => a.date.localeCompare(b.date))[0]!;
+    expect(await api.putClosingDate(co, oldest.date)).toBe(oldest.date);
+    const full = await api.txn(co, oldest.id);
+    const err = await rejects(api.updateTxn(co, { ...full.txn, memo: 'changed' }));
+    expect(err.code).toBe('closed_period');
+    expect(err.closingDate).toBe(oldest.date);
+    expect((await rejects(api.deleteTxn(co, oldest.id, full.txn.edit_seq))).code).toBe('closed_period');
+    const check = { ...blankTxn('Check', oldest.date), account_id: api.find('account', 'Checking')!, lines: [{ ...blankLine('Account'), account_id: api.find('account', 'Office Supplies')!, amount: 100 }] };
+    expect((await rejects(api.createTxn(co, check))).code).toBe('closed_period');
+    expect((await api.createTxn(co, { ...check, date: addDaysIso(oldest.date, 1) })).txn.edit_seq).toBe(1);
+    expect(await api.putClosingDate(co, null)).toBeNull();
+    expect((await api.updateTxn(co, { ...full.txn, memo: 'changed' })).txn.memo).toBe('changed');
+  });
+
+  test('company info saves whole', async () => {
+    const api = make();
+    const info = await api.companyInfo(co);
+    const saved = await api.putCompanyInfo(co, { ...info, legal_name: 'Juniper Hill Woodworks LLC', preferences: { ...info.preferences, use_class_tracking: false } });
+    expect(saved.legal_name).toBe('Juniper Hill Woodworks LLC');
+    expect((await api.companyInfo(co)).preferences.use_class_tracking).toBe(false);
+    expect((await rejects(api.putCompanyInfo(co, { ...info, name: '' }))).code).toBe('invalid');
+  });
+
+  test('merge moves every reference and removes the duplicate', async () => {
+    const api = make();
+    const vendors = (await api.list(co, 'entities', { kind: 'Vendor' })).filter((v) => !v.parent_id);
+    const [a, b] = vendors;
+    const before = (await api.txns(co, { entity_id: a!.id })).length + (await api.txns(co, { entity_id: b!.id })).length;
+    expect(before).toBeGreaterThan(0);
+    await api.merge(co, { kind: 'entity', from: a!.id, into: b!.id });
+    expect((await api.list(co, 'entities', { kind: 'Vendor' })).some((v) => v.id === a!.id)).toBe(false);
+    expect((await api.txns(co, { entity_id: b!.id })).length).toBe(before);
+    // Accounts: same type only; balances fold together.
+    const accounts = await api.list(co, 'accounts');
+    const expenses = accounts.filter((x) => x.account_type === 'Expense' && !x.parent_id && !accounts.some((y) => y.parent_id === x.id));
+    const [e1, e2] = expenses;
+    const bal = new Map((await api.balances(co)).map((x) => [x.account_id, x.debit_positive]));
+    const sum = (bal.get(e1!.id) ?? 0) + (bal.get(e2!.id) ?? 0);
+    await api.merge(co, { kind: 'account', from: e1!.id, into: e2!.id });
+    expect(new Map((await api.balances(co)).map((x) => [x.account_id, x.debit_positive])).get(e2!.id) ?? 0).toBe(sum);
+    const bank = accounts.find((x) => x.account_type === 'Bank')!;
+    expect((await rejects(api.merge(co, { kind: 'account', from: bank.id, into: e2!.id }))).code).toBe('invalid');
+    expect((await rejects(api.merge(co, { kind: 'entity', from: b!.id, into: b!.id }))).code).toBe('invalid');
+  });
+
+  test('QuickBooks import: settings (key write-only), a sync that runs and reports, parity, Web Connector password', async () => {
+    const api = make();
+    const s = await api.qbdSettings(co);
+    expect(s.transport).toBe('bridge');
+    expect(s.bridge.bridge_key).toBeUndefined();
+    const saved = await api.putQbdSettings(co, { ...s, bridge: { ...s.bridge, bridge_key: 'secret-key' }, pause_ms: 500 });
+    expect(saved.bridge.key_set).toBe(true);
+    expect(saved.bridge.bridge_key).toBeUndefined();
+    expect(saved.pause_ms).toBe(500);
+    expect((await rejects(api.putQbdSettings(co, { ...s, bridge: { ...s.bridge, url: 'nope' } }))).code).toBe('invalid');
+    const idle = await api.qbdStatus(co);
+    expect(idle.running).toBe(false);
+    expect(idle.last?.entities.length).toBeGreaterThan(5);
+    await api.qbdSync(co, { full: true });
+    expect((await rejects(api.qbdSync(co))).code).toBe('running');
+    const running = await api.qbdStatus(co);
+    expect(running.running).toBe(true);
+    expect(running.progress?.phase).toBe('Listing');
+    await new Promise((r) => setTimeout(r, 2_400));
+    const done = await api.qbdStatus(co);
+    expect(done.running).toBe(false);
+    expect(done.last?.full).toBe(true);
+    expect(await api.qbdParity(co)).toBeNull();
+    await api.qbdParityRun(co);
+    const parity = await api.qbdParity(co);
+    expect(parity?.summary.accounts_off).toBe(2);
+    expect(parity?.accounts.filter((a) => a.difference !== 0).length).toBe(2);
+    expect(parity?.summary.total_abs_difference).toBe(12_501);
+    const pw = await api.qbwcPassword(co, null);
+    expect(pw.password.length).toBe(12);
+    expect((await api.qbdSettings(co)).qbwc.password_set).toBe(true);
+    expect((await rejects(api.qbwcPassword(co, 'short'))).code).toBe('invalid');
+    const qwc = await api.qbwcFile(co);
+    expect(await qwc.blob.text()).toContain('<QBWCXML>');
+    api.dispose();
+  });
+});
+
 function addDaysIso(d: string, n: number): string {
   const t = new Date(`${d}T00:00:00Z`);
   t.setUTCDate(t.getUTCDate() + n);

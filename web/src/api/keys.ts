@@ -3,7 +3,7 @@
 
 import type { QueryClient } from '@tanstack/react-query';
 import type { TxnQuery } from './client';
-import type { ChangeEvent, CompanyId, DateRange, FeedQuery, ListName, ListQuery, ReportRequest, SavedKind } from './types';
+import type { AttachmentQuery, ChangeEvent, CompanyId, DateRange, FeedQuery, ListName, ListQuery, ReportRequest, SavedKind } from './types';
 
 export const qk = {
   company: (co: CompanyId) => ['c', co] as const,
@@ -37,6 +37,34 @@ export const qk = {
   savedAll: (co: CompanyId) => ['c', co, 'saved'] as const,
   saved: (co: CompanyId, kind: SavedKind) => ['c', co, 'saved', kind] as const,
   memorizedDue: (co: CompanyId) => ['c', co, 'memorized-due'] as const,
+  closingDate: (co: CompanyId) => ['c', co, 'closing-date'] as const,
+  backupsAll: (co: CompanyId) => ['c', co, 'backups'] as const,
+  backups: (co: CompanyId) => ['c', co, 'backups', 'list'] as const,
+  backupsStatus: (co: CompanyId) => ['c', co, 'backups', 'status'] as const,
+  attachmentsAll: (co: CompanyId) => ['c', co, 'attachments'] as const,
+  attachments: (co: CompanyId, q: AttachmentQuery = {}) => ['c', co, 'attachments', q] as const,
+  qbdAll: (co: CompanyId) => ['c', co, 'qbd'] as const,
+  qbdSettings: (co: CompanyId) => ['c', co, 'qbd', 'settings'] as const,
+  qbdStatus: (co: CompanyId) => ['c', co, 'qbd', 'status'] as const,
+  qbdParity: (co: CompanyId) => ['c', co, 'qbd', 'parity'] as const,
+};
+
+/** Server-level keys (no company): who's signed in, users, the server itself. */
+export const sk = {
+  session: ['session'] as const,
+  users: ['users'] as const,
+  user: (id: string) => ['users', id] as const,
+  enrollments: ['enrollments'] as const,
+  me: ['me'] as const,
+  passkeys: ['me', 'passkeys'] as const,
+  devices: ['me', 'devices'] as const,
+  sessions: ['me', 'sessions'] as const,
+  server: ['server'] as const,
+  serverView: ['server', 'view'] as const,
+  secrets: ['server', 'secrets'] as const,
+  update: ['server', 'update'] as const,
+  tunnel: ['server', 'tunnel'] as const,
+  serverBackups: ['server', 'backups'] as const,
 };
 
 /** Everything that depends on transactions' postings. */
@@ -85,6 +113,32 @@ export function invalidateForEvent(qc: QueryClient, co: CompanyId, e: ChangeEven
   }
   if (e.kind === 'company' || e.kind === 'info') {
     void qc.invalidateQueries({ queryKey: qk.info(co) });
+    void qc.invalidateQueries({ queryKey: qk.closingDate(co) });
+    return;
+  }
+  if (e.kind === 'attachment') {
+    void qc.invalidateQueries({ queryKey: qk.attachmentsAll(co) });
+    return;
+  }
+  if (e.kind === 'backup') {
+    void qc.invalidateQueries({ queryKey: qk.backupsAll(co) });
+    void qc.invalidateQueries({ queryKey: sk.server });
+    return;
+  }
+  if (e.kind === 'import') {
+    void qc.invalidateQueries({ queryKey: qk.qbdAll(co) });
+    // A finished sync changed the books (progress ticks don't).
+    if (e.action === 'finished') invalidateTxnDerived(qc, co);
+    return;
+  }
+  if (e.kind === 'user' || e.kind === 'enrolment') {
+    void qc.invalidateQueries({ queryKey: sk.users });
+    void qc.invalidateQueries({ queryKey: sk.enrollments });
+    void qc.invalidateQueries({ queryKey: sk.me });
+    return;
+  }
+  if (e.kind === 'server') {
+    void qc.invalidateQueries({ queryKey: sk.server });
     return;
   }
   if (e.kind.startsWith('feed')) {

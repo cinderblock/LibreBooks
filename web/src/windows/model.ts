@@ -23,7 +23,16 @@ export type WindowKind =
   | 'company'
   | 'form'
   | 'reconcile'
-  | 'feeds';
+  | 'feeds'
+  | 'memorized'
+  | 'attachments'
+  | 'merge'
+  | 'account'
+  | 'users'
+  | 'enrollments'
+  | 'server'
+  | 'backups'
+  | 'import';
 
 export interface WindowDesc {
   key: string;

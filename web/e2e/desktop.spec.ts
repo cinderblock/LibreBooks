@@ -378,6 +378,167 @@ test("someone else's save shows a banner, and saving over it asks", async ({ pag
   await expect(page.getByText(/saved\./)).toBeVisible();
 });
 
+const CO = '/c/00000000-0000-4000-8000-00000000c0de';
+
+test('enrolment links: mint one, shown once as text and a QR code', async ({ page }) => {
+  await start(page, `${CO}/admin/enrollments`);
+  const win = page.getByTestId('enrollments');
+  await expect(win.getByTestId('enrollment-row')).toHaveCount(1);
+  await win.getByRole('button', { name: 'New link' }).click();
+  const dialog = page.getByRole('dialog', { name: 'New enrolment link' });
+  await dialog.getByRole('textbox', { name: 'Their name' }).fill('Pat Quinn');
+  await dialog.getByRole('button', { name: 'Mint link' }).click();
+  const minted = page.getByTestId('minted-link');
+  await expect(minted.getByRole('img', { name: 'Enrolment link as a QR code' })).toBeVisible();
+  await expect(minted.getByRole('textbox', { name: 'Enrolment link' })).toHaveValue(/\/enroll#token=/);
+  await minted.getByRole('button', { name: 'Done' }).click();
+  await expect(win.getByTestId('enrollment-row')).toHaveCount(2);
+  await expect(win.getByText('Pat Quinn')).toBeVisible();
+});
+
+test('users: change a role from the detail drawer; you cannot demote yourself', async ({ page }) => {
+  await start(page, `${CO}/admin/users`);
+  const win = page.getByTestId('users');
+  await win.getByRole('row', { name: /Maya Okafor/ }).click();
+  const detail = page.getByTestId('user-detail');
+  await detail.getByRole('combobox', { name: 'Server role' }).click();
+  await page.getByRole('option', { name: 'Admin' }).click();
+  await detail.getByRole('button', { name: 'Save' }).click();
+  await expect(page.getByText('Maya Okafor saved.')).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(win.getByRole('row', { name: /Maya Okafor, Admin/ })).toBeVisible();
+  await win.getByRole('row', { name: /Demo User/ }).click();
+  await expect(page.getByTestId('user-detail').getByRole('combobox', { name: 'Server role' })).toBeDisabled();
+});
+
+test('server settings: a write-only secret, and the update that is available', async ({ page }) => {
+  await start(page, `${CO}/admin/server`);
+  const win = page.getByTestId('server-settings');
+  await win.getByRole('tab', { name: 'Secrets' }).click();
+  await expect(win.getByTestId('secret-row')).toHaveCount(1);
+  await win.getByRole('textbox', { name: 'Name' }).fill('s3-secret-key');
+  await win.getByLabel('Value').fill('hunter2');
+  await win.getByRole('button', { name: 'Add secret' }).click();
+  await expect(win.getByTestId('secret-row')).toHaveCount(2);
+  await expect(win.getByText('hunter2')).toHaveCount(0);
+  await win.getByRole('tab', { name: 'Updates' }).click();
+  await expect(win.getByTestId('update-available')).toContainText('0.4.2');
+  await win.getByRole('tab', { name: 'Tunnel' }).click();
+  await expect(win.getByTestId('tunnel-state')).toHaveText('stopped');
+});
+
+test('closing date: set it from Company, then an old transaction refuses to save', async ({ page }) => {
+  await start(page, `${CO}/company`);
+  const card = page.getByTestId('closing-date');
+  await card.getByRole('textbox', { name: 'Closing date' }).fill('12/31/2025');
+  await page.keyboard.press('Tab');
+  await card.getByRole('button', { name: 'Set' }).click();
+  await expect(card.getByText(/closed through 12\/31\/2025/)).toBeVisible();
+  // The opening journal entry is dated well inside the closed period.
+  const txnId = await page.evaluate(async () => {
+    const lb = (window as unknown as { __librebooks: { txns(co: string, q: object): Promise<Array<{ id: string; date: string }>> } }).__librebooks;
+    const list = await lb.txns('00000000-0000-4000-8000-00000000c0de', { types: ['Check'] });
+    return [...list].sort((a, b) => a.date.localeCompare(b.date))[0]!.id;
+  });
+  // Open the transaction window in-app (a reload would reset the fixture books).
+  await page.evaluate((id) => history.pushState(null, '', `/c/00000000-0000-4000-8000-00000000c0de/txns/${id}`), txnId);
+  await page.evaluate(() => dispatchEvent(new PopStateEvent('popstate')));
+  const form = page.getByTestId('write-checks');
+  await form.getByRole('textbox', { name: 'Memo', exact: true }).fill('late edit');
+  await form.getByRole('button', { name: /Save & Close/ }).click();
+  await expect(page.getByText(/books are closed through/)).toBeVisible();
+});
+
+test('memorize a check with Ctrl+M, find it on the Memorized Transaction List, enter it now', async ({ page }) => {
+  await start(page);
+  await page.keyboard.press('Alt+Shift+W');
+  const form = page.getByTestId('write-checks');
+  const payee = form.getByRole('combobox', { name: 'Payee' });
+  await payee.pressSequentially('Office D');
+  await page.keyboard.press('Tab');
+  const amount = form.getByRole('textbox', { name: 'Check amount' });
+  await amount.fill('125');
+  await page.keyboard.press('Tab');
+  await page.keyboard.press('Control+M');
+  const dialog = page.getByRole('dialog', { name: 'Memorize Transaction' });
+  await expect(dialog.getByRole('textbox', { name: 'Name' })).toHaveValue('Office Depot');
+  await dialog.getByRole('button', { name: 'Memorize' }).click();
+  await expect(page.getByText('Memorized "Office Depot".')).toBeVisible();
+  await page.keyboard.press('Alt+Shift+T');
+  const list = page.getByTestId('memorized-list');
+  const row = list.getByTestId('memorized-row').filter({ hasText: 'Office Depot' });
+  await expect(row).toBeVisible();
+  await expect(row).toContainText('125.00');
+  await row.getByRole('button', { name: 'Enter now' }).click();
+  const entered = page.getByTestId('write-checks').last();
+  await expect(entered.getByRole('combobox', { name: 'Payee' })).toHaveValue('Office Depot');
+  await expect(entered.getByRole('textbox', { name: 'Check amount' })).toHaveValue('125.00');
+});
+
+test('attachments: upload to the inbox, then attach to a transaction', async ({ page }) => {
+  await start(page, `${CO}/attachments`);
+  const win = page.getByTestId('attachments');
+  await expect(win.getByTestId('attachment-row')).toHaveCount(2);
+  await win.locator('input[type=file]:not([aria-label])').setInputFiles({ name: 'receipt.txt', mimeType: 'text/plain', buffer: Buffer.from('Lumber $54.00') });
+  // Notifications render in their own corner, outside the window.
+  await expect(page.getByText('Added receipt.txt to the inbox.')).toBeVisible();
+  await expect(win.getByTestId('attachment-row')).toHaveCount(3);
+  await win.getByTestId('attachment-row').filter({ hasText: 'receipt.txt' }).getByRole('button', { name: 'Attach to…' }).click();
+  const dialog = page.getByRole('dialog', { name: /Attach "receipt.txt"/ });
+  await dialog.getByRole('textbox', { name: 'Find a transaction' }).fill('Office Depot');
+  await expect(dialog.getByTestId('attach-target').first()).toContainText('Office Depot');
+  await dialog.getByTestId('attach-target').first().click();
+  await expect(page.getByText('Attached.')).toBeVisible();
+  await expect(win.getByTestId('attachment-row')).toHaveCount(2);
+});
+
+test('QuickBooks import: a sync runs with progress and lands a report; parity compares balances', async ({ page }) => {
+  await start(page, `${CO}/import/qbd`);
+  const win = page.getByTestId('qbd-import');
+  await expect(win.getByTestId('sync-report')).toContainText('Last sync');
+  await win.getByRole('button', { name: 'Full re-sync' }).click();
+  await expect(win.getByTestId('sync-progress')).toBeVisible();
+  await expect(win.getByTestId('sync-progress')).toBeHidden({ timeout: 15_000 });
+  await expect(win.getByTestId('sync-report')).toContainText('Last sync (full)');
+  await win.getByRole('tab', { name: 'Parity' }).click();
+  await win.getByRole('button', { name: 'Compare now' }).click();
+  const table = win.getByTestId('parity-table');
+  await expect(table.locator('tr[data-off]')).toHaveCount(2);
+  await expect(win.getByText(/2 off by/)).toBeVisible();
+  await win.getByRole('tab', { name: 'Connection' }).click();
+  await expect(win.getByRole('textbox', { name: 'Bridge URL' })).toHaveValue(/8750/);
+});
+
+test('merge folds one vendor into another', async ({ page }) => {
+  await start(page, `${CO}/merge`);
+  const win = page.getByTestId('merge');
+  const from = win.getByRole('combobox', { name: 'Record to merge away' });
+  await from.pressSequentially('Office D');
+  await page.keyboard.press('Tab');
+  await expect(from).toHaveValue('Office Depot');
+  const into = win.getByRole('combobox', { name: 'Record to keep' });
+  await into.pressSequentially('Main Street');
+  await page.keyboard.press('Tab');
+  await expect(into).toHaveValue('Main Street Properties');
+  await win.getByRole('button', { name: 'Merge…' }).click();
+  await page.getByRole('dialog', { name: 'Merge these two?' }).getByRole('button', { name: 'Merge', exact: true }).click();
+  await expect(page.getByText('Merged "Office Depot" into "Main Street Properties".')).toBeVisible();
+});
+
+test('my account from the avatar menu: passkeys and sessions', async ({ page }) => {
+  await start(page);
+  await page.getByRole('button', { name: 'Signed in as Demo User' }).click();
+  await page.getByRole('menuitem', { name: 'My Account' }).click();
+  const win = page.getByTestId('my-account');
+  await expect(win.getByTestId('passkey-row')).toHaveCount(2);
+  await expect(win.getByTestId('session-row')).toHaveCount(3);
+  await expect(win.getByText('This device')).toBeVisible();
+  await win.getByRole('button', { name: 'Rename passkey YubiKey 5C' }).click();
+  await page.getByRole('dialog', { name: 'Rename passkey' }).getByRole('textbox', { name: 'Name' }).fill('Blue YubiKey');
+  await page.getByRole('dialog', { name: 'Rename passkey' }).getByRole('button', { name: 'Save' }).click();
+  await expect(win.getByText('Blue YubiKey')).toBeVisible();
+});
+
 test('stress: a 100,000-line register and 5,000 more names stay responsive', async ({ page }) => {
   const stressAccount = '00000000-0000-4000-9fff-000000000001';
   await page.goto(`/c/00000000-0000-4000-8000-00000000c0de/accounts/${stressAccount}/register?fixtures=stress&latency=0&keymap=browser`);

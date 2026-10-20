@@ -11,6 +11,8 @@ export interface MenuItem {
   path?: string;
   /** Not built yet: shown dimmed, opens a placeholder explaining so. */
   todo?: boolean;
+  /** Server admins only: hidden from everyone else (the server refuses anyway). */
+  admin?: boolean;
   keywords?: string[];
 }
 
@@ -75,10 +77,25 @@ export const MENUS: Menu[] = [
     label: 'Company',
     entries: [
       { label: 'Home Page', command: 'nav.home', path: paths.home() },
-      { label: 'Company Information', path: paths.company() },
+      { label: 'Company Information', path: paths.company(), keywords: ['closing date', 'preferences'] },
+      { label: 'Set Closing Date', path: paths.company(), admin: true, keywords: ['lock', 'period'] },
       { divider: true },
       { label: 'Chart of Accounts', command: 'nav.chartOfAccounts', path: paths.accounts() },
       form('journal', { command: 'form.journal' }),
+      { label: 'Attachments', path: paths.attachments(), keywords: ['receipt', 'document', 'photo', 'inbox'] },
+      { divider: true },
+      {
+        label: 'Administration',
+        children: [
+          { label: 'Users and Roles', path: paths.users(), admin: true, keywords: ['people', 'access'] },
+          { label: 'Enrolment Links', path: paths.enrollments(), admin: true, keywords: ['invite', 'passkey', 'qr'] },
+          { label: 'Server Settings', path: paths.server(), admin: true, keywords: ['update', 'tunnel', 'cloudflare', 'secrets'] },
+          { label: 'Backups', path: paths.backups(), admin: true, keywords: ['restore', 'export', 'verify'] },
+          { label: 'Import from QuickBooks', path: paths.qbdImport(), admin: true, keywords: ['qbd', 'sync', 'parity', 'web connector'] },
+          { label: 'Merge…', path: paths.merge(), admin: true, keywords: ['duplicate', 'combine'] },
+        ],
+      },
+      { label: 'My Account', path: paths.account(), keywords: ['passkeys', 'sessions', 'devices', 'sign out'] },
       { divider: true },
       { label: 'Find…', command: 'nav.find', path: paths.find() },
       { label: 'Search / Go To…', command: 'palette.open' },
@@ -188,13 +205,13 @@ export const MENUS: Menu[] = [
       { label: 'Payment Method List', path: paths.list('payment-methods') },
       { label: 'Other Names List', path: paths.list('other-names') },
       { divider: true },
-      form('memorized', { command: 'nav.memorizedTxns' }),
+      { label: FORM_LABELS.memorized!, command: 'nav.memorizedTxns', path: paths.memorized(), keywords: ['recurring', 'scheduled'] },
     ],
   },
 ];
 
-/** Every leaf item, flattened (for the palette). */
-export function allMenuItems(): Array<MenuItem & { menu: string }> {
+/** Every leaf item, flattened (for the palette); admin items only for admins. */
+export function allMenuItems(admin = true): Array<MenuItem & { menu: string }> {
   const out: Array<MenuItem & { menu: string }> = [];
   for (const m of MENUS) {
     for (const e of m.entries) {
@@ -203,7 +220,27 @@ export function allMenuItems(): Array<MenuItem & { menu: string }> {
       else out.push({ ...e, menu: m.label });
     }
   }
-  return out;
+  return admin ? out : out.filter((i) => !i.admin);
+}
+
+/** A menu's entries as this person should see them: admin items dropped, and submenus/dividers that become empty with them. */
+export function visibleEntries(entries: MenuEntry[], admin: boolean): MenuEntry[] {
+  if (admin) return entries;
+  const kept: MenuEntry[] = [];
+  for (const e of entries) {
+    if ('divider' in e) {
+      if (kept.length && !('divider' in kept[kept.length - 1]!)) kept.push(e);
+      continue;
+    }
+    if ('children' in e) {
+      const children = e.children.filter((c) => !c.admin);
+      if (children.length) kept.push({ ...e, children });
+      continue;
+    }
+    if (!e.admin) kept.push(e);
+  }
+  while (kept.length && 'divider' in kept[kept.length - 1]!) kept.pop();
+  return kept;
 }
 
 /** Desktop left navigation (QBD's icon bar), also the mobile "More" sheet. */
