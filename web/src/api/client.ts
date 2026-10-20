@@ -68,15 +68,15 @@ export interface ApiClient {
   getRecord<L extends ListName>(co: CompanyId, list: L, id: string): Promise<ListRecords[L]>;
   createRecord<L extends ListName>(co: CompanyId, list: L, record: ListRecords[L]): Promise<ListRecords[L]>;
   updateRecord<L extends ListName>(co: CompanyId, list: L, record: ListRecords[L]): Promise<ListRecords[L]>;
-  deleteRecord(co: CompanyId, list: ListName, id: string, editSeq: bigint): Promise<void>;
+  deleteRecord(co: CompanyId, list: ListName, id: string, editSeq: number): Promise<void>;
 
   txns(co: CompanyId, query?: TxnQuery): Promise<TxnSummary[]>;
   txn(co: CompanyId, id: string): Promise<TxnWithPostings>;
   createTxn(co: CompanyId, txn: Txn): Promise<SaveOutcome>;
   updateTxn(co: CompanyId, txn: Txn): Promise<SaveOutcome>;
   previewTxn(co: CompanyId, txn: Txn): Promise<PreviewOutcome>;
-  voidTxn(co: CompanyId, id: string, editSeq: bigint): Promise<SaveOutcome>;
-  deleteTxn(co: CompanyId, id: string, editSeq: bigint): Promise<void>;
+  voidTxn(co: CompanyId, id: string, editSeq: number): Promise<SaveOutcome>;
+  deleteTxn(co: CompanyId, id: string, editSeq: number): Promise<void>;
   nextNumber(co: CompanyId, type: TxnType, accountId?: string | null): Promise<string | null>;
   history(co: CompanyId, id: string): Promise<AuditEntry[]>;
 

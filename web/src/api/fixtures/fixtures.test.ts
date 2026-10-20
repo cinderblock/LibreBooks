@@ -52,9 +52,9 @@ describe('fixture books', () => {
     txn.lines = [{ ...blankLine('Account'), account_id: api.find('account', 'Office Supplies')!, amount: 4_250 }];
     const saved = await api.createTxn(co, txn);
     expect(saved.total).toBe(4_250);
-    expect(saved.txn.edit_seq).toBe(1n);
+    expect(saved.txn.edit_seq).toBe(1);
     const again = await api.updateTxn(co, { ...saved.txn, memo: 'first edit' });
-    expect(again.txn.edit_seq).toBe(2n);
+    expect(again.txn.edit_seq).toBe(2);
     const err = await rejects(api.updateTxn(co, { ...saved.txn, memo: 'stale edit' }));
     expect(err.status).toBe(409);
     expect(err.isStaleConflict).toBe(true);
@@ -79,7 +79,7 @@ describe('fixture books', () => {
     const checking = (await api.list(co, 'accounts')).find((a) => a.full_name === 'Checking')!;
     const err = await rejects(api.deleteRecord(co, 'accounts', checking.id, checking.edit_seq));
     expect(err.code).toBe('in_use');
-    const dup = await rejects(api.createRecord(co, 'accounts', { ...checking, id: 'new-id', edit_seq: 0n }));
+    const dup = await rejects(api.createRecord(co, 'accounts', { ...checking, id: 'new-id', edit_seq: 0 }));
     expect(dup.isDuplicate).toBe(true);
   });
 

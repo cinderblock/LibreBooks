@@ -173,7 +173,7 @@ export class FixtureApiClient implements ApiClient {
     }
     const posted = this.post(t);
     t.amount = posted.total;
-    t.edit_seq = 1n;
+    t.edit_seq = 1;
     t.created_at = `${t.date}T16:00:00Z`;
     t.modified_at = t.created_at;
     // Bank lines older than a month have cleared (gives the register some ✓s).
@@ -282,7 +282,7 @@ export class FixtureApiClient implements ApiClient {
     this.checkCompany(co);
     try {
       const r = this.normalize(list, record);
-      r.edit_seq = 1n;
+      r.edit_seq = 1;
       (this.lists[list] as ListRecords[L][]).push(r);
       this.emit(kindOfList(list), r.id, 'created');
       return this.delay(() => r);
@@ -304,7 +304,7 @@ export class FixtureApiClient implements ApiClient {
     }
     try {
       const r = this.normalize(list, record);
-      r.edit_seq = current.edit_seq + 1n;
+      r.edit_seq = current.edit_seq + 1;
       rows[i] = r;
       // Renaming a parent renames its children's full names.
       if ('full_name' in r) {
@@ -320,9 +320,9 @@ export class FixtureApiClient implements ApiClient {
     }
   }
 
-  deleteRecord(co: CompanyId, list: ListName, id: string, editSeq: bigint): Promise<void> {
+  deleteRecord(co: CompanyId, list: ListName, id: string, editSeq: number): Promise<void> {
     this.checkCompany(co);
-    const rows = this.lists[list] as Array<{ id: string; edit_seq: bigint; parent_id?: string | null }>;
+    const rows = this.lists[list] as Array<{ id: string; edit_seq: number; parent_id?: string | null }>;
     const i = rows.findIndex((r) => r.id === id);
     if (i < 0) return Promise.reject(new ApiError(404, 'not_found', 'Not found'));
     if (rows[i]!.edit_seq !== editSeq) {
@@ -484,7 +484,7 @@ export class FixtureApiClient implements ApiClient {
       if (this.txnStore.has(txn.id)) throw new ApiError(409, 'conflict', 'That transaction already exists', { expected: 0, actual: 1 });
       const posted = this.post(txn);
       const now = new Date().toISOString();
-      const saved: Txn = { ...clone(txn), amount: posted.total, edit_seq: 1n, created_at: now, modified_at: now, created_by: 'fixture-user', modified_by: 'fixture-user' };
+      const saved: Txn = { ...clone(txn), amount: posted.total, edit_seq: 1, created_at: now, modified_at: now, created_by: 'fixture-user', modified_by: 'fixture-user' };
       this.txnStore.set(saved.id, { txn: saved, postings: posted.postings, total: posted.total, seq: this.seq++ });
       this.record('created', null, saved);
       this.emit('txn', saved.id, 'created');
@@ -509,7 +509,7 @@ export class FixtureApiClient implements ApiClient {
       // Keep cleared marks on the accounts that still have a posting.
       const cleared = new Map(current.postings.map((p) => [p.account_id, p.cleared]));
       const postings = posted.postings.map((p) => ({ ...p, cleared: cleared.get(p.account_id) ?? p.cleared }));
-      const saved: Txn = { ...clone(txn), amount: posted.total, edit_seq: current.txn.edit_seq + 1n, modified_at: new Date().toISOString(), modified_by: 'fixture-user' };
+      const saved: Txn = { ...clone(txn), amount: posted.total, edit_seq: current.txn.edit_seq + 1, modified_at: new Date().toISOString(), modified_by: 'fixture-user' };
       this.txnStore.set(saved.id, { txn: saved, postings, total: posted.total, seq: current.seq });
       this.record('updated', current.txn, saved);
       this.emit('txn', saved.id, 'updated');
@@ -529,13 +529,13 @@ export class FixtureApiClient implements ApiClient {
     }
   }
 
-  voidTxn(co: CompanyId, id: string, editSeq: bigint): Promise<SaveOutcome> {
+  voidTxn(co: CompanyId, id: string, editSeq: number): Promise<SaveOutcome> {
     const s = this.txnStore.get(id);
     if (!s) return Promise.reject(new ApiError(404, 'not_found', 'Not found'));
     return this.updateTxn(co, { ...clone(s.txn), edit_seq: editSeq, is_void: true, memo: `VOID: ${s.txn.memo ?? ''}`.trim() });
   }
 
-  deleteTxn(co: CompanyId, id: string, editSeq: bigint): Promise<void> {
+  deleteTxn(co: CompanyId, id: string, editSeq: number): Promise<void> {
     this.checkCompany(co);
     const s = this.txnStore.get(id);
     if (!s) return Promise.reject(new ApiError(404, 'not_found', 'Not found'));
@@ -654,7 +654,7 @@ export class FixtureApiClient implements ApiClient {
         cleared: i < 99_000 ? 'Cleared' : 'Uncleared',
         balance,
         is_void: false,
-        edit_seq: 1n,
+        edit_seq: 1,
         due_date: null,
         open_balance: null,
       } satisfies RegisterLine;
@@ -752,7 +752,7 @@ export class FixtureApiClient implements ApiClient {
   simulateRemoteEdit(txnId: string): boolean {
     const s = this.txnStore.get(txnId);
     if (!s) return false;
-    s.txn = { ...s.txn, edit_seq: s.txn.edit_seq + 1n, memo: `${s.txn.memo ?? ''} (edited elsewhere)`.trim(), modified_by: 'someone-else' };
+    s.txn = { ...s.txn, edit_seq: s.txn.edit_seq + 1, memo: `${s.txn.memo ?? ''} (edited elsewhere)`.trim(), modified_by: 'someone-else' };
     this.emit('txn', txnId, 'updated');
     return true;
   }

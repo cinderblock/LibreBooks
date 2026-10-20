@@ -106,7 +106,7 @@ function CheckForm({ saved }: { saved: Txn | null }) {
 
   // The company's default account arrives after first render on a cold load.
   useEffect(() => {
-    if (!draft.account_id && info?.preferences.default_check_account && draft.edit_seq === 0n) {
+    if (!draft.account_id && info?.preferences.default_check_account && draft.edit_seq === 0) {
       setDraft((d) => ({ ...d, account_id: defaultAccount() }));
     }
   }, [info]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -122,9 +122,9 @@ function CheckForm({ saved }: { saved: Txn | null }) {
   }, [bank?.name, saved?.number]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Next check number for this account (new checks, until the user types one).
-  const next = useNextNumber('Check', draft.account_id, draft.edit_seq === 0n && draft.numberIsAuto);
+  const next = useNextNumber('Check', draft.account_id, draft.edit_seq === 0 && draft.numberIsAuto);
   useEffect(() => {
-    if (next.data !== undefined && draft.numberIsAuto && draft.edit_seq === 0n) {
+    if (next.data !== undefined && draft.numberIsAuto && draft.edit_seq === 0) {
       setDraft((d) => (d.numberIsAuto ? { ...d, number: next.data ?? '' } : d));
     }
   }, [next.data]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -235,7 +235,7 @@ function CheckForm({ saved }: { saved: Txn | null }) {
   const onPayee = async (id: string | null) => {
     const payee = id ? entities.get(id) : undefined;
     let last: Txn | null = null;
-    if (payee && draft.edit_seq === 0n && checkTotal(draft) === 0) {
+    if (payee && draft.edit_seq === 0 && checkTotal(draft) === 0) {
       try {
         const [summary] = await api.txns(co, { types: ['Check'], entity_id: payee.id, descending: true, limit: 1 });
         if (summary) last = (await api.txn(co, summary.id)).txn;
@@ -535,7 +535,7 @@ function CheckForm({ saved }: { saved: Txn | null }) {
           label="Bank Account"
           types={CHECK_ACCOUNT_TYPES}
           value={draft.account_id}
-          onChange={(id) => update((d) => ({ ...d, account_id: id, numberIsAuto: d.edit_seq === 0n ? true : d.numberIsAuto }))}
+          onChange={(id) => update((d) => ({ ...d, account_id: id, numberIsAuto: d.edit_seq === 0 ? true : d.numberIsAuto }))}
           error={errors.header.account}
           style={{ flex: mobile ? '1 1 100%' : '0 1 320px' }}
           aria-label="Bank account"

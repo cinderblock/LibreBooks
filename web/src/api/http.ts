@@ -157,7 +157,7 @@ export class HttpApiClient implements ApiClient {
   updateRecord<L extends ListName>(co: CompanyId, list: L, record: ListRecords[L]) {
     return this.request<ListRecords[L]>('PUT', this.co(co, `/${list}/${encodeURIComponent(record.id)}`), { body: record });
   }
-  deleteRecord(co: CompanyId, list: ListName, id: string, editSeq: bigint) {
+  deleteRecord(co: CompanyId, list: ListName, id: string, editSeq: number) {
     return this.request<void>('DELETE', this.co(co, `/${list}/${encodeURIComponent(id)}`), {
       query: new URLSearchParams({ edit_seq: String(editSeq) }),
     });
@@ -178,12 +178,12 @@ export class HttpApiClient implements ApiClient {
   previewTxn(co: CompanyId, txn: Txn) {
     return this.request<PreviewOutcome>('POST', this.co(co, '/txns/preview'), { body: txn });
   }
-  voidTxn(co: CompanyId, id: string, editSeq: bigint) {
+  voidTxn(co: CompanyId, id: string, editSeq: number) {
     return this.request<SaveOutcome>('POST', this.co(co, `/txns/${encodeURIComponent(id)}/void`), {
       body: { edit_seq: editSeq },
     });
   }
-  deleteTxn(co: CompanyId, id: string, editSeq: bigint) {
+  deleteTxn(co: CompanyId, id: string, editSeq: number) {
     return this.request<void>('DELETE', this.co(co, `/txns/${encodeURIComponent(id)}`), {
       query: new URLSearchParams({ edit_seq: String(editSeq) }),
     });

@@ -79,7 +79,7 @@ export function buildSeed(today: string): SeedBooks {
   ): Account => {
     const parts = fullName.split(':');
     const parent = parts.length > 1 ? acct.get(parts.slice(0, -1).join(':')) : undefined;
-    const a: Account = { ...blankAccount(parts[parts.length - 1]!, type, parent), id: id(), number, edit_seq: 1n, ...extra };
+    const a: Account = { ...blankAccount(parts[parts.length - 1]!, type, parent), id: id(), number, edit_seq: 1, ...extra };
     accounts.push(a);
     acct.set(fullName, a);
     return a;
@@ -149,14 +149,14 @@ export function buildSeed(today: string): SeedBooks {
 
   // ---- Small lists ---------------------------------------------------------
   const terms: Terms[] = [
-    { id: id(), name: 'Net 30', is_active: true, kind: { type: 'Standard', due_days: 30, discount_days: null, discount_percent: null }, edit_seq: 1n },
-    { id: id(), name: 'Net 15', is_active: true, kind: { type: 'Standard', due_days: 15, discount_days: null, discount_percent: null }, edit_seq: 1n },
-    { id: id(), name: 'Due on receipt', is_active: true, kind: { type: 'Standard', due_days: 0, discount_days: null, discount_percent: null }, edit_seq: 1n },
-    { id: id(), name: '2% 10 Net 30', is_active: true, kind: { type: 'Standard', due_days: 30, discount_days: 10, discount_percent: '2' }, edit_seq: 1n },
+    { id: id(), name: 'Net 30', is_active: true, kind: { type: 'Standard', due_days: 30, discount_days: null, discount_percent: null }, edit_seq: 1 },
+    { id: id(), name: 'Net 15', is_active: true, kind: { type: 'Standard', due_days: 15, discount_days: null, discount_percent: null }, edit_seq: 1 },
+    { id: id(), name: 'Due on receipt', is_active: true, kind: { type: 'Standard', due_days: 0, discount_days: null, discount_percent: null }, edit_seq: 1 },
+    { id: id(), name: '2% 10 Net 30', is_active: true, kind: { type: 'Standard', due_days: 30, discount_days: 10, discount_percent: '2' }, edit_seq: 1 },
   ];
   const classes: Class[] = ['Shop', 'Field', 'Field:Installs'].map((full) => {
     const parts = full.split(':');
-    return { id: id(), name: parts[parts.length - 1]!, full_name: full, parent_id: null, sublevel: parts.length - 1, is_active: true, edit_seq: 1n };
+    return { id: id(), name: parts[parts.length - 1]!, full_name: full, parent_id: null, sublevel: parts.length - 1, is_active: true, edit_seq: 1 };
   });
   classes[2]!.parent_id = classes[1]!.id;
   const paymentMethods: PaymentMethod[] = (
@@ -167,16 +167,16 @@ export function buildSeed(today: string): SeedBooks {
       ['MasterCard', 'MasterCard'],
       ['ACH', 'ECheck'],
     ] as const
-  ).map(([name, kind]) => ({ id: id(), name, kind, is_active: true, edit_seq: 1n }));
+  ).map(([name, kind]) => ({ id: id(), name, kind, is_active: true, edit_seq: 1 }));
   const salesTaxCodes: SalesTaxCode[] = [
-    { id: id(), name: 'Tax', description: 'Taxable sales', is_taxable: true, is_active: true, edit_seq: 1n },
-    { id: id(), name: 'Non', description: 'Non-taxable sales', is_taxable: false, is_active: true, edit_seq: 1n },
+    { id: id(), name: 'Tax', description: 'Taxable sales', is_taxable: true, is_active: true, edit_seq: 1 },
+    { id: id(), name: 'Non', description: 'Non-taxable sales', is_taxable: false, is_active: true, edit_seq: 1 },
   ];
   const types: TypeEntry[] = [
-    { id: id(), list: 'CustomerType', name: 'Commercial', full_name: 'Commercial', parent_id: null, is_active: true, edit_seq: 1n },
-    { id: id(), list: 'CustomerType', name: 'Residential', full_name: 'Residential', parent_id: null, is_active: true, edit_seq: 1n },
-    { id: id(), list: 'VendorType', name: 'Supplier', full_name: 'Supplier', parent_id: null, is_active: true, edit_seq: 1n },
-    { id: id(), list: 'JobType', name: 'New Build', full_name: 'New Build', parent_id: null, is_active: true, edit_seq: 1n },
+    { id: id(), list: 'CustomerType', name: 'Commercial', full_name: 'Commercial', parent_id: null, is_active: true, edit_seq: 1 },
+    { id: id(), list: 'CustomerType', name: 'Residential', full_name: 'Residential', parent_id: null, is_active: true, edit_seq: 1 },
+    { id: id(), list: 'VendorType', name: 'Supplier', full_name: 'Supplier', parent_id: null, is_active: true, edit_seq: 1 },
+    { id: id(), list: 'JobType', name: 'New Build', full_name: 'New Build', parent_id: null, is_active: true, edit_seq: 1 },
   ];
 
   // ---- Names ---------------------------------------------------------------
@@ -185,7 +185,7 @@ export function buildSeed(today: string): SeedBooks {
   const addEntity = (kind: EntityKind, fullName: string, extra: Partial<Entity> = {}): Entity => {
     const parts = fullName.split(':');
     const parent = parts.length > 1 ? ent.get(parts.slice(0, -1).join(':')) : undefined;
-    const e: Entity = { ...blankEntity(parts[parts.length - 1]!, kind, parent), id: id(), edit_seq: 1n, ...extra };
+    const e: Entity = { ...blankEntity(parts[parts.length - 1]!, kind, parent), id: id(), edit_seq: 1, ...extra };
     entities.push(e);
     ent.set(fullName, e);
     return e;
@@ -232,7 +232,7 @@ export function buildSeed(today: string): SeedBooks {
     if (!e) throw new Error(`seed: no name ${name}`);
     return e.id;
   };
-  const salesReps: SalesRep[] = [{ id: id(), initials: 'JL', entity_id: E('Lee, Jordan'), is_active: true, edit_seq: 1n }];
+  const salesReps: SalesRep[] = [{ id: id(), initials: 'JL', entity_id: E('Lee, Jordan'), is_active: true, edit_seq: 1 }];
 
   // ---- Items ---------------------------------------------------------------
   const items: Item[] = [];
@@ -240,7 +240,7 @@ export function buildSeed(today: string): SeedBooks {
   const addItem = (type: ItemType, fullName: string, extra: Partial<Item> = {}): Item => {
     const parts = fullName.split(':');
     const parent = parts.length > 1 ? itm.get(parts.slice(0, -1).join(':')) : undefined;
-    const i: Item = { ...blankItem(parts[parts.length - 1]!, type, parent), id: id(), edit_seq: 1n, ...extra };
+    const i: Item = { ...blankItem(parts[parts.length - 1]!, type, parent), id: id(), edit_seq: 1, ...extra };
     items.push(i);
     itm.set(fullName, i);
     return i;
@@ -500,6 +500,6 @@ export function stressNames(count: number): Entity[] {
   return Array.from({ length: count }, (_, i) => ({
     ...blankEntity(`${first[i % first.length]} ${second[Math.floor(i / first.length) % second.length]} ${i + 1}`, 'Vendor'),
     id: id(i + 1),
-    edit_seq: 1n,
+    edit_seq: 1,
   }));
 }

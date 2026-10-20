@@ -6,15 +6,6 @@ import { type FetchFn, HttpApiClient } from './http';
 import { parseApiJson, stringifyApiJson } from './json';
 
 describe('JSON edit_seq handling', () => {
-  test('edit_seq revives to bigint and writes back as a number', () => {
-    const v = parseApiJson<{ edit_seq: bigint; amount: number; lines: Array<{ edit_seq: bigint }> }>(
-      '{"edit_seq":7,"amount":1234,"lines":[{"edit_seq":2}]}',
-    );
-    expect(v.edit_seq).toBe(7n);
-    expect(v.amount).toBe(1234);
-    expect(v.lines[0]!.edit_seq).toBe(2n);
-    expect(stringifyApiJson(v)).toBe('{"edit_seq":7,"amount":1234,"lines":[{"edit_seq":2}]}');
-  });
 });
 
 describe('txnQueryParams', () => {
@@ -48,9 +39,9 @@ describe('HttpApiClient', () => {
     }) as unknown as FetchFn;
     const api = new HttpApiClient({ fetch: fake });
     const t = blankTxn('Check', '2026-10-19');
-    const out = await api.updateTxn('co1', { ...t, edit_seq: 2n });
-    expect(out.txn.edit_seq).toBe(3n);
-    await api.deleteTxn('co1', t.id, 3n);
+    const out = await api.updateTxn('co1', { ...t, edit_seq: 2 });
+    expect(out.txn.edit_seq).toBe(3);
+    await api.deleteTxn('co1', t.id, 3);
     await api.txns('co1', { types: ['Check'] });
     const [put, del, get] = calls;
     expect(put!.url).toBe(`/api/v1/c/co1/txns/${t.id}`);

@@ -158,7 +158,7 @@ export function useSaveTxn() {
   const co = useCompanyId();
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (txn: Txn) => (txn.edit_seq === 0n ? api.createTxn(co, txn) : api.updateTxn(co, txn)),
+    mutationFn: (txn: Txn) => (txn.edit_seq === 0 ? api.createTxn(co, txn) : api.updateTxn(co, txn)),
     onSuccess: (out) => {
       qc.setQueryData<TxnWithPostings>(qk.txn(co, out.txn.id), { txn: out.txn, postings: out.postings });
       invalidateTxnDerived(qc, co, out.txn.id);
@@ -171,7 +171,7 @@ export function useDeleteTxn() {
   const co = useCompanyId();
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, editSeq }: { id: string; editSeq: bigint }) => api.deleteTxn(co, id, editSeq),
+    mutationFn: ({ id, editSeq }: { id: string; editSeq: number }) => api.deleteTxn(co, id, editSeq),
     onSuccess: (_v, { id }) => {
       qc.removeQueries({ queryKey: qk.txn(co, id) });
       invalidateTxnDerived(qc, co);
@@ -184,7 +184,7 @@ export function useVoidTxn() {
   const co = useCompanyId();
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, editSeq }: { id: string; editSeq: bigint }) => api.voidTxn(co, id, editSeq),
+    mutationFn: ({ id, editSeq }: { id: string; editSeq: number }) => api.voidTxn(co, id, editSeq),
     onSuccess: (out) => {
       qc.setQueryData<TxnWithPostings>(qk.txn(co, out.txn.id), { txn: out.txn, postings: out.postings });
       invalidateTxnDerived(qc, co, out.txn.id);
@@ -197,7 +197,7 @@ export function useSaveRecord<L extends ListName>(list: L) {
   const co = useCompanyId();
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (rec: ListRecords[L]) => (rec.edit_seq === 0n ? api.createRecord(co, list, rec) : api.updateRecord(co, list, rec)),
+    mutationFn: (rec: ListRecords[L]) => (rec.edit_seq === 0 ? api.createRecord(co, list, rec) : api.updateRecord(co, list, rec)),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: qk.listAll(co, list) });
     },
@@ -209,7 +209,7 @@ export function useDeleteRecord(list: ListName) {
   const co = useCompanyId();
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, editSeq }: { id: string; editSeq: bigint }) => api.deleteRecord(co, list, id, editSeq),
+    mutationFn: ({ id, editSeq }: { id: string; editSeq: number }) => api.deleteRecord(co, list, id, editSeq),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: qk.listAll(co, list) });
     },

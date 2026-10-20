@@ -26,8 +26,8 @@ import { withTrailingBlank } from '~/inputs/gridRows';
 
 export interface CheckDraft {
   id: string;
-  /** 0n for a new check. */
-  edit_seq: bigint;
+  /** 0 for a new check. */
+  edit_seq: number;
   account_id: string | null;
   number: string;
   /** The number came from the server's next-number; replace it when the account changes. */
@@ -45,7 +45,7 @@ export interface CheckDraft {
 export function newCheckDraft(date: IsoDate, accountId: string | null): CheckDraft {
   return {
     id: crypto.randomUUID(),
-    edit_seq: 0n,
+    edit_seq: 0,
     account_id: accountId,
     number: '',
     numberIsAuto: true,
@@ -107,7 +107,7 @@ export function setHeaderAmount(d: CheckDraft, amount: Cents | null): CheckDraft
  */
 export function applyPayee(d: CheckDraft, payee: Entity | undefined, last: Txn | null): CheckDraft {
   const next = { ...d, entity_id: payee?.id ?? null };
-  const untouched = d.edit_seq === 0n && checkTotal(d) === 0 && d.expenses.every(isBlankExpense) && d.items.every(isBlankItem);
+  const untouched = d.edit_seq === 0 && checkTotal(d) === 0 && d.expenses.every(isBlankExpense) && d.items.every(isBlankItem);
   if (!payee || !untouched) return next;
   if (last) {
     const { expenses, items } = fromTxnLines(last.lines);

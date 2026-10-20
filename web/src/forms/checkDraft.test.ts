@@ -72,12 +72,12 @@ describe('to and from Txn', () => {
     const t = blankTxn('Check', today);
     t.account_id = 'bank';
     t.number = '1042';
-    t.edit_seq = 3n;
+    t.edit_seq = 3;
     t.po_number = 'kept';
     t.lines = [{ ...blankLine('Account'), account_id: 'rent', amount: 185_000 }];
     const d = draftFromTxn(t);
     const back = draftToTxn(d);
-    expect(back).toMatchObject({ id: t.id, edit_seq: 3n, number: '1042', po_number: 'kept', amount: 185_000 });
+    expect(back).toMatchObject({ id: t.id, edit_seq: 3, number: '1042', po_number: 'kept', amount: 185_000 });
     expect(back.lines[0]!.id).toBe(t.lines[0]!.id);
   });
   test('to be printed clears the number', () => {

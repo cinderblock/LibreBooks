@@ -39,7 +39,7 @@ export function blankAccount(name: string, account_type: AccountType, parent?: A
     is_active: true,
     currency: null,
     cash_flow_class: null,
-    edit_seq: 0n,
+    edit_seq: 0,
   };
 }
 
@@ -90,7 +90,7 @@ export function blankEntity(name: string, kind: EntityKind, parent?: Entity | nu
     hired_date: null,
     released_date: null,
     custom_fields: {},
-    edit_seq: 0n,
+    edit_seq: 0,
   };
 }
 
@@ -124,7 +124,7 @@ export function blankItem(name: string, item_type: ItemType, parent?: Item | nul
     components: [],
     print_components: false,
     deposit_account_id: null,
-    edit_seq: 0n,
+    edit_seq: 0,
   };
 }
 
@@ -190,7 +190,7 @@ export function blankTxn(txn_type: TxnType, date: string): Txn {
     exchange_rate: null,
     lines: [],
     applications: [],
-    edit_seq: 0n,
+    edit_seq: 0,
     created_at: null,
     modified_at: null,
     created_by: null,
