@@ -197,6 +197,9 @@ impl FromRequestParts<AppState> for Client {
             .sessions
             .as_ref()
             .and_then(|s| s.client_ip_header.as_deref())
+            // While the tunnel is on, cloudflared on this machine forwards the
+            // real address in `cf-connecting-ip`.
+            .or_else(|| state.ops.forwarded_ip_header())
             .filter(|_| peer.is_some_and(|p| p.is_loopback()))
             .and_then(|h| parts.headers.get(h))
             .and_then(|v| v.to_str().ok())

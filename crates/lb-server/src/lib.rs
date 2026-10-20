@@ -22,10 +22,13 @@ pub mod assets;
 pub mod auth;
 pub mod error;
 pub mod housekeeping;
+pub mod ops;
 mod routes;
+pub mod secrets;
 pub mod state;
 
 pub use auth::{AuthMode, Principal, Role, Sessions};
+pub use ops::{Background, OpsOptions, ServerSettings};
 pub use state::{AppState, ChangeEvent, Companies, Mode};
 
 /// How to run a server.
@@ -48,8 +51,16 @@ impl ServerConfig {
 
 /// Build the shared state.
 pub fn state(config: &ServerConfig) -> std::io::Result<AppState> {
+    state_with(config, OpsOptions::default())
+}
+
+/// Build the shared state, with options for the server's own operations
+/// (where the secret key lives, which updater to run). Starts nothing; see
+/// [`ops::start`].
+pub fn state_with(config: &ServerConfig, ops: OpsOptions) -> std::io::Result<AppState> {
     let (events, _) = broadcast::channel(1024);
     let companies = Companies::new(config.companies_dir(), events.clone())?;
+    let ops = ops::Ops::new(&config.data_dir, ops)?;
     Ok(AppState {
         inner: Arc::new(state::Inner {
             mode: config.mode,
@@ -58,6 +69,7 @@ pub fn state(config: &ServerConfig) -> std::io::Result<AppState> {
             events,
             auth: config.auth.clone(),
             sessions: config.sessions.clone(),
+            ops,
         }),
     })
 }
@@ -73,6 +85,10 @@ pub fn router(state: AppState) -> Router {
     Router::new()
         .nest("/api/v1", api)
         .fallback(assets::serve)
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            ops::access::guard,
+        ))
         .with_state(state)
         .layer(RequestBodyLimitLayer::new(64 * 1024 * 1024))
         .layer(CompressionLayer::new())
@@ -120,9 +136,13 @@ pub async fn serve(
     shutdown: impl std::future::Future<Output = ()> + Send + 'static,
 ) -> Result<(), StartError> {
     check_bind(config, listener.local_addr()?)?;
-    let app = router(state(config)?);
-    axum::serve(listener, app)
+    let state = state(config)?;
+    let background = ops::start(&state);
+    let app = router(state);
+    let served = axum::serve(listener, app)
         .with_graceful_shutdown(shutdown)
-        .await?;
+        .await;
+    background.shutdown().await;
+    served?;
     Ok(())
 }

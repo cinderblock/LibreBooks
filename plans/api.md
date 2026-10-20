@@ -59,9 +59,40 @@ and the UI; change both together.
 | `GET /companies` | → `[{ id, name, role }]` |
 | `POST /companies` | admin: `{ info: CompanyInfo }` → `{ id }` |
 | `GET /events?company=:id` | Server-Sent Events: `event: change`, `data: {kind, id, action}` |
-| `GET /server` / `PUT /server` | admin: server settings (bind address, public URL, tunnel, updates, backups) |
+| `GET /server` / `PUT /server` | admin: server settings (see "Server administration") |
 | `POST /server/update/check`, `POST /server/update/install` | admin |
 | `GET /server/tunnel` | admin: cloudflared status |
+
+### Server administration (admin only)
+
+Settings live in `server.json` in the data folder; credentials never do (they
+are references: `secret:<name>`, `env:NAME`, `file:/path`). Details and reasons:
+`plans/server-ops.md`.
+
+| Method & path | Body → Response |
+| --- | --- |
+| `GET /server` | → `{ version, data_dir, settings: ServerSettings, secrets: [{name, updated_at}], update: UpdateView, tunnel: TunnelView, backups: [{company_id, company_name, status: SchedulerStatus}], restart_required: string[], running }` |
+| `PUT /server` | `ServerSettings` (whole) → same as `GET`. 400 `invalid` with `detail.problems: string[]` when something must be fixed first (a missing secret, a bad URL…). |
+| `GET /server/secrets` | → `[{ name, updated_at }]`. Never values. |
+| `PUT /server/secrets/:name` | `{ value }` → 204. Write-only. Names `[A-Za-z0-9._-]{1,128}`. |
+| `DELETE /server/secrets/:name` | → 204; 404 if none; 409 `in_use` while the settings refer to it |
+| `GET /server/update` | → `UpdateView { config, status: UpdateStatus \| null, unavailable: string \| null }` (`unavailable` says why, e.g. this build has no release signing key) |
+| `POST /server/update/check` | → `UpdateView`. 409 `unavailable` without an updater; 502 `network` / `untrusted` |
+| `POST /server/update/install` | `{ restart?: true }` → `{ installed: Installed, restarting }`. 409 `up_to_date`. With `restart`, the server shuts down gracefully and starts the new version (or exits 75 for its supervisor). |
+| `GET /server/tunnel` | → `TunnelView { enabled, public_hostname, public_url, token_ref, token_set, tunnel_id, cloudflared_path, auto_download, cloudflared, preparing_since, status: TunnelStatus, problems, restart_required }` (`status.state.state` is `stopped` \| `starting` \| `connected` \| `reconnecting` \| `failed`) |
+| `PUT /server/tunnel` | any of `{ enabled, public_hostname, token, cloudflared_path, auto_download }` (`""` clears a text field) → `TunnelView`. `token` is checked, saved as the secret `tunnel-token`, and never returned. |
+| `GET /server/backups/status` | → `{ enabled, running, companies: [{company_id, company_name, status}] }` |
+
+`ServerSettings`: `{ public_urls: string[], backups: BackupConfig, updates:
+UpdateConfig, tunnel: TunnelConfig, access: {team_domain, audience: string[]} |
+null, feeds: { auto_sync, every } }` (durations ISO 8601, e.g. `"PT6H"`). Changing
+`public_urls` or the tunnel hostname needs a restart for passkeys
+(`restart_required` says so).
+
+**Cloudflare Access**: with `access` set, a request that came through Cloudflare
+(it has `cf-ray`) without a valid `Cf-Access-Jwt-Assertion` gets 403 with
+`detail.reason = "cloudflare_access"`. Direct (LAN, localhost) requests are not
+affected.
 
 ## Company-scoped: `/api/v1/c/:company`
 
@@ -126,5 +157,57 @@ Each list has the same five routes. `:list` is one of `accounts`, `entities`,
 | `GET /audit?record_kind=&record_id=&before_id=&limit=` | audit trail |
 | `POST /attachments` (multipart) / `GET /attachments/:id` | receipts, documents |
 | `POST /import/qbd/sync` / `GET /import/qbd/status` / `GET /import/qbd/parity` | QuickBooks import (admin) |
-| `/feeds/…` | bank feeds (see `lb-feeds`) |
-| `/backups/…` | list, run now, restore (admin) |
+| `/feeds/…` | bank feeds (below) |
+| `/backups/…` | list, run now, verify, restore, export (below) |
+
+### Backups (admin on the company)
+
+Each company backs up into its own folder (named by company id) in every
+destination of the server's backup settings.
+
+| | |
+| --- | --- |
+| `GET /backups` | → `{ backups: [{ destination, destination_name, manifest: Manifest }], errors: string[] }` newest first |
+| `GET /backups/status` | → `{ enabled, destinations: string[], scheduler: SchedulerStatus \| null }` |
+| `POST /backups/run` | → `BackupRecord` (one manual backup per company at a time) |
+| `POST /backups/:id/verify?destination=` | `{ identities?: string[], passphrase? }` (optional) → `VerifyReport` |
+| `POST /backups/:id/restore?destination=` | `{ name?, identities?, passphrase? }` → 201 `{ id, name, from: Manifest }`: a **new** company (also needs server admin); nothing existing is replaced. Default name "<name> (restored from <date>)". |
+| `GET /backups/export` | → `application/zip` download, `<slug>.lbk` |
+
+Errors: 404 unknown backup, 400 bad unlock/config, 422 `damaged` (checksum or
+integrity), 502 `storage` (destination unreachable).
+
+### Bank feeds
+
+Types are lb-feeds' (`web/src/api/generated/`). Reading needs viewer, changes
+bookkeeper. Multipart uploads use a `file` part plus text parts.
+
+| | |
+| --- | --- |
+| `GET /feeds` | → `FeedAccountSummary[]` |
+| `GET /feeds/txns?account_id=&connection_id=&statuses=new,matched&from=&to=&text=&amount=&limit=&offset=&descending=` | → `FeedTxn[]` |
+| `GET /feeds/txns/:id` | → `FeedTxn` |
+| `POST /feeds/detect` | multipart `file` → `{ kind: "Ofx" \| "Csv", csv?: CsvDetection, statements?: Statement[] }` |
+| `POST /feeds/import` | multipart `file`, `account_id?`, `connection_id?`, `mapping?` (CsvMapping JSON), `statement?` (index) → `IngestReport`. A file whose account was imported before goes to that connection; a CSV without a confident mapping is 400 (detect first). |
+| `GET /feeds/txns/:id/candidates?days=` | → `MatchCandidate[]` |
+| `POST /feeds/txns/:id/match` | `{ txn_id }` → 204 |
+| `POST /feeds/txns/:id/preview` | `AddRequest` → `{ txn, postings, total, sales_tax }` (nothing saved) |
+| `POST /feeds/txns/:id/add` | `AddRequest` → 201 `AddOutcome` |
+| `POST /feeds/txns/add-all` | `{ ids, request? }` → `BatchOutcome` |
+| `POST /feeds/txns/ignore` | `{ ids }` → `{ ignored }` |
+| `POST /feeds/txns/:id/undo` | → `FeedTxn` |
+| `GET/POST /feeds/connections`, `GET/PUT /feeds/connections/:id`, `DELETE /feeds/connections/:id?edit_seq=` | `FeedConnection`. Credential references must be this company's own (`secret:feeds.<company>.…`), else 400; deleting removes credentials nothing else uses. |
+| `PUT /feeds/connections/:id/credentials` | `{ value }` (password, PIN, access URL or token) → `FeedConnection`. Saved in the secret store; never returned. |
+| `POST /feeds/connections/:id/sync` | → `IngestReport` |
+| `POST /feeds/connections/:id/remote-accounts` | → `StatementAccount[]` (Direct Connect, SimpleFIN) |
+| `POST /feeds/simplefin/claim` | `{ setup_token }` → `{ access: "secret:feeds.<company>.simplefin-…", accounts: StatementAccount[], errors }`; then create one connection per account with `access` and `remote_account_id` |
+| `GET/POST /feeds/rules`, `GET/PUT/DELETE /feeds/rules/:id` | `FeedRule` |
+| `POST /feeds/rules/reorder` | `{ ids }` → `FeedRule[]` |
+| `POST /feeds/rules/apply` | `{ ids? , account_id? }` → `{ applied }` |
+| `POST /feeds/amazon/orders` | multipart `file` (Amazon order-history CSV), `account_id?` → `{ matches: AmazonMatch[], orders: AmazonOrder[] }` (preview) |
+| `POST /feeds/amazon/apply` | `{ matches, orders }` → `{ annotated }` |
+
+Feed errors: 400 `invalid` (parse/bad input), 404, **409 `reconnect`** (the bank
+or bridge refused the saved credentials; not the person's session), 502
+`provider` / `network`, 501 `unsupported`. Online connections also download by
+themselves (`feeds.every`, default 6 h).

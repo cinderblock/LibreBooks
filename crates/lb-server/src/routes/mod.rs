@@ -6,11 +6,14 @@ use axum::routing::{get, post, put};
 use crate::state::AppState;
 
 mod auth;
+mod backups;
 mod banking;
 mod company;
 mod events;
+mod feeds;
 mod lists;
 mod merge;
+mod ops;
 mod reports;
 mod saved;
 mod system;
@@ -92,8 +95,13 @@ pub fn api() -> Router<AppState> {
             get(banking::get_attachment)
                 .put(banking::attach)
                 .delete(banking::delete_attachment),
-        );
+        )
+        // Bank feeds and backups (routes/feeds.rs, routes/backups.rs).
+        .merge(feeds::routes())
+        .merge(backups::routes());
     Router::new()
+        // Server administration (routes/ops.rs).
+        .merge(ops::routes())
         .route("/health", get(system::health))
         .route("/session", get(system::session))
         .route(

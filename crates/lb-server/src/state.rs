@@ -188,6 +188,8 @@ pub struct Inner {
     pub events: broadcast::Sender<ChangeEvent>,
     pub auth: AuthMode,
     pub sessions: Option<Sessions>,
+    /// Settings, secrets and background work (backups, updates, tunnel, feeds).
+    pub ops: crate::ops::Ops,
 }
 
 impl AppState {
