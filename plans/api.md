@@ -154,6 +154,7 @@ Each list has the same five routes. `:list` is one of `accounts`, `entities`,
 | `GET /accounts/:id/register?from=&to=` | → `{ opening: Money, lines: RegisterLine[] }` |
 | `PUT /accounts/:id/register/:txn_id/cleared` | `{ status: ClearedStatus }` |
 | `GET /balances?from=&to=` | → `AccountBalance[]` (debit-positive) |
+| `GET /balances/names` | → `NameBalance[]`: every name with an open A/R or A/P item (`receivable`, `payable`, both positive = owed; credits and unapplied payments count against), with `*_total` rolling jobs up to their parent (the Customer/Vendor Centers' Balance and Balance Total) |
 | `GET /open?entity_id=&kind=receivable\|payable` | open invoices/bills/credits for a name (Receive Payments / Pay Bills) |
 | `GET /undeposited` | payments waiting in Undeposited Funds (Make Deposits) |
 
@@ -171,7 +172,7 @@ Each list has the same five routes. `:list` is one of `accounts`, `entities`,
 | | |
 | --- | --- |
 | `GET /audit?record_kind=&record_id=&before_id=&limit=` | audit trail |
-| `POST /attachments` (multipart) / `GET /attachments/:id` | receipts, documents |
+| `POST /attachments` (multipart) / `GET /attachments/:id` | receipts, documents. `GET /attachments` lists the inbox; `?record_kind=&record_id=` one record's; `?all=true` everything. `GET /attachments/:id` takes the session cookie, a bearer token, or `?token=` (for `<img>`), like every route |
 | `/import/qbd/…` | QuickBooks Desktop import (admin; below) |
 | `/feeds/…` | bank feeds (below) |
 | `/backups/…` | list, run now, verify, restore, export (below) |

@@ -58,6 +58,7 @@ pub fn api() -> Router<AppState> {
             put(txns::set_cleared),
         )
         .route("/balances", get(txns::balances))
+        .route("/balances/names", get(txns::name_balances))
         .route("/open", get(txns::open_items))
         .route("/undeposited", get(txns::undeposited))
         .route("/audit", get(company::audit))

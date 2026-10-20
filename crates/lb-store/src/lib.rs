@@ -35,7 +35,7 @@ pub mod saved;
 pub mod schema;
 pub mod txns;
 
-pub use balances::{AccountBalance, RegisterLine};
+pub use balances::{AccountBalance, NameBalance, RegisterLine};
 pub use context::StoreContext;
 pub use txns::{SaveOutcome, TxnFilter, TxnSummary};
 

@@ -258,3 +258,124 @@ pub fn set_downloaded(
     w.changed("txn", txn.to_string(), "downloaded");
     Ok(())
 }
+
+/// A name's balance as QBD's Customer and Vendor Centers show it: what it owes
+/// us (its A/R postings, debit-positive) and what we owe it (its A/P postings,
+/// credit-positive). `*_total` adds the name's jobs (sub-names).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct NameBalance {
+    pub entity_id: EntityId,
+    pub receivable: Money,
+    pub payable: Money,
+    pub receivable_total: Money,
+    pub payable_total: Money,
+}
+
+/// Every name with an open A/R or A/P item, plus the parents whose jobs have
+/// one. Built from open balances, as the Centers are: a charge counts what is
+/// still owed on it, a credit (credit memo, unapplied payment, vendor credit)
+/// counts against. A payment applied to a job's invoice therefore lowers the
+/// job's balance, which is where QBD shows it.
+pub fn name_balances(c: &Connection) -> Result<Vec<NameBalance>> {
+    use lb_core::AccountType;
+    let mut stmt = c.prepare(
+        "SELECT t.entity_id, t.txn_type, a.account_type, SUM(t.open_balance)
+         FROM txn t
+         LEFT JOIN account a ON a.id = t.ar_ap_account_id
+         WHERE t.entity_id IS NOT NULL
+           AND t.open_balance IS NOT NULL AND t.open_balance <> 0
+           AND t.is_void = 0
+         GROUP BY t.entity_id, t.txn_type, a.account_type",
+    )?;
+    let rows = stmt.query_map([], |r| {
+        Ok((
+            r.get::<_, String>(0)?,
+            r.get::<_, String>(1)?,
+            r.get::<_, Option<String>>(2)?,
+            r.get::<_, i64>(3)?,
+        ))
+    })?;
+    let mut own: HashMap<EntityId, (Money, Money)> = HashMap::new();
+    for row in rows {
+        let (e, t, account_type, open) = row?;
+        let id: EntityId = codec::parse_id(&e)?;
+        let txn_type = TxnType::parse(&t).ok_or_else(|| StoreError::Corrupt(t.clone()))?;
+        let credit = matches!(
+            txn_type,
+            TxnType::CreditMemo
+                | TxnType::ReceivePayment
+                | TxnType::VendorCredit
+                | TxnType::BillPaymentCheck
+                | TxnType::BillPaymentCreditCard
+        );
+        let receivable = match account_type.as_deref() {
+            Some(k) if k == AccountType::AccountsReceivable.as_str() => true,
+            Some(k) if k == AccountType::AccountsPayable.as_str() => false,
+            // No A/R-A/P link recorded (older files): go by the form.
+            _ => match txn_type {
+                TxnType::Invoice
+                | TxnType::StatementCharge
+                | TxnType::CreditMemo
+                | TxnType::ReceivePayment => true,
+                TxnType::Bill
+                | TxnType::VendorCredit
+                | TxnType::BillPaymentCheck
+                | TxnType::BillPaymentCreditCard => false,
+                _ => continue,
+            },
+        };
+        let amount = if credit { Money(-open) } else { Money(open) };
+        let entry = own.entry(id).or_default();
+        if receivable {
+            entry.0 += amount;
+        } else {
+            entry.1 += amount;
+        }
+    }
+    own.retain(|_, (r, p)| !r.is_zero() || !p.is_zero());
+
+    // Roll each balance up to the name's parents.
+    let mut parents: HashMap<EntityId, Option<EntityId>> = HashMap::new();
+    let mut stmt = c.prepare("SELECT id, parent_id FROM entity")?;
+    for row in stmt.query_map([], |r| {
+        Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?))
+    })? {
+        let (id, parent) = row?;
+        let parent = match parent {
+            Some(p) => Some(codec::parse_id(&p)?),
+            None => None,
+        };
+        parents.insert(codec::parse_id(&id)?, parent);
+    }
+    let mut totals: HashMap<EntityId, (Money, Money)> = HashMap::new();
+    for (id, (r, p)) in &own {
+        let mut at = Some(*id);
+        let mut hops = 0;
+        while let Some(e) = at {
+            let t = totals.entry(e).or_default();
+            t.0 += *r;
+            t.1 += *p;
+            at = parents.get(&e).copied().flatten();
+            hops += 1;
+            if hops > 16 {
+                break; // a cycle would be a corrupt file; don't spin on it
+            }
+        }
+    }
+    let mut out: Vec<NameBalance> = totals
+        .into_iter()
+        .map(|(entity_id, (receivable_total, payable_total))| {
+            let (receivable, payable) = own.get(&entity_id).copied().unwrap_or_default();
+            NameBalance {
+                entity_id,
+                receivable,
+                payable,
+                receivable_total,
+                payable_total,
+            }
+        })
+        .collect();
+    out.sort_by_key(|b| b.entity_id);
+    Ok(out)
+}

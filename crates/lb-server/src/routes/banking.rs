@@ -246,6 +246,8 @@ pub async fn upload(
 pub struct AttachmentQuery {
     record_kind: Option<String>,
     record_id: Option<String>,
+    /// Every document, attached or not (the "Attached" tab).
+    all: bool,
 }
 
 pub async fn list_attachments(
@@ -257,8 +259,9 @@ pub async fn list_attachments(
     let books = s.books_for(&p, company, Role::Viewer)?;
     Ok(Json(
         blocking(move || {
-            books.read(|c| match (q.record_kind, q.record_id) {
-                (Some(k), Some(i)) => attachments::for_record(c, &k, &i),
+            books.read(|c| match (q.all, q.record_kind, q.record_id) {
+                (true, _, _) => attachments::all(c),
+                (false, Some(k), Some(i)) => attachments::for_record(c, &k, &i),
                 _ => attachments::inbox(c),
             })
         })

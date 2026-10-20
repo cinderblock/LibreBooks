@@ -334,6 +334,19 @@ pub async fn balances(
     Ok(Json(out))
 }
 
+/// `GET /balances/names`: every name's A/R and A/P balance (with its jobs
+/// rolled up), what the Customer and Vendor Centers show in their lists.
+pub async fn name_balances(
+    State(s): State<AppState>,
+    p: Principal,
+    Path(company): Path<CompanyId>,
+) -> ApiResult<Json<Vec<lb_store::NameBalance>>> {
+    let books = s.books_for(&p, company, Role::Viewer)?;
+    Ok(Json(
+        blocking(move || books.read(balances::name_balances)).await?,
+    ))
+}
+
 #[derive(Deserialize)]
 pub struct OpenQuery {
     entity_id: EntityId,

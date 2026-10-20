@@ -984,3 +984,60 @@ fn a_refund_check_made_out_to_another_name_is_still_the_customers_receivable() {
         .unwrap();
     assert_eq!(open, Some(Money::ZERO));
 }
+
+#[test]
+fn name_balances_follow_open_items_and_roll_jobs_up() {
+    let b = books();
+    let s = setup(&b);
+    let mut inv = Txn::new(TxnType::Invoice, date(2026, 10, 1));
+    inv.entity_id = Some(s.job);
+    inv.lines.push(TxnLine::item(
+        s.labor,
+        Decimal::from(10),
+        Decimal::from(220),
+    ));
+    let inv = b.write(&me(), |w| txns::save(w, inv)).unwrap().txn;
+    let mut bill = Txn::new(TxnType::Bill, date(2026, 10, 2));
+    bill.entity_id = Some(s.vendor);
+    bill.lines.push(TxnLine::account(s.rent, Money(50_000)));
+    b.write(&me(), |w| txns::save(w, bill)).unwrap();
+
+    let by_name = |b: &Books| -> std::collections::HashMap<EntityId, lb_store::NameBalance> {
+        b.read(balances::name_balances)
+            .unwrap()
+            .into_iter()
+            .map(|n| (n.entity_id, n))
+            .collect()
+    };
+    let n = by_name(&b);
+    assert_eq!(n[&s.job].receivable, Money(220_000));
+    assert_eq!(n[&s.customer].receivable, Money::ZERO, "nothing of its own");
+    assert_eq!(
+        n[&s.customer].receivable_total,
+        Money(220_000),
+        "the job rolls up"
+    );
+    assert_eq!(n[&s.vendor].payable, Money(50_000));
+    assert_eq!(n[&s.vendor].receivable, Money::ZERO);
+
+    // The customer pays most of the job's invoice: the job's balance falls,
+    // the parent's total with it; a fully applied payment adds nothing.
+    let mut pmt = Txn::new(TxnType::ReceivePayment, date(2026, 10, 5));
+    pmt.entity_id = Some(s.customer);
+    pmt.amount = Money(200_000);
+    pmt.applications
+        .push(Application::cash(inv.id, Money(200_000)));
+    let pmt = b.write(&me(), |w| txns::save(w, pmt)).unwrap().txn;
+    let n = by_name(&b);
+    assert_eq!(n[&s.job].receivable, Money(20_000));
+    assert_eq!(n[&s.customer].receivable_total, Money(20_000));
+
+    // Unapplied, the payment is a credit against the customer.
+    let mut pmt2 = b.read(|c| txns::get(c, pmt.id)).unwrap();
+    pmt2.applications.clear();
+    b.write(&me(), |w| txns::save(w, pmt2)).unwrap();
+    let n = by_name(&b);
+    assert_eq!(n[&s.job].receivable, Money(220_000));
+    assert_eq!(n[&s.customer].receivable, Money(-200_000));
+    assert_eq!(n[&s.customer].receivable_total, Money(20_000));
+}

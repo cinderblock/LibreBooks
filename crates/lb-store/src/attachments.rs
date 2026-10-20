@@ -177,6 +177,15 @@ pub fn for_record(
     Ok(rows.collect::<rusqlite::Result<_>>()?)
 }
 
+/// Every document, attached or not, newest first.
+pub fn all(c: &Connection) -> Result<Vec<AttachmentMeta>> {
+    let mut stmt = c.prepare(&format!(
+        "SELECT {COLS} FROM attachment ORDER BY created_at DESC"
+    ))?;
+    let rows = stmt.query_map([], row)?;
+    Ok(rows.collect::<rusqlite::Result<_>>()?)
+}
+
 /// Documents not attached to anything yet (the inbox), newest first.
 pub fn inbox(c: &Connection) -> Result<Vec<AttachmentMeta>> {
     let mut stmt = c.prepare(&format!(
