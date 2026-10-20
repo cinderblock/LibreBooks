@@ -35,6 +35,7 @@ export function parseWindowPath(relPath: string): WindowDesc | null {
     case 'accounts':
       if (seg.length === 1) return one('accounts', 'accounts');
       if (seg.length === 3 && c === 'register' && b) return one('register', `register:${b}`, { accountId: b });
+      if (seg.length === 3 && c === 'reconcile' && b) return one('reconcile', `reconcile:${b}`, { accountId: b });
       return null;
     case 'customers':
     case 'vendors':
@@ -71,6 +72,7 @@ export const paths = {
   home: () => '/home',
   accounts: () => '/accounts',
   register: (accountId: string) => `/accounts/${encodeURIComponent(accountId)}/register`,
+  reconcile: (accountId: string) => `/accounts/${encodeURIComponent(accountId)}/reconcile`,
   customers: (select?: string) => `/customers${select ? `?select=${encodeURIComponent(select)}` : ''}`,
   vendors: (select?: string) => `/vendors${select ? `?select=${encodeURIComponent(select)}` : ''}`,
   employees: (select?: string) => `/employees${select ? `?select=${encodeURIComponent(select)}` : ''}`,

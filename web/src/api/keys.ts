@@ -25,6 +25,9 @@ export const qk = {
   reportsAll: (co: CompanyId) => ['c', co, 'report'] as const,
   report: (co: CompanyId, req: ReportRequest) => ['c', co, 'report', req] as const,
   history: (co: CompanyId, id: string) => ['c', co, 'history', id] as const,
+  reconcileAll: (co: CompanyId) => ['c', co, 'reconcile'] as const,
+  reconcileOverview: (co: CompanyId, accountId: string) => ['c', co, 'reconcile', 'account', accountId] as const,
+  reconciliation: (co: CompanyId, id: string) => ['c', co, 'reconcile', 'id', id] as const,
   savedAll: (co: CompanyId) => ['c', co, 'saved'] as const,
   saved: (co: CompanyId, kind: SavedKind) => ['c', co, 'saved', kind] as const,
   memorizedDue: (co: CompanyId) => ['c', co, 'memorized-due'] as const,
@@ -37,6 +40,7 @@ export function invalidateTxnDerived(qc: QueryClient, co: CompanyId, txnId?: str
   void qc.invalidateQueries({ queryKey: qk.balancesAll(co) });
   void qc.invalidateQueries({ queryKey: qk.openAll(co) });
   void qc.invalidateQueries({ queryKey: qk.undeposited(co) });
+  void qc.invalidateQueries({ queryKey: qk.reconcileAll(co) });
   void qc.invalidateQueries({ queryKey: qk.reportsAll(co) });
   void qc.invalidateQueries({ queryKey: ['c', co, 'next-number'] });
   if (txnId) {

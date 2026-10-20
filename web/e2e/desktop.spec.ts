@@ -215,6 +215,27 @@ test('a register line edits in place with Ctrl+E; 1-Line mode; Ctrl+Q QuickZooms
   await expect(page.getByRole('tab', { name: /Check \d+/ })).toBeVisible();
 });
 
+test('reconcile: begin, mark all deposits, the difference moves, discard', async ({ page }) => {
+  const checking = '00000000-0000-4000-8000-000000000001';
+  await start(page, `/c/00000000-0000-4000-8000-00000000c0de/accounts/${checking}/reconcile`);
+  const begin = page.getByTestId('reconcile-begin');
+  await expect(begin.getByTestId('beginning-balance')).toBeVisible();
+  const ending = begin.getByRole('textbox', { name: 'Ending balance' });
+  await ending.fill('5000');
+  await page.keyboard.press('Tab');
+  await begin.getByRole('button', { name: 'Continue' }).click();
+  const rec = page.getByTestId('reconcile');
+  await expect(rec.getByTestId('reconcile-payments')).toBeVisible();
+  await expect(rec.getByTestId('reconcile-deposits')).toBeVisible();
+  const diffBefore = await rec.getByTestId('reconcile-summary').getByLabel('Difference').textContent();
+  await rec.getByTestId('reconcile-deposits').getByRole('button', { name: 'Mark All', exact: true }).click();
+  await expect(rec.getByTestId('reconcile-deposits').getByRole('checkbox').first()).toBeChecked();
+  await expect(rec.getByTestId('reconcile-summary').getByLabel('Difference')).not.toHaveText(diffBefore!);
+  page.once('dialog', (d) => void d.accept());
+  await rec.getByRole('button', { name: 'Discard' }).click();
+  await expect(page.getByTestId('reconcile-begin')).toBeVisible();
+});
+
 test('saving an empty check shows the problem inline', async ({ page }) => {
   await start(page, '/c/00000000-0000-4000-8000-00000000c0de/checks/new');
   const form = page.getByTestId('write-checks');

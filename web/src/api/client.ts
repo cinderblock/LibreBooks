@@ -23,9 +23,14 @@ import type {
   LoginStart,
   MemorizedDue,
   PreviewOutcome,
+  ReconcileOverview,
+  ReconcileStatus,
+  Reconciliation,
+  ReconciliationView,
   RegisterResponse,
   Report,
   ReportRequest,
+  StartReconcile,
   Saved,
   SavedKind,
   SaveOutcome,
@@ -113,6 +118,16 @@ export interface ApiClient {
   memorizedDue(co: CompanyId): Promise<MemorizedDue[]>;
   /** A fresh, unsaved transaction from a memorized one (`edit_seq` 0, today's date). */
   useMemorized(co: CompanyId, id: string, date?: string | null): Promise<Txn>;
+
+  /** Reconciliation: what's in progress and finished for an account, start one, mark lines, finish, discard, undo the last. */
+  reconcileOverview(co: CompanyId, accountId: string): Promise<ReconcileOverview>;
+  startReconcile(co: CompanyId, accountId: string, body: StartReconcile): Promise<Reconciliation>;
+  reconciliation(co: CompanyId, id: string): Promise<ReconciliationView>;
+  markReconcile(co: CompanyId, id: string, txnIds: string[], marked: boolean): Promise<ReconcileStatus>;
+  /** `adjust`: write the difference off to Reconciliation Discrepancies. */
+  finishReconcile(co: CompanyId, id: string, adjust: boolean): Promise<Reconciliation>;
+  discardReconcile(co: CompanyId, id: string): Promise<void>;
+  undoReconcile(co: CompanyId, accountId: string): Promise<Reconciliation | null>;
 
   /** Live changes (SSE `/events?company=`); the fixture client emits its own. */
   subscribe(co: CompanyId, handlers: EventHandlers): EventSubscription;

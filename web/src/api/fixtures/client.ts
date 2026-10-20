@@ -5,7 +5,7 @@
 // events after every write, and a little latency so loading states are real.
 // State lives only in memory: a reload starts over.
 
-import { blankLine } from '../blank';
+import { blankLine, blankTxn } from '../blank';
 import { ApiError } from '../errors';
 import type { ApiClient, EventHandlers, EventSubscription, FileDownload, TxnQuery } from '../client';
 import { clone } from '../json';
@@ -29,6 +29,11 @@ import type {
   MemorizedDue,
   Posting,
   PreviewOutcome,
+  ReconcileLine,
+  ReconcileOverview,
+  ReconcileStatus,
+  Reconciliation,
+  ReconciliationView,
   RegisterLine,
   RegisterResponse,
   Report,
@@ -37,12 +42,14 @@ import type {
   SavedKind,
   SaveOutcome,
   Session,
+  StartReconcile,
+  StatementCharge,
   Txn,
   TxnSummary,
   TxnType,
   TxnWithPostings,
 } from '../types';
-import { accountTypeOrder } from '~/lib/accountTypes';
+import { accountTypeOrder, naturalBalance } from '~/lib/accountTypes';
 import { addDays, addMonths, todayIso } from '~/lib/dates';
 import { hierarchicalCompare } from '~/lib/tree';
 import { reportToCsv } from '~/reports/rows';
@@ -86,6 +93,8 @@ export class FixtureApiClient implements ApiClient {
   private stressLines: RegisterLine[] | null = null;
   /** Memorized transactions and reports (`/saved/:kind`). */
   private savedDocs: Saved[] = [];
+  /** Reconciliations, in progress (finished_at null) and finished. */
+  private reconciliations: Reconciliation[] = [];
 
   constructor(opts: FixtureOptions = {}) {
     this.latency = opts.latencyMs ?? 90;
@@ -866,6 +875,184 @@ export class FixtureApiClient implements ApiClient {
     s.doc = { ...m, next_date: next, remaining: m.remaining === null ? null : Math.max(0, m.remaining - 1) };
     s.modified_at = new Date().toISOString();
     this.emit('saved', s.id, 'updated');
+  }
+
+  // ---- reconciliation --------------------------------------------------------
+  //
+  // While a reconciliation is in progress its marked lines are Pending in the
+  // account; finishing makes them Cleared and records them on it; undoing the
+  // last one makes them Uncleared again.
+
+  private reconcileStatus(rec: Reconciliation): ReconcileStatus {
+    const lines = this.reconcileLines(rec);
+    let inc = 0;
+    let dec = 0;
+    let count = 0;
+    for (const l of lines) {
+      if (!l.marked) continue;
+      count++;
+      if (l.amount < 0) dec += l.amount;
+      else inc += l.amount;
+    }
+    const cleared = rec.beginning_balance + inc + dec;
+    return { beginning_balance: rec.beginning_balance, marked_increases: inc, marked_decreases: dec, cleared_balance: cleared, ending_balance: rec.ending_balance, difference: rec.ending_balance - cleared, marked_count: count };
+  }
+
+  private reconcileLines(rec: Reconciliation): ReconcileLine[] {
+    const type = this.lists.accounts.find((a) => a.id === rec.account_id)?.account_type ?? 'Bank';
+    const names = new Map(this.lists.entities.map((e) => [e.id, e.full_name]));
+    return [...this.txnStore.values()]
+      .filter((s) => !s.txn.is_void && s.postings.some((p) => p.account_id === rec.account_id && p.cleared !== 'Cleared' && (s.txn.date <= rec.statement_date || p.cleared === 'Pending')))
+      .sort((a, b) => (a.txn.date < b.txn.date ? -1 : a.txn.date > b.txn.date ? 1 : a.seq - b.seq))
+      .map((s) => {
+        const mine = s.postings.filter((p) => p.account_id === rec.account_id);
+        const amount = mine.reduce((t, p) => t + p.amount, 0);
+        return {
+          txn_id: s.txn.id,
+          txn_type: s.txn.txn_type,
+          date: s.txn.date,
+          number: s.txn.number,
+          payee: s.txn.entity_id ? (names.get(s.txn.entity_id) ?? null) : null,
+          memo: s.txn.memo,
+          amount: naturalBalance(type, amount),
+          marked: mine.some((p) => p.cleared === 'Pending'),
+        };
+      })
+      .filter((l) => l.amount !== 0);
+  }
+
+  private beginningBalance(accountId: string): number {
+    const type = this.lists.accounts.find((a) => a.id === accountId)?.account_type ?? 'Bank';
+    let sum = 0;
+    for (const s of this.txnStore.values()) for (const p of s.postings) if (p.account_id === accountId && p.cleared === 'Cleared') sum += p.amount;
+    return naturalBalance(type, sum);
+  }
+
+  reconcileOverview(co: CompanyId, accountId: string): Promise<ReconcileOverview> {
+    this.checkCompany(co);
+    if (!this.lists.accounts.some((a) => a.id === accountId)) return Promise.reject(new ApiError(404, 'not_found', 'No such account'));
+    return this.delay(() => ({
+      in_progress: this.reconciliations.find((r) => r.account_id === accountId && !r.finished_at) ?? null,
+      history: this.reconciliations.filter((r) => r.account_id === accountId && r.finished_at).sort((a, b) => b.statement_date.localeCompare(a.statement_date)),
+      beginning_balance: this.beginningBalance(accountId),
+    }));
+  }
+
+  startReconcile(co: CompanyId, accountId: string, body: StartReconcile): Promise<Reconciliation> {
+    this.checkCompany(co);
+    if (this.reconciliations.some((r) => r.account_id === accountId && !r.finished_at)) return Promise.reject(new ApiError(409, 'conflict', 'A reconciliation of this account is already in progress'));
+    const charge = (c: StatementCharge | null, memo: string, sign: 1 | -1): string | null => {
+      if (!c || !c.amount) return null;
+      const t = blankTxn(sign < 0 ? 'Check' : 'Deposit', c.date);
+      t.account_id = accountId;
+      t.memo = memo;
+      t.amount = c.amount;
+      t.lines = [{ ...blankLine(sign < 0 ? 'Account' : 'DepositLine'), account_id: c.account_id, amount: c.amount, description: memo }];
+      const posted = this.post(t);
+      const saved: Txn = { ...t, amount: posted.total, edit_seq: 1, created_at: new Date().toISOString(), modified_at: new Date().toISOString() };
+      this.txnStore.set(saved.id, { txn: saved, postings: posted.postings, total: posted.total, seq: this.seq++ });
+      this.emit('txn', saved.id, 'created');
+      return saved.id;
+    };
+    const rec: Reconciliation = {
+      id: crypto.randomUUID(),
+      account_id: accountId,
+      statement_date: body.statement_date,
+      beginning_balance: this.beginningBalance(accountId),
+      ending_balance: body.ending_balance,
+      service_charge_txn_id: charge(body.service_charge, 'Service Charge', -1),
+      interest_txn_id: charge(body.interest, 'Interest Earned', 1),
+      adjustment_txn_id: null,
+      finished_at: null,
+      finished_by: null,
+      cleared_txn_ids: [],
+    };
+    this.reconciliations.push(rec);
+    this.emit('reconciliation', rec.id, 'created');
+    return this.delay(() => rec);
+  }
+
+  reconciliation(co: CompanyId, id: string): Promise<ReconciliationView> {
+    this.checkCompany(co);
+    const rec = this.reconciliations.find((r) => r.id === id);
+    if (!rec) return Promise.reject(new ApiError(404, 'not_found', 'No such reconciliation'));
+    return this.delay(() => ({ reconciliation: rec, lines: this.reconcileLines(rec), status: this.reconcileStatus(rec) }));
+  }
+
+  markReconcile(co: CompanyId, id: string, txnIds: string[], marked: boolean): Promise<ReconcileStatus> {
+    this.checkCompany(co);
+    const rec = this.reconciliations.find((r) => r.id === id && !r.finished_at);
+    if (!rec) return Promise.reject(new ApiError(404, 'not_found', 'No reconciliation in progress'));
+    for (const txnId of txnIds) {
+      const s = this.txnStore.get(txnId);
+      if (!s) continue;
+      s.postings = s.postings.map((p) => (p.account_id === rec.account_id && p.cleared !== 'Cleared' ? { ...p, cleared: marked ? 'Pending' : 'Uncleared' } : p));
+    }
+    this.emit('reconciliation', id, 'updated');
+    return this.delay(() => this.reconcileStatus(rec));
+  }
+
+  finishReconcile(co: CompanyId, id: string, adjust: boolean): Promise<Reconciliation> {
+    this.checkCompany(co);
+    const rec = this.reconciliations.find((r) => r.id === id && !r.finished_at);
+    if (!rec) return Promise.reject(new ApiError(404, 'not_found', 'No reconciliation in progress'));
+    const status = this.reconcileStatus(rec);
+    if (status.difference !== 0 && !adjust) return Promise.reject(new ApiError(400, 'invalid', `The difference is ${(status.difference / 100).toFixed(2)}; mark more lines or enter an adjustment.`));
+    if (status.difference !== 0) {
+      const disc = this.lists.accounts.find((a) => a.role === 'ReconciliationDiscrepancies') ?? this.lists.accounts.find((a) => a.full_name === 'Ask My Accountant')!;
+      const t = blankTxn('JournalEntry', rec.statement_date);
+      const type = this.lists.accounts.find((a) => a.id === rec.account_id)?.account_type ?? 'Bank';
+      const here = naturalBalance(type, status.difference); // debit-positive effect that brings the account to the statement
+      t.memo = 'Balance Adjustment';
+      t.amount = Math.abs(here);
+      t.lines = [
+        { ...blankLine('Journal'), account_id: rec.account_id, amount: here, description: t.memo },
+        { ...blankLine('Journal'), account_id: disc.id, amount: -here, description: t.memo },
+      ];
+      const posted = this.post(t);
+      const saved: Txn = { ...t, edit_seq: 1, created_at: new Date().toISOString(), modified_at: new Date().toISOString() };
+      this.txnStore.set(saved.id, { txn: saved, postings: posted.postings.map((p) => (p.account_id === rec.account_id ? { ...p, cleared: 'Pending' as const } : p)), total: posted.total, seq: this.seq++ });
+      this.emit('txn', saved.id, 'created');
+      rec.adjustment_txn_id = saved.id;
+    }
+    const cleared: string[] = [];
+    for (const s of this.txnStore.values()) {
+      if (s.postings.some((p) => p.account_id === rec.account_id && p.cleared === 'Pending')) {
+        s.postings = s.postings.map((p) => (p.account_id === rec.account_id && p.cleared === 'Pending' ? { ...p, cleared: 'Cleared' } : p));
+        cleared.push(s.txn.id);
+      }
+    }
+    rec.cleared_txn_ids = cleared;
+    rec.finished_at = new Date().toISOString();
+    rec.finished_by = 'Demo User';
+    this.emit('reconciliation', id, 'finished');
+    return this.delay(() => rec);
+  }
+
+  discardReconcile(co: CompanyId, id: string): Promise<void> {
+    this.checkCompany(co);
+    const i = this.reconciliations.findIndex((r) => r.id === id && !r.finished_at);
+    if (i < 0) return Promise.reject(new ApiError(404, 'not_found', 'No reconciliation in progress'));
+    const rec = this.reconciliations[i]!;
+    for (const s of this.txnStore.values()) s.postings = s.postings.map((p) => (p.account_id === rec.account_id && p.cleared === 'Pending' ? { ...p, cleared: 'Uncleared' } : p));
+    this.reconciliations.splice(i, 1);
+    this.emit('reconciliation', id, 'deleted');
+    return this.delay(() => undefined);
+  }
+
+  undoReconcile(co: CompanyId, accountId: string): Promise<Reconciliation | null> {
+    this.checkCompany(co);
+    if (this.reconciliations.some((r) => r.account_id === accountId && !r.finished_at)) return Promise.reject(new ApiError(400, 'invalid', 'Finish or discard the reconciliation in progress first'));
+    const done = this.reconciliations.filter((r) => r.account_id === accountId && r.finished_at).sort((a, b) => b.statement_date.localeCompare(a.statement_date));
+    const last = done[0];
+    if (!last) return this.delay(() => null);
+    for (const id of last.cleared_txn_ids) {
+      const s = this.txnStore.get(id);
+      if (s) s.postings = s.postings.map((p) => (p.account_id === accountId && p.cleared === 'Cleared' ? { ...p, cleared: 'Uncleared' } : p));
+    }
+    this.reconciliations = this.reconciliations.filter((r) => r.id !== last.id);
+    this.emit('reconciliation', last.id, 'undone');
+    return this.delay(() => last);
   }
 
   // ---- events ---------------------------------------------------------------

@@ -21,7 +21,8 @@ export type WindowKind =
   | 'find'
   | 'list'
   | 'company'
-  | 'form';
+  | 'form'
+  | 'reconcile';
 
 export interface WindowDesc {
   key: string;

@@ -78,6 +78,23 @@ test('a journal entry and a transfer at 375px', async ({ page }) => {
   await page.screenshot({ path: test.info().outputPath('transfer-375.png') });
 });
 
+test('reconcile at 375px: one column at a time, the difference stays in view', async ({ page }) => {
+  const checking = '00000000-0000-4000-8000-000000000001';
+  await start(page, `${CO}/accounts/${checking}/reconcile`);
+  const begin = page.getByTestId('reconcile-begin');
+  await begin.getByRole('textbox', { name: 'Ending balance' }).fill('1000');
+  await page.keyboard.press('Tab');
+  await begin.getByRole('button', { name: 'Continue' }).tap();
+  const rec = page.getByTestId('reconcile');
+  await expect(rec.getByTestId('reconcile-payments')).toBeVisible();
+  await expect(rec.getByTestId('reconcile-deposits')).toHaveCount(0);
+  await rec.getByText(/^Deposits \(\d+\)/).tap();
+  await expect(rec.getByTestId('reconcile-deposits')).toBeVisible();
+  await expect(rec.getByTestId('reconcile-summary').getByLabel('Difference')).toBeInViewport();
+  await expectNoSideways(page);
+  await page.screenshot({ path: test.info().outputPath('reconcile-375.png') });
+});
+
 test('banking → a register as a tappable list', async ({ page }) => {
   await start(page);
   await page.getByRole('navigation', { name: 'Main' }).getByText('Banking', { exact: true }).tap();

@@ -32,6 +32,10 @@ import type {
   LoginStart,
   MemorizedDue,
   PreviewOutcome,
+  ReconcileOverview,
+  ReconcileStatus,
+  Reconciliation,
+  ReconciliationView,
   RegisterResponse,
   Report,
   ReportRequest,
@@ -39,6 +43,7 @@ import type {
   SavedKind,
   SaveOutcome,
   Session,
+  StartReconcile,
   Txn,
   TxnSummary,
   TxnType,
@@ -282,6 +287,29 @@ export class HttpApiClient implements ApiClient {
     const p = new URLSearchParams();
     if (date) p.set('date', date);
     return this.request<Txn>('GET', this.co(co, `/memorized/${encodeURIComponent(id)}/use`), { query: p });
+  }
+
+  reconcileOverview(co: CompanyId, accountId: string) {
+    return this.request<ReconcileOverview>('GET', this.co(co, `/accounts/${encodeURIComponent(accountId)}/reconcile`));
+  }
+  startReconcile(co: CompanyId, accountId: string, body: StartReconcile) {
+    return this.request<Reconciliation>('POST', this.co(co, `/accounts/${encodeURIComponent(accountId)}/reconcile`), { body });
+  }
+  reconciliation(co: CompanyId, id: string) {
+    return this.request<ReconciliationView>('GET', this.co(co, `/reconciliations/${encodeURIComponent(id)}`));
+  }
+  markReconcile(co: CompanyId, id: string, txnIds: string[], marked: boolean) {
+    return this.request<ReconcileStatus>('POST', this.co(co, `/reconciliations/${encodeURIComponent(id)}/mark`), { body: { txn_ids: txnIds, marked } });
+  }
+  finishReconcile(co: CompanyId, id: string, adjust: boolean) {
+    return this.request<Reconciliation>('POST', this.co(co, `/reconciliations/${encodeURIComponent(id)}/finish`), { body: { adjust } });
+  }
+  discardReconcile(co: CompanyId, id: string) {
+    return this.request<void>('DELETE', this.co(co, `/reconciliations/${encodeURIComponent(id)}`));
+  }
+  async undoReconcile(co: CompanyId, accountId: string) {
+    const r = await this.request<{ undone: Reconciliation | null }>('POST', this.co(co, `/accounts/${encodeURIComponent(accountId)}/reconcile/undo`));
+    return r.undone;
   }
 
   /**

@@ -8,7 +8,7 @@ import { Alert, Button, Checkbox, Group, Skeleton, Text } from '@mantine/core';
 import { useLocalStorage } from '@mantine/hooks';
 import { notifications } from '@mantine/notifications';
 import { useQueryClient } from '@tanstack/react-query';
-import { IconPlus, IconReportAnalytics } from '@tabler/icons-react';
+import { IconChecklist, IconPlus, IconReportAnalytics } from '@tabler/icons-react';
 import { useEffect, useRef, useState } from 'react';
 import { useApi, useCompanyId } from '~/api/context';
 import { describeError, isApiError } from '~/api/errors';
@@ -133,6 +133,11 @@ export function Register() {
           {!mobile && (
             <Button size="compact-xs" variant="subtle" leftSection={<IconReportAnalytics size={14} />} onClick={() => open(paths.report('AccountQuickReport', { acct: account.id, dates: 'ThisFiscalYearToDate' }))}>
               QuickReport
+            </Button>
+          )}
+          {['Bank', 'CreditCard'].includes(account.account_type) && (
+            <Button size="compact-xs" variant="subtle" leftSection={<IconChecklist size={14} />} onClick={() => open(paths.reconcile(account.id))}>
+              Reconcile
             </Button>
           )}
           {editing && (

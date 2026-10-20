@@ -187,5 +187,47 @@ describe('fixture books', () => {
   });
 });
 
+describe('reconciliation', () => {
+  test('start, mark, finish with an adjustment, then undo', async () => {
+    const api = make();
+    const checking = api.find('account', 'Checking')!;
+    const before = await api.reconcileOverview(co, checking);
+    expect(before.in_progress).toBeNull();
+    const rec = await api.startReconcile(co, checking, { statement_date: today, ending_balance: before.beginning_balance + 1_000, service_charge: { amount: 1_000, date: today, account_id: api.find('account', 'Bank Service Charges')! }, interest: null });
+    const chargeId = rec.service_charge_txn_id!;
+    expect(chargeId).toBeTruthy();
+    const view = await api.reconciliation(co, rec.id);
+    expect(view.lines.length).toBeGreaterThan(0);
+    expect(view.status.difference).toBe(1_000);
+    // Mark the service charge: the difference grows by its 10.00 (a payment lowers the cleared balance).
+    const status = await api.markReconcile(co, rec.id, [chargeId], true);
+    expect(status.marked_count).toBe(1);
+    expect(status.difference).toBe(2_000);
+    await expect(api.finishReconcile(co, rec.id, false)).rejects.toMatchObject({ code: 'invalid' });
+    const done = await api.finishReconcile(co, rec.id, true);
+    expect(done.finished_at).not.toBeNull();
+    expect(done.adjustment_txn_id).not.toBeNull();
+    expect(done.cleared_txn_ids).toContain(chargeId);
+    const reg = await api.register(co, checking);
+    expect(reg.lines.find((l) => l.txn_id === chargeId)?.cleared).toBe('Cleared');
+    const after = await api.reconcileOverview(co, checking);
+    expect(after.history[0]?.id).toBe(rec.id);
+    expect(after.beginning_balance).toBe(before.beginning_balance + 1_000);
+    const undone = await api.undoReconcile(co, checking);
+    expect(undone?.id).toBe(rec.id);
+    expect((await api.register(co, checking)).lines.find((l) => l.txn_id === chargeId)?.cleared).toBe('Uncleared');
+  });
+  test('discard unmarks', async () => {
+    const api = make();
+    const checking = api.find('account', 'Checking')!;
+    const rec = await api.startReconcile(co, checking, { statement_date: today, ending_balance: 0, service_charge: null, interest: null });
+    const view = await api.reconciliation(co, rec.id);
+    await api.markReconcile(co, rec.id, [view.lines[0]!.txn_id], true);
+    await api.discardReconcile(co, rec.id);
+    expect((await api.reconcileOverview(co, checking)).in_progress).toBeNull();
+    expect((await api.register(co, checking)).lines.every((l) => l.cleared !== 'Pending')).toBe(true);
+  });
+});
+
 const textOf = (row: Row) => (row.cells[0]?.value.type === 'Text' ? row.cells[0].value.value : '');
 const money = (c: Cell | undefined) => (c?.value.type === 'Money' ? c.value.value : Number.NaN);

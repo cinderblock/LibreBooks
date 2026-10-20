@@ -16,9 +16,11 @@ import type {
   ListName,
   ListQuery,
   ListRecords,
+  ReconciliationView,
   RegisterResponse,
   ReportRequest,
   SavedKind,
+  StartReconcile,
   Txn,
   TxnType,
   TxnWithPostings,
@@ -240,6 +242,50 @@ export function useTxnPreview(txn: Txn | null, enabled = true) {
     retry: false,
     placeholderData: keepPreviousData,
   });
+}
+
+export function useReconcileOverview(accountId: string | null) {
+  const api = useApi();
+  const co = useCompanyId();
+  return useQuery({ queryKey: qk.reconcileOverview(co, accountId ?? ''), queryFn: () => api.reconcileOverview(co, accountId!), enabled: !!accountId, staleTime: 10_000 });
+}
+
+export function useReconciliation(id: string | null) {
+  const api = useApi();
+  const co = useCompanyId();
+  return useQuery({ queryKey: qk.reconciliation(co, id ?? ''), queryFn: () => api.reconciliation(co, id!), enabled: !!id, staleTime: 5_000 });
+}
+
+/** Start, mark, finish, discard and undo; each refreshes the reconcile queries and the register. */
+export function useReconcileActions(accountId: string | null) {
+  const api = useApi();
+  const co = useCompanyId();
+  const qc = useQueryClient();
+  const refresh = () => {
+    void qc.invalidateQueries({ queryKey: qk.reconcileAll(co) });
+    void qc.invalidateQueries({ queryKey: qk.registerAll(co) });
+  };
+  const start = useMutation({ mutationFn: (body: StartReconcile) => api.startReconcile(co, accountId!, body), onSuccess: refresh });
+  const mark = useMutation({
+    mutationFn: ({ id, txnIds, marked }: { id: string; txnIds: string[]; marked: boolean }) => api.markReconcile(co, id, txnIds, marked),
+    // The ✓ flips at once; the server's status replaces ours when it answers.
+    onMutate: async ({ id, txnIds, marked }) => {
+      await qc.cancelQueries({ queryKey: qk.reconciliation(co, id) });
+      const before = qc.getQueryData<ReconciliationView>(qk.reconciliation(co, id));
+      if (before) qc.setQueryData<ReconciliationView>(qk.reconciliation(co, id), { ...before, lines: before.lines.map((l) => (txnIds.includes(l.txn_id) ? { ...l, marked } : l)) });
+      return { before };
+    },
+    onError: (_e, { id }, ctx) => {
+      if (ctx?.before) qc.setQueryData(qk.reconciliation(co, id), ctx.before);
+    },
+    onSuccess: (status, { id }) => {
+      qc.setQueryData<ReconciliationView>(qk.reconciliation(co, id), (old) => (old ? { ...old, status } : old));
+    },
+  });
+  const finish = useMutation({ mutationFn: ({ id, adjust }: { id: string; adjust: boolean }) => api.finishReconcile(co, id, adjust), onSuccess: () => { refresh(); invalidateTxnDerived(qc, co); } });
+  const discard = useMutation({ mutationFn: (id: string) => api.discardReconcile(co, id), onSuccess: refresh });
+  const undo = useMutation({ mutationFn: () => api.undoReconcile(co, accountId!), onSuccess: refresh });
+  return { start, mark, finish, discard, undo };
 }
 
 /** Create (edit_seq 0) or update a transaction; refreshes everything it touches. */
