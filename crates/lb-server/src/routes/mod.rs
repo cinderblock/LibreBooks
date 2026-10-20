@@ -10,6 +10,7 @@ mod banking;
 mod company;
 mod events;
 mod lists;
+mod reports;
 mod system;
 mod txns;
 
@@ -48,6 +49,9 @@ pub fn api() -> Router<AppState> {
         .route("/open", get(txns::open_items))
         .route("/undeposited", get(txns::undeposited))
         .route("/audit", get(company::audit))
+        .route("/reports", get(reports::catalog))
+        .route("/reports/run", post(reports::run_report))
+        .route("/reports/export", post(reports::export))
         .route(
             "/accounts/{id}/reconcile",
             get(banking::reconcile_overview).post(banking::reconcile_start),

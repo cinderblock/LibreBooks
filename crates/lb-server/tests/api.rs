@@ -386,3 +386,23 @@ async fn reconcile_over_the_api() {
     assert_eq!(s, StatusCode::OK, "{done}");
     assert!(done["finished_at"].is_string());
 }
+
+#[tokio::test]
+async fn run_a_profit_and_loss() {
+    let api = Api::new(AuthMode::Open);
+    let c = company(&api).await;
+    let base = format!("/api/v1/c/{c}");
+    let (s, catalog) = api.call("GET", &format!("{base}/reports"), None).await;
+    assert_eq!(s, StatusCode::OK);
+    assert!(catalog.as_array().unwrap().len() > 40);
+    let id = catalog[0]["id"].clone();
+    let (s, report) = api
+        .call(
+            "POST",
+            &format!("{base}/reports/run"),
+            Some(json!({ "report": id })),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{report}");
+    assert_eq!(report["company_name"], "Test Co");
+}
