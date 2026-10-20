@@ -12,6 +12,7 @@ mod events;
 mod lists;
 mod merge;
 mod reports;
+mod saved;
 mod system;
 mod txns;
 
@@ -51,6 +52,13 @@ pub fn api() -> Router<AppState> {
         .route("/undeposited", get(txns::undeposited))
         .route("/audit", get(company::audit))
         .route("/merge", post(merge::merge))
+        .route("/memorized/due", get(saved::due))
+        .route("/memorized/{id}/use", get(saved::use_memorized))
+        .route("/saved/{kind}", get(saved::list).post(saved::create))
+        .route(
+            "/saved/{kind}/{id}",
+            put(saved::update).delete(saved::delete),
+        )
         .route("/reports", get(reports::catalog))
         .route("/reports/run", post(reports::run_report))
         .route("/reports/export", post(reports::export))

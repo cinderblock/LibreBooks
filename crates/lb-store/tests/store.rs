@@ -642,3 +642,39 @@ fn merging_names_and_accounts_moves_everything_onto_the_survivor() {
     );
     assert_eq!(b.check_integrity().unwrap(), Vec::<String>::new());
 }
+
+#[test]
+fn memorized_rent_enters_itself_each_month() {
+    use lb_store::saved::{self, Interval, Memorized, Repeat};
+    let b = books();
+    let s = setup(&b);
+    let mut rent = Txn::new(TxnType::Check, date(2026, 1, 1));
+    rent.account_id = Some(s.bank);
+    rent.entity_id = Some(s.vendor);
+    rent.lines.push(TxnLine::account(s.rent, Money(150_000)));
+    let m = Memorized {
+        template: rent,
+        repeat: Repeat::Automatic,
+        interval: Some(Interval::Monthly),
+        next_date: Some(date(2026, 8, 1)),
+        days_in_advance: 0,
+        remaining: Some(5),
+        group: None,
+    };
+    b.write(&me(), |w| saved::memorize(w, None, "Rent", &m))
+        .unwrap();
+    // The server was off since July: August, September and October all enter.
+    let entered = b
+        .write(&me(), |w| saved::enter_due(w, date(2026, 10, 19)))
+        .unwrap();
+    assert_eq!(entered.len(), 3);
+    let again = b
+        .write(&me(), |w| saved::enter_due(w, date(2026, 10, 19)))
+        .unwrap();
+    assert!(again.is_empty(), "nothing enters twice");
+    let (_, m) = b.read(saved::list_memorized).unwrap().remove(0);
+    assert_eq!(m.next_date, Some(date(2026, 11, 1)));
+    assert_eq!(m.remaining, Some(2));
+    let sums = b.read(|c| balances::sums(c, None, None)).unwrap();
+    assert_eq!(sums[&s.rent], Money(450_000));
+}

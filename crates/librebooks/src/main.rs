@@ -223,6 +223,7 @@ fn serve(
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async move {
         let state = lb_server::state(&config)?;
+        lb_server::housekeeping::spawn(state.clone());
         let app = lb_server::router(state);
         let mut tasks = Vec::new();
         for addr in binds {

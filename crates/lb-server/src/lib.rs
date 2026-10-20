@@ -21,6 +21,7 @@ use tower_http::trace::TraceLayer;
 pub mod assets;
 pub mod auth;
 pub mod error;
+pub mod housekeeping;
 mod routes;
 pub mod state;
 
