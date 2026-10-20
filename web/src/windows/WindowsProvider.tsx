@@ -23,6 +23,12 @@ export interface WindowsApi {
   setTitle(key: string, title: string): void;
   /** The path the URL had when it matched no window (for a "not found" view). */
   notFound: string | null;
+  /**
+   * Phones' Back: a window showing a sub-view (a centre's detail) handles it
+   * first; otherwise Back closes the window.
+   */
+  back(key: string): void;
+  setBackHandler(key: string, handler: (() => void) | null): void;
 }
 
 const WindowsContext = createContext<WindowsApi | null>(null);
@@ -46,6 +52,7 @@ export function WindowsProvider({ base, children }: { base: string; children: Re
   const navigate = useNavigate();
   const stateRef = useRef(state);
   stateRef.current = state;
+  const backHandlers = useRef(new Map<string, () => void>());
 
   const rel = location.pathname.startsWith(base) ? location.pathname.slice(base.length) + location.search : null;
 
@@ -61,10 +68,13 @@ export function WindowsProvider({ base, children }: { base: string; children: Re
 
   // Active window → URL (after Ctrl+Tab, or closing the active window).
   const active = activeWindow(state);
+  // Only after a window has existed: on first render the URL's window is still being opened.
+  const hadWindows = useRef(false);
+  if (state.windows.length > 0) hadWindows.current = true;
   useEffect(() => {
     if (!active) {
       // Never leave the user with nothing: closing the last window shows Home.
-      if (state.windows.length === 0 && rel !== null && parseWindowPath(rel)) navigate(`${base}${paths.home()}`, { replace: true });
+      if (hadWindows.current && state.windows.length === 0) navigate(`${base}${paths.home()}`, { replace: true });
       return;
     }
     const target = `${base}${active.path}`;
@@ -81,6 +91,18 @@ export function WindowsProvider({ base, children }: { base: string; children: Re
   const cycle = useCallback((delta: 1 | -1) => dispatch({ type: 'cycle', delta }), []);
   const setDirty = useCallback((key: string, dirty: boolean) => dispatch({ type: 'dirty', key, dirty }), []);
   const setTitle = useCallback((key: string, title: string) => dispatch({ type: 'title', key, title }), []);
+  const setBackHandler = useCallback((key: string, handler: (() => void) | null) => {
+    if (handler) backHandlers.current.set(key, handler);
+    else backHandlers.current.delete(key);
+  }, []);
+  const back = useCallback(
+    (key: string) => {
+      const h = backHandlers.current.get(key);
+      if (h) h();
+      else close(key);
+    },
+    [close],
+  );
 
   useShortcut('window.next', () => cycle(1));
   useShortcut('window.prev', () => cycle(-1));
@@ -95,8 +117,8 @@ export function WindowsProvider({ base, children }: { base: string; children: Re
   }, [anyDirty]);
 
   const api = useMemo<WindowsApi>(
-    () => ({ state, base, open, activate, close, cycle, setDirty, setTitle, notFound }),
-    [state, base, open, activate, close, cycle, setDirty, setTitle, notFound],
+    () => ({ state, base, open, activate, close, cycle, setDirty, setTitle, notFound, back, setBackHandler }),
+    [state, base, open, activate, close, cycle, setDirty, setTitle, notFound, back, setBackHandler],
   );
 
   const confirmTitle = confirmKey ? (state.titles[confirmKey] ?? 'this window') : '';
@@ -136,6 +158,8 @@ export interface WindowApi {
   setDirty(dirty: boolean): void;
   setTitle(title: string): void;
   close(opts?: { force?: boolean }): void;
+  /** Claim the phone's Back button while a sub-view is showing (null releases it). */
+  setBackHandler(handler: (() => void) | null): void;
 }
 
 const WindowContext = createContext<WindowApi | null>(null);
@@ -153,6 +177,7 @@ export function WindowProvider({ desc, isActive, children }: { desc: WindowDesc;
       setDirty: (d) => w.setDirty(key, d),
       setTitle: (t) => w.setTitle(key, t),
       close: (opts) => w.close(key, opts),
+      setBackHandler: (h) => w.setBackHandler(key, h),
     }),
     // w's callbacks are stable; desc/isActive are what change.
     [desc, isActive, key, w.setDirty, w.setTitle, w.close], // eslint-disable-line react-hooks/exhaustive-deps

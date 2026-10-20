@@ -28,13 +28,14 @@ export interface ReportViewerProps {
 
 const ROW_H = 26;
 
-function width(c: ReportColumn, i: number): string {
-  if (i === 0) return c.kind === 'text' ? 'minmax(220px, 2.5fr)' : '110px';
+function width(c: ReportColumn, i: number, mobile: boolean): string {
+  // Labels ellipsize rather than push the figures off a phone's screen.
+  if (i === 0) return c.kind === 'text' ? (mobile ? 'minmax(150px, 2.5fr)' : 'minmax(220px, 2.5fr)') : '110px';
   switch (c.kind) {
     case 'money':
     case 'quantity':
     case 'percent':
-      return 'minmax(110px, 1fr)';
+      return mobile ? 'minmax(96px, 1fr)' : 'minmax(110px, 1fr)';
     case 'date':
       return '96px';
     default:
@@ -53,7 +54,7 @@ export function ReportViewer({ report, collapsed, onToggle, onDrill, mobile = fa
   const scrollEl = useRef<HTMLDivElement>(null);
   const rows = useMemo(() => visibleRows(report.rows, collapsed), [report.rows, collapsed]);
   const [selected, setSelected] = useState(0);
-  const template = report.columns.map(width).join(' ');
+  const template = report.columns.map((c, i) => width(c, i, mobile)).join(' ');
   const gridStyle = { gridTemplateColumns: template } as CSSProperties;
   const virtualizer = useVirtualizer({
     count: rows.length,

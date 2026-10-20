@@ -4,7 +4,7 @@
 // own screen with a back arrow.
 
 import { ActionIcon, Alert, Badge, Button, Card, Checkbox, Group, Menu, Modal, SimpleGrid, Skeleton, Stack, Table, Text, TextInput, Title } from '@mantine/core';
-import { IconArrowLeft, IconChevronDown, IconPencil, IconPlus, IconSearch } from '@tabler/icons-react';
+import { IconChevronDown, IconPencil, IconPlus, IconSearch } from '@tabler/icons-react';
 import { useEffect, useMemo, useState } from 'react';
 import { describeError } from '~/api/errors';
 import { useEntities, useSaveRecord, useTxns } from '~/api/hooks';
@@ -110,6 +110,12 @@ export function Center({ which }: { which: 'customers' | 'vendors' | 'employees'
 
   const current = rows[selected];
   const enabled = win.isActiveNow;
+  // On a phone the detail is a sub-view: the header's Back returns to the list.
+  const showingDetail = mobile && mobileDetail && !!current;
+  useEffect(() => {
+    win.setBackHandler(showingDetail ? () => setMobileDetail(false) : null);
+    return () => win.setBackHandler(null);
+  }, [showingDetail]); // eslint-disable-line react-hooks/exhaustive-deps
   useShortcut('record.new', () => void qc.createEntity('', [cfg.kind]), { enabled });
   useShortcut('record.edit', () => current && setEditing(current), { enabled });
   useShortcut('report.quick', () => current && open(paths.report('transaction_list_by_date', { entity: current.id, macro: 'All' })), { enabled });
@@ -176,7 +182,7 @@ export function Center({ which }: { which: 'customers' | 'vendors' | 'employees'
   );
 
   const detail = current ? (
-    <NameDetail entity={current} balance={balances.get(current.id) ?? 0} cfg={cfg} onEdit={() => setEditing(current)} onBack={mobile ? () => setMobileDetail(false) : undefined} />
+    <NameDetail entity={current} balance={balances.get(current.id) ?? 0} cfg={cfg} onEdit={() => setEditing(current)} phone={mobile} />
   ) : (
     <Text c="dimmed" p="md">
       Choose a name.
@@ -196,21 +202,16 @@ export function Center({ which }: { which: 'customers' | 'vendors' | 'employees'
   );
 }
 
-function NameDetail({ entity, balance, cfg, onEdit, onBack }: { entity: Entity; balance: number; cfg: CenterConfig; onEdit(): void; onBack?(): void }) {
+function NameDetail({ entity, balance, cfg, onEdit, phone }: { entity: Entity; balance: number; cfg: CenterConfig; onEdit(): void; phone: boolean }) {
   const open = useOpenWindow();
   const txns = useTxns({ entity_id: entity.id, include_jobs: true, descending: true, limit: 200 });
   const addr = entity.bill_address;
   const address = [...(addr.lines ?? []), [addr.city, addr.state, addr.postal_code].filter(Boolean).join(' ')].filter(Boolean);
   return (
-    <Stack gap="sm" p={onBack ? 'sm' : 0}>
-      <Group justify="space-between" wrap="nowrap" align="flex-start">
-        <Group gap="xs" wrap="nowrap">
-          {onBack && (
-            <ActionIcon variant="subtle" onClick={onBack} aria-label="Back to list">
-              <IconArrowLeft size={18} />
-            </ActionIcon>
-          )}
-          <div>
+    <Stack gap="sm" p={phone ? 'sm' : 0}>
+      <Group justify="space-between" wrap={phone ? 'wrap' : 'nowrap'} align="flex-start" gap="xs">
+        <Group gap="xs" wrap="nowrap" style={{ minWidth: 0 }}>
+          <div style={{ minWidth: 0 }}>
             <Title order={4}>{entity.full_name}</Title>
             {entity.company_name && <Text c="dimmed">{entity.company_name}</Text>}
           </div>
@@ -277,14 +278,14 @@ function NameDetail({ entity, balance, cfg, onEdit, onBack }: { entity: Entity; 
           No transactions yet.
         </Text>
       ) : (
-        <Table.ScrollContainer minWidth={520}>
+        <Table.ScrollContainer minWidth={phone ? 0 : 520}>
           <Table highlightOnHover striped fz="sm" verticalSpacing={4}>
             <Table.Thead>
               <Table.Tr>
                 <Table.Th>Type</Table.Th>
                 <Table.Th>Num</Table.Th>
                 <Table.Th>Date</Table.Th>
-                <Table.Th>Account</Table.Th>
+                {!phone && <Table.Th>Account</Table.Th>}
                 <Table.Th ta="right">Amount</Table.Th>
                 {cfg.openTypes.length > 0 && <Table.Th ta="right">Open</Table.Th>}
               </Table.Tr>
@@ -295,17 +296,19 @@ function NameDetail({ entity, balance, cfg, onEdit, onBack }: { entity: Entity; 
                   <Table.Td>{TXN_LABEL[t.txn_type]}</Table.Td>
                   <Table.Td>{t.number}</Table.Td>
                   <Table.Td>{formatDateShort(t.date)}</Table.Td>
-                  <Table.Td>
-                    <Text size="sm" truncate maw={220}>
-                      {t.account_name}
-                    </Text>
-                  </Table.Td>
+                  {!phone && (
+                    <Table.Td>
+                      <Text size="sm" truncate maw={220}>
+                        {t.account_name}
+                      </Text>
+                    </Table.Td>
+                  )}
                   <Table.Td ta="right" className={classes.num}>
                     {formatMoney(t.amount)}
                   </Table.Td>
                   {cfg.openTypes.length > 0 && (
                     <Table.Td ta="right" className={classes.num}>
-                      {t.open_balance ? formatMoney(t.open_balance) : ''}
+                      {cfg.openTypes.includes(t.txn_type) && t.open_balance ? formatMoney(t.open_balance) : ''}
                     </Table.Td>
                   )}
                 </Table.Tr>

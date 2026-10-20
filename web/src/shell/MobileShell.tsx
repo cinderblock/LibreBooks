@@ -62,7 +62,7 @@ export function MobileShell({ live, onShortcuts }: { live: LiveStatus; onShortcu
     <div className={classes.mobile}>
       <header className={classes.mheader}>
         {active && active.kind !== 'home' ? (
-          <ActionIcon variant="subtle" size="xl" aria-label="Back" onClick={() => windows.close(active.key)}>
+          <ActionIcon variant="subtle" size="xl" aria-label="Back" onClick={() => windows.back(active.key)}>
             <IconArrowLeft size={22} />
           </ActionIcon>
         ) : (

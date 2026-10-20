@@ -23,9 +23,9 @@
   box-shadow: inset 0 0 0 2px var(--mantine-primary-color-filled);
 }
 
-/* Wide enough for every column; the scroll container handles overflow. */
+/* At least every column's minimum; wider reports scroll inside the grid. */
 .inner {
-  min-width: max-content;
+  min-width: min-content;
   width: 100%;
 }
 

@@ -48,7 +48,19 @@ function apiBaseUrl(base: string | null | undefined): string | undefined {
   return /\/api\/v\d+$/.test(trimmed) ? trimmed : `${trimmed}/api/v1`;
 }
 
-export function createApiClient(): ApiClient {
+let singleton: ApiClient | null = null;
+
+/**
+ * The page's one client. A singleton rather than per-render state because
+ * React may run state initializers twice (StrictMode), and fixture mode must
+ * not end up with two sets of books (one in the app, another on the console handle).
+ */
+export function getApiClient(): ApiClient {
+  singleton ??= createApiClient();
+  return singleton;
+}
+
+function createApiClient(): ApiClient {
   const mode = fixtureMode();
   if (mode !== 'off') {
     const latency = Number(new URLSearchParams(window.location.search).get('latency') ?? '90');

@@ -195,6 +195,9 @@
   flex: 1;
   min-height: 0;
   position: relative;
+  /* The window host must fill this (it is a flex child, as on desktop). */
+  display: flex;
+  flex-direction: column;
 }
 
 .tabbar {

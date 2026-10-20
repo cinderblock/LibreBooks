@@ -438,7 +438,7 @@ export function buildSeed(today: string): SeedBooks {
     }
     // Pay the Visa off from checking each month (a check to the card account).
     if (m > 0) {
-      check(25, 'First Valley Bank', [expense('Visa', between(40_000, 60_000), { description: 'Visa payment' })], { memo: 'Visa payment' });
+      check(25, 'First Valley Bank', [expense('Visa', between(15_000, 25_000), { description: 'Visa payment' })], { memo: 'Visa payment' });
     }
     // Loan payment: principal and interest.
     check(27, 'First Valley Bank', [expense('Equipment Loan', 35_000), expense('Interest Expense', between(5_000, 6_000))], { memo: 'Equipment loan payment' });

@@ -11,7 +11,7 @@ import { useState } from 'react';
 import { createBrowserRouter, Navigate, RouterProvider } from 'react-router';
 import { ApiProvider } from './api/context';
 import { isApiError } from './api/errors';
-import { createApiClient } from './api/select';
+import { getApiClient } from './api/select';
 import { Enrol } from './auth/Enrol';
 import { SignIn } from './auth/SignIn';
 import { KeyboardProvider } from './keyboard/KeyboardProvider';
@@ -56,7 +56,7 @@ function makeQueryClient() {
 }
 
 export function App() {
-  const [client] = useState(createApiClient);
+  const [client] = useState(getApiClient);
   const [queryClient] = useState(makeQueryClient);
   return (
     <MantineProvider theme={theme} defaultColorScheme="auto">

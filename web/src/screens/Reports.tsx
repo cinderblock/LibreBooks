@@ -88,9 +88,13 @@ export function ReportWindow() {
   const accounts = useAccountIndex();
   const entities = useEntityIndex();
   const { data: catalog } = useReportCatalog();
-  const req = useMemo(() => requestFromParams(win.desc.params), [win.desc.params]);
-  const entry = catalog?.find((c) => c.id === req.report);
-  const { data: report, error, isFetching, refetch } = useReport(req);
+  const entry = catalog?.find((c) => c.id === win.desc.params.report);
+  // No dates in the URL: the report's own default macro (shown as such, not as "Custom").
+  const req = useMemo(() => {
+    const r = requestFromParams(win.desc.params);
+    return !r.macro && !r.range && entry ? { ...r, macro: entry.default_macro } : r;
+  }, [win.desc.params, entry]);
+  const { data: report, error, isFetching, refetch } = useReport(catalog ? req : null);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
 
   useEffect(() => {

@@ -64,13 +64,27 @@ function DesktopRegister({ account, lines, onOpen, onToggleCleared, onRecord, in
 
   // QBD opens a register scrolled to the bottom (today's end), or on the
   // transaction you came from.
+  // A window opened in the background (or just shown) has no size yet, and a
+  // scroll then is lost; so wait until the list has a height.
   useLayoutEffect(() => {
-    if (didInitialScroll.current || count === 0) return;
-    didInitialScroll.current = true;
+    const el = scrollEl.current;
+    if (didInitialScroll.current || count === 0 || !el) return;
     const i = initialTxnId ? lines.findIndex((l) => l.txn_id === initialTxnId) : -1;
     const target = i >= 0 ? i : count - 1;
     setSelected(target);
-    virtualizer.scrollToIndex(target, { align: 'center' });
+    const scroll = () => {
+      if (didInitialScroll.current || el.clientHeight === 0) return;
+      didInitialScroll.current = true;
+      // The spacer already has the full height, so the DOM can scroll now even
+      // though the virtualizer hasn't measured its viewport; refine next frame.
+      if (i < 0) el.scrollTop = el.scrollHeight;
+      requestAnimationFrame(() => virtualizer.scrollToIndex(target, { align: i >= 0 ? 'center' : 'end' }));
+    };
+    scroll();
+    if (didInitialScroll.current) return;
+    const ro = new ResizeObserver(scroll);
+    ro.observe(el);
+    return () => ro.disconnect();
   }, [count]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {

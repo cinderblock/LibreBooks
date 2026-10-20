@@ -4,6 +4,7 @@
 
 import { Alert, Button, Group, Kbd, Loader, Modal, Stack, Table, Text, Tooltip, type ButtonProps } from '@mantine/core';
 import { IconAlertTriangle, IconRefresh } from '@tabler/icons-react';
+import { useMediaQuery } from '@mantine/hooks';
 import { useQuery } from '@tanstack/react-query';
 import type { ComponentPropsWithoutRef, ReactNode } from 'react';
 import { useApi, useCompanyId } from '~/api/context';
@@ -35,7 +36,9 @@ export function ShortcutButton({
   ...props
 }: { command?: CommandId; children: ReactNode } & ButtonProps & Omit<ComponentPropsWithoutRef<'button'>, keyof ButtonProps>) {
   const hint = useComboHint(command ?? 'palette.open');
-  const shown = command ? hint : '';
+  // Keyboard hints mean nothing on a touch screen.
+  const touch = useMediaQuery('(pointer: coarse)');
+  const shown = command && !touch ? hint : '';
   const button = (
     <Button {...props} rightSection={shown && !props.rightSection ? <Kbd size="xs">{shown}</Kbd> : props.rightSection}>
       {children}

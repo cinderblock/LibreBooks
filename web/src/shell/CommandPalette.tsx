@@ -109,6 +109,8 @@ export function CommandPalette({ run }: { run: RunCommand }) {
       onQueryChange={setQuery}
       filter={(_q, a) => a}
       shortcut={null}
+      // No open animation: keys typed right after Ctrl+K must land in the search box.
+      transitionProps={{ duration: 0 }}
       nothingFound="Nothing matches"
       highlightQuery
       scrollable

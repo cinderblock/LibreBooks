@@ -20,13 +20,14 @@ import classes from './screens.module.css';
 function Action({ icon, label, path, command, todo }: { icon: ReactNode; label: string; path: string; command?: CommandId; todo?: boolean }) {
   const open = useOpenWindow();
   const hint = useComboHint(command ?? 'palette.open');
+  const mobile = useIsMobile();
   return (
     <UnstyledButton className={classes.action} onClick={() => open(path)} data-todo={todo || undefined}>
       <div className={classes.actionIcon}>{icon}</div>
       <Text size="sm" fw={500}>
         {label}
       </Text>
-      {command && hint && (
+      {command && hint && !mobile && (
         <Text size="xs" c="dimmed">
           {hint}
         </Text>
