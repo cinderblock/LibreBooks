@@ -177,10 +177,13 @@ Phases are ordered; each ends usable. **Current step is marked ▶.**
 - Phase 0 — Foundation
   - Plan, repo, license, README, workspace skeleton, `.gitattributes`. Done
     (`858b1be`). CI still to write.
-- **Wave 1 (2026-10-19, running in parallel worktrees):** lb-auth, lb-reports,
-  lb-qbd, lb-backup + lb-update + lb-tunnel, lb-feeds, web UI foundation (phase A,
-  fixture mode). Each agent writes `plans/<area>.md`. ▶ Meanwhile the parent
-  session builds lb-server + the `librebooks` CLI, then merges each branch.
+- **Wave 1 (2026-10-19), parallel worktrees, each with `plans/<area>.md`:**
+  merged so far: lb-auth (`ff76a50`), lb-feeds (`11134c1`), lb-reports
+  (`51d6943`), lb-backup/lb-update/lb-tunnel (`bc44451`). Still running: lb-qbd,
+  web UI phase A (fixture mode), desktop (Tauri), and a server-ops integration
+  agent (secret store, settings, backups/update/tunnel/feeds routes and CLI).
+  ▶ Parent session: merge each, wire QBD import into server + CLI, then the
+  first read-only import of the real company (with the user).
 - Phase 1 — Ledger core
   - Domain types, chart of accounts (all QBD account types), names (customers +
     jobs, vendors, employees, other names), items (all QBD item types), classes,
@@ -264,20 +267,42 @@ Phases are ordered; each ends usable. **Current step is marked ▶.**
 - `/api/v1/status` reported `qb_desktop_running:false` while queries still
   succeeded; don't gate on that field.
 
+- **Compute budget:** the machine is shared (6 cores). Every cargo/test run
+  goes through `node ~/.claude/bin/cpu-slots.mjs run --slots 4 --label … -- …`.
+  Cargo's build dir is shared machine-wide (`~/.cargo/build`), so parallel
+  worktree builds take turns on its lock.
+- `ts-rs` exports TypeScript into `web/src/api/generated/` whenever
+  `cargo test` runs (`.cargo/config.toml` sets `TS_RS_EXPORT_DIR`); commit them.
+- `MemoryBooks` helper methods are `add_*`: inherent methods named like the
+  `PostingContext` trait's (`account`, `item`) lose to the trait's `&self`
+  methods at autoref, which gave baffling arity errors.
+- **Two crates can export the same TypeScript type name** and ts-rs silently
+  overwrites one with the other (lb-feeds' and lb-reports' `Column` collided at
+  merge, 2026-10-19). Rename on the TS side with `#[ts(export, rename = "…")]`.
+- **cpu-slots broker** sometimes fails with a transient `EPERM` on its mutex
+  file under contention (Windows). Rerun.
+- **Passkeys and addresses:** a passkey is bound to a hostname; browsers refuse
+  IP addresses as RP IDs and need HTTPS or `http://localhost`. LAN-IP clients
+  use device keys. People enrol once per hostname they use (details in
+  `plans/auth.md`).
+
 ## Progress log
 
 - [x] Survey environment, sibling projects, QB bridge shape.
 - [x] Phase 0: repo skeleton (`858b1be`); API contract `plans/api.md` (`091efac`).
-- [ ] CI workflows.
+- [x] CI workflow (`c74ff31`); release workflow on tags + Dockerfile (`4058946`),
+      untested until the repo exists on GitHub.
 - [x] Phase 1 core: lb-core posting rules for all 25 types (18 rule tests),
-      lb-store company file (15 integration tests). Inventory re-costing on
-      back-dated purchases, JE lines in A/R-A/P as open items: still to do.
-- [ ] Phase 2: server + auth.
-- [ ] Phase 3: QBD read-only import + parity.
-- [ ] Phase 4: web UI.
-- [ ] Phase 5: desktop.
-- [ ] Phase 6: backups, update, tunnel, release.
-- [ ] Phase 7: feeds.
+      lb-store company file (15 integration tests); reconciliation, opening
+      balances, attachments (`ac5475c`). Inventory re-costing on back-dated
+      purchases, JE lines in A/R-A/P as open items: still to do.
+- [x] Phase 2: server API (`84edc4c`), auth integration (`49063f0`), reports API
+      (`c33ee6c`). Feeds/backup/update/tunnel routes: server-ops agent running.
+- [ ] Phase 3: QBD read-only import + parity (agent running).
+- [ ] Phase 4: web UI (phase A agent running; forms, reports UI, auth screens next).
+- [ ] Phase 5: desktop (agent running).
+- [x] Phase 6 libraries: backups, self-update, tunnel (merged); server wiring running.
+- [x] Phase 7 library: feeds (merged); routes running.
 - [ ] Phase 8: parity tail.
 - [ ] Phase 9: native QBW research.
 
@@ -290,19 +315,17 @@ Phases are ordered; each ends usable. **Current step is marked ▶.**
 3. **Bank aggregator.** Recommendation: SimpleFIN first (≈$15/yr, the user holds
    the access token, no developer approval). Plaid needs a developer account and
    production approval per deployment.
-4. **Bridge gaps.** The QB Bridge lacks CreditCardCharge/Credit, Transfer,
+4. **Feeds and the cleared mark** (from `plans/feeds.md`): matching a download
+   marks the register line Cleared. QBD keeps "downloaded/matched" separate from
+   the reconcile check mark. Recommendation: a separate downloaded flag (new
+   migration), so Cleared still means reconciled.
+5. **Auto-add strictness** (feeds): only auto-add when nothing in the register
+   resembles the download. Recommendation: keep it strict.
+6. **Release signing key**: generating the minisign key and setting the GitHub
+   secret `MINISIGN_SECRET_KEY` needs your yes (steps in `plans/self-update.md`).
+7. **Bridge gaps.** The QB Bridge lacks CreditCardCharge/Credit, Transfer,
    VendorCredit and others. Extend the bridge (a separate repo, separate thread),
    or rely on the Web Connector transport?
-
-- **Compute budget:** the machine is shared (6 cores). Every cargo/test run
-  goes through `node ~/.claude/bin/cpu-slots.mjs run --slots 4 --label … -- …`.
-  Cargo's build dir is shared machine-wide (`~/.cargo/build`), so parallel
-  worktree builds take turns on its lock.
-- `ts-rs` exports TypeScript into `web/src/api/generated/` whenever
-  `cargo test` runs (`.cargo/config.toml` sets `TS_RS_EXPORT_DIR`); commit them.
-- `MemoryBooks` helper methods are `add_*`: inherent methods named like the
-  `PostingContext` trait's (`account`, `item`) lose to the trait's `&self`
-  methods at autoref, which gave baffling arity errors.
 
 ## Things not to do
 
