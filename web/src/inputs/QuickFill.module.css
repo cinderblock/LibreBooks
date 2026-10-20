@@ -1,0 +1,72 @@
+.scroll {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.header {
+  display: flex;
+  gap: 8px;
+  padding: 4px 10px;
+  font-size: var(--mantine-font-size-xs);
+  font-weight: 600;
+  color: var(--mantine-color-dimmed);
+  border-bottom: 1px solid var(--mantine-color-default-border);
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+  font-size: var(--mantine-font-size-sm);
+  cursor: pointer;
+  white-space: nowrap;
+  user-select: none;
+}
+
+.row[data-active] {
+  background: var(--mantine-primary-color-light);
+}
+
+.row[data-selected] .name {
+  font-weight: 600;
+}
+
+.row[data-inactive] {
+  color: var(--mantine-color-dimmed);
+}
+
+.name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.path {
+  color: var(--mantine-color-dimmed);
+  font-size: var(--mantine-font-size-xs);
+}
+
+.col {
+  flex: 0 0 auto;
+  min-width: 90px;
+  text-align: right;
+  color: var(--mantine-color-dimmed);
+  font-size: var(--mantine-font-size-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.add {
+  font-style: italic;
+  color: var(--mantine-primary-color-filled);
+}
+
+.chevron {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  width: 100%;
+  color: var(--mantine-color-dimmed);
+}

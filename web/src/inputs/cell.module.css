@@ -1,0 +1,36 @@
+/* Inputs rendered inside grid cells: no chrome of their own, the cell is the box. */
+.cellInput {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  height: 100%;
+  min-height: 30px;
+  padding-inline: 6px;
+}
+
+.cellInput:focus {
+  outline: 2px solid var(--mantine-primary-color-filled);
+  outline-offset: -2px;
+  background: var(--mantine-color-body);
+}
+
+.cellInput[aria-invalid='true'] {
+  outline: 2px solid var(--mantine-color-error);
+  outline-offset: -2px;
+}
+
+.amount {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.tape {
+  font-family: var(--mantine-font-family-monospace);
+  font-size: var(--mantine-font-size-xs);
+  padding: 2px 8px;
+  white-space: nowrap;
+}
+
+.tape[data-error] {
+  color: var(--mantine-color-error);
+}

@@ -1,0 +1,86 @@
+.wrap {
+  overflow-x: auto;
+  border: 1px solid var(--mantine-color-default-border);
+  border-radius: var(--mantine-radius-sm);
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+  font-size: var(--mantine-font-size-sm);
+}
+
+.table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--mantine-color-default-hover);
+  font-weight: 600;
+  font-size: var(--mantine-font-size-xs);
+  padding: 4px 6px;
+  border-bottom: 1px solid var(--mantine-color-default-border);
+  border-right: 1px solid var(--mantine-color-default-border);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.table td {
+  padding: 0;
+  height: 31px;
+  border-bottom: 1px solid var(--mantine-color-default-border);
+  border-right: 1px solid var(--mantine-color-default-border);
+  vertical-align: middle;
+}
+
+.table td :global(.mantine-Input-wrapper),
+.table td :global(.mantine-InputWrapper-root) {
+  margin: 0;
+}
+
+.table tbody tr:nth-child(even of :not(.pad)) td {
+  background: light-dark(var(--mantine-color-gray-0), var(--mantine-color-dark-6));
+}
+
+.table tr[data-error] td:first-child {
+  box-shadow: inset 3px 0 0 var(--mantine-color-error);
+}
+
+.table td[data-invalid] {
+  background: light-dark(var(--mantine-color-red-0), rgba(250, 82, 82, 0.12)) !important;
+}
+
+.table tfoot td {
+  font-weight: 600;
+  padding: 4px 6px;
+  border-bottom: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.actions {
+  text-align: center;
+}
+
+.pad td {
+  height: 31px;
+}
+
+.card[data-error] {
+  border-left: 3px solid var(--mantine-color-error);
+}
+
+.cardFields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.full {
+  flex: 1 1 100%;
+}
+
+.half {
+  flex: 1 1 calc(50% - 4px);
+  min-width: 0;
+}
