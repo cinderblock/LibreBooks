@@ -256,8 +256,12 @@ or `sc create` with a wrapper) that forwards stop as Ctrl+C.
   folder) are pruned too: the server sets `RetentionScope::Destination` on
   each company's config, since the folder/prefix is that company's alone.
   The library default stays `CompanySlug` for shared destinations.
-- **Settings races**: the store re-reads on change, but two processes writing
-  `secrets.age` at the same instant can lose one write (last writer wins).
+- **Secret-store races**: `set`/`delete` hold an exclusive lock on
+  `secrets.lock` (std `File::lock`) across the read-modify-write, so the server
+  and the CLI can't save over each other (test: 12 threads × 5 saves from
+  separate stores; it loses saves without the lock). `server.json` is written
+  by the server alone (the CLI changes settings through the API), so it only
+  has the in-process `change` mutex.
 - **Access check** is tested end to end: lb-tunnel's tests cover the verifier,
   and the server's `a_signed_access_assertion_gets_through` sends a token
   signed with lb-tunnel's test key through the middleware against a local key

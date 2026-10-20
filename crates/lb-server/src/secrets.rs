@@ -151,6 +151,25 @@ impl SecretStore {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
+    /// A lock other processes honour, held across a read-modify-write so the
+    /// server and the CLI (or two CLIs) can't each save over the other's change.
+    /// Released when the handle drops. The lock file sits beside the store.
+    fn exclusive(&self) -> Result<std::fs::File, SecretError> {
+        let path = self.inner.file.with_extension("lock");
+        let dir = path.parent().unwrap_or(Path::new("."));
+        std::fs::create_dir_all(dir).map_err(io(format!("create {}", dir.display())))?;
+        let file = std::fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .read(true)
+            .write(true)
+            .open(&path)
+            .map_err(io(format!("open {}", path.display())))?;
+        file.lock()
+            .map_err(io(format!("lock {}", path.display())))?;
+        Ok(file)
+    }
+
     /// The secrets as they are on disk now (re-read when the file changed).
     fn fresh(&self) -> Result<MutexGuard<'_, Loaded>, SecretError> {
         let mut loaded = self.lock();
@@ -243,6 +262,7 @@ impl SecretStore {
         if !valid_name(name) {
             return Err(SecretError::BadName(name.to_owned()));
         }
+        let _across_processes = self.exclusive()?;
         let mut loaded = self.fresh()?;
         loaded.secrets.insert(
             name.to_owned(),
@@ -253,6 +273,7 @@ impl SecretStore {
 
     /// Remove a secret; `false` if there was none.
     pub fn delete(&self, name: &str) -> Result<bool, SecretError> {
+        let _across_processes = self.exclusive()?;
         let mut loaded = self.fresh()?;
         if loaded.secrets.remove(name).is_none() {
             return Ok(false);
@@ -521,6 +542,31 @@ impl lb_feeds::Secrets for CompanySecrets {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Separate stores on the same files, saving at once from many threads (as
+    /// the server and CLI processes would): every save survives. Without the
+    /// lock file, a save made between another's read and write is lost.
+    #[test]
+    fn concurrent_saves_from_separate_stores_all_survive() {
+        let dir = tempfile::tempdir().unwrap();
+        // Make the key first so the writers don't race to create it.
+        SecretStore::open(dir.path(), None)
+            .set("seed", "0")
+            .unwrap();
+        std::thread::scope(|scope| {
+            for i in 0..12 {
+                let dir = dir.path().to_owned();
+                scope.spawn(move || {
+                    let store = SecretStore::open(&dir, None);
+                    for j in 0..5 {
+                        store.set(&format!("w{i}-{j}"), "v").unwrap();
+                    }
+                });
+            }
+        });
+        let names = SecretStore::open(dir.path(), None).list().unwrap();
+        assert_eq!(names.len(), 1 + 12 * 5, "every save survived");
+    }
 
     #[test]
     fn secrets_round_trip_encrypted_and_never_print() {
