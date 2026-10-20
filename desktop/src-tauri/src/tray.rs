@@ -119,6 +119,9 @@ fn on_menu(app: &AppHandle, event: &MenuEvent) {
                 }
             });
         }
+        // `open_devtools` only exists in debug builds (Tauri's `devtools`
+        // feature); the menu item is debug-only too.
+        #[cfg(debug_assertions)]
         "devtools" => {
             if let Some(w) = app.get_webview_window(MAIN) {
                 w.open_devtools();

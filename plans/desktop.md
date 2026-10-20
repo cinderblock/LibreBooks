@@ -172,33 +172,50 @@ refuses `network.enabled`; `network::start` refuses too; and
 
 ### Needed from lb-server (not changed by this branch)
 
-```rust
-/// The application with requests authenticated by `auth` instead of the state's own mode.
-pub fn router_with_auth(state: AppState, auth: AuthMode) -> Router;
-```
+Originally this branch asked for a `router_with_auth(state, auth)`. lb-server on
+master (after the lb-auth merge, seen at `d15f35d`) already accepts both the
+local token and passkey/device sessions on one state
+(`AuthMode::LocalToken` + `ServerConfig::sessions: Some(Sessions)`), so one
+router can serve both listeners. Remaining needs:
 
-Implementation sketch: a layer inserting `Extension(ListenerAuth(auth))`; the
-`Principal` extractor uses `parts.extensions.get::<ListenerAuth>()` when present,
-else `state.auth`. Plus an `AuthMode` variant for passkey/device sessions. Then
-`network::network_auth` returns that mode and `network::network_router` returns
-`Ok(lb_server::router_with_auth(state.clone(), auth))` — both marked in
-`network.rs`.
+1. **The local token only from loopback peers.** Serve with
+   `into_make_service_with_connect_info::<SocketAddr>()` and, in the
+   `Principal` extractor, accept `AuthMode::LocalToken` only when the peer
+   (`ConnectInfo`) is a loopback address. Otherwise anyone who learned the
+   token could use it from the network as admin "This computer".
+2. **A `Sessions` for the desktop**: an `AuthStore` in the data folder and
+   `public_origin` set to the address phones use. The settings page then needs
+   a way to mint an enrolment link (QR) for a phone's first passkey.
+
+Then `network::network_auth`/`network_router` (marked in `network.rs`) return
+the shared `lb_server::router(state)`.
+
+### When merging with master
+
+`desktop/src-tauri/src/backend.rs` and `network.rs` construct `ServerConfig`;
+master added `sessions: Option<Sessions>`. Add `sessions: None` to both
+(local mode serves only the local token).
 
 ## Thin client: the device-key handshake
 
-Implemented in `device::login` to the contract in `plans/api.md` and
-`plans/auth.md`, **not yet verified against a real server** (the endpoints
-didn't exist in lb-server when written). Assumptions to re-check when lb-auth is
-wired into lb-server:
+`device::login` / `device::enroll` match lb-server and lb-auth **on master as
+of `d15f35d`**, checked by reading that code (this branch predates the merge,
+so they have only run against the fake server in `proxy.rs`'s tests):
 
-- `POST /api/v1/auth/device/enroll {token, public_key, name}` → `{key_id}`;
-  `public_key` = base64url (no padding) of the 32-byte key.
-- `POST /api/v1/auth/device/challenge` (we send `{key_id}`; harmless if
-  ignored) → `{challenge_id, challenge}`, challenge = base64url of 32 bytes.
-- `POST /api/v1/auth/device/login {challenge_id, key_id, signature}` (base64url
-  64-byte signature) → `Set-Cookie: lb_session=…`.
-- `origin` in the signed message = `scheme://host[:port]` of the server URL the
-  desktop was configured with (no trailing slash).
+- `POST /api/v1/auth/device/enroll {token, public_key, name}` →
+  `{user, key: {id, …}}`; `public_key` = base64url of the 32-byte key.
+- `POST /api/v1/auth/device/challenge` → `{challenge_id, challenge}`, the
+  challenge base64url of 32 bytes.
+- `POST /api/v1/auth/device/login {challenge_id, key_id, signature}`
+  (base64url 64-byte signature over
+  `b"librebooks device login v1\0" || challenge || origin`) →
+  `{user, token, expires_at}` plus `Set-Cookie: lb_session`.
+- The server binds the login to the request's `Origin` (or its configured
+  public URL when there's none), and that origin must be one of its relying
+  parties or `extra_device_origins`. The desktop sends `Origin: <server
+  origin>` explicitly, the same string it signs.
+- Upstream, the proxy sends the session as `Authorization: Bearer lbs_…`
+  (lb-server prefers that to the cookie; it also passes the CSRF guard).
 
 The proxy signs in lazily on the first API call, shares one sign-in between
 concurrent requests, and on a `401` with a session signs in again once and
@@ -275,7 +292,9 @@ plus `rpm-build` for rpm bundles. Runtime: WebKitGTK 4.1, and a Secret Service
 5. Thin-client proxy + keychain device key + login handshake (unverified). Done.
 6. Network listener plumbing (refused until passkeys). Done.
 7. Updater. Done (untested end to end: no signing key/releases yet).
-8. ▶ Clippy/tests, launch + screenshot, `cargo tauri build --bundles nsis`.
+8. Clippy/tests, launch + screenshot, `cargo tauri build --bundles nsis`. Done.
+9. ▶ Handed to the parent session to merge (add `sessions: None` to the two
+   `ServerConfig`s, see "When merging with master").
 
 ## Findings / gotchas
 
@@ -300,6 +319,27 @@ plus `rpm-build` for rpm bundles. Runtime: WebKitGTK 4.1, and a Secret Service
   `AppState` (closing company files; warns if anything still holds them).
 - Sync Tauri commands that create windows deadlock on Windows; `open_settings`
   is async.
+- **rust-embed + `allow_missing` (lb-server's `assets.rs`), debug builds on
+  Windows:** if `web/dist` doesn't exist when lb-server compiles, the debug
+  lookup keeps the *non-canonical* folder path (`…\crates\lb-server\../../web/dist`)
+  and rejects every file whose canonical path (`\\?\C:\…\web\dist\…`) doesn't
+  start with it, so the UI stays "not embedded" even after `bun run build`
+  until lb-server is recompiled (`cargo clean -p lb-server`). Seen as "This
+  build has no web UI embedded" in the desktop window. lb-server's (and the
+  CLI's) concern; reported to the parent session rather than fixed here.
+- `WebviewWindow::open_devtools` exists only in debug builds (Tauri's
+  `devtools` feature is on under `cfg(debug_assertions)` only); a debug
+  `cargo build` passes but the release `cargo tauri build` fails. Gate callers
+  with `#[cfg(debug_assertions)]`.
+- `cargo tauri build` prints "STATIC_VCRUNTIME is deprecated": the Tauri CLI
+  (2.10) sets that env var itself, so the warning appears whatever `build.rs`
+  says. `build.rs` asks for the static runtime explicitly
+  (`WindowsAttributes::static_vc_runtime(true)`); the warning is harmless.
+- The CPU broker can fail with `EPERM … .claude\compute\.mutex` when another
+  job holds it at the same moment; just retry.
+- Screenshots of WebView2 windows: `PrintWindow(hwnd, hdc, PW_RENDERFULLCONTENT)`
+  on the process's `MainWindowHandle` (PowerShell's `FindWindow` with `$null`
+  passes `""`, not NULL, and finds nothing).
 
 ## Progress log
 
@@ -311,9 +351,18 @@ plus `rpm-build` for rpm bundles. Runtime: WebKitGTK 4.1, and a Secret Service
 - [x] Tray, single instance, window state, keys, context menu
 - [x] Shell UI
 - [x] Updater (needs a signing key to be exercised)
-- [ ] Clippy clean, tests pass
-- [ ] Launched, self-test, screenshot
-- [ ] `cargo tauri build --bundles nsis`
+- [x] Clippy clean, tests pass (18 unit/integration tests in the crate)
+- [x] Launched (Windows 11, debug): first-run welcome window → "Start
+      LibreBooks" → backend + main window; self-test
+      `session=200 without-token=401`; single instance (second launch exits 0,
+      first focused); closing the main window logs "quitting" then "company
+      files closed"; thin-client mode serves the SPA via the proxy and answers
+      `device_not_enrolled`
+- [x] Device handshake aligned with master's lb-auth (read, not run)
+- [x] `cargo tauri build --bundles nsis` →
+      `target/release/bundle/nsis/LibreBooks_0.1.0_x64-setup.exe` (7.0 MB;
+      exe 26.7 MB with the web UI embedded). The release exe launched, served
+      the books, showed the UI and quit cleanly ("company files closed").
 
 ## Open questions for the user
 

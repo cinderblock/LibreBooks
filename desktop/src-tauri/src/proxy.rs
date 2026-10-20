@@ -30,7 +30,7 @@ use subtle::ConstantTimeEq;
 use tokio::sync::Mutex;
 use url::Url;
 
-use crate::device::{self, DeviceError, Identity, SESSION_COOKIE, Session};
+use crate::device::{self, DeviceError, Identity, Session};
 
 /// Largest request body forwarded (the server's own limit).
 const MAX_BODY: usize = 64 * 1024 * 1024;
@@ -156,15 +156,15 @@ impl Proxy {
     /// Drop `stale` if it is still the current session.
     async fn invalidate(&self, stale: &Session) {
         let mut guard = self.session.lock().await;
-        if guard.as_ref().is_some_and(|s| s.cookie == stale.cookie) {
+        if guard.as_ref().is_some_and(|s| s.token == stale.token) {
             *guard = None;
         }
     }
 
     /// Remember a session the server refreshed via `Set-Cookie`.
     async fn refresh(&self, headers: &HeaderMap) {
-        if let Some(cookie) = device::session_from_headers(headers) {
-            *self.session.lock().await = Some(Session { cookie });
+        if let Some(token) = device::session_from_headers(headers) {
+            *self.session.lock().await = Some(Session { token });
         }
     }
 }
@@ -326,10 +326,12 @@ async fn forward(State(p): State<Arc<Proxy>>, req: Request) -> Response {
             },
         };
         let mut h = headers.clone();
+        // lb-server takes a session as a bearer token (it prefers that to the
+        // cookie), which also passes its CSRF guard.
         if let Some(s) = &session
-            && let Ok(v) = HeaderValue::from_str(&format!("{SESSION_COOKIE}={}", s.cookie))
+            && let Ok(v) = HeaderValue::from_str(&format!("Bearer {}", s.token))
         {
-            h.insert(header::COOKIE, v);
+            h.insert(header::AUTHORIZATION, v);
         }
         let resp = p
             .client
@@ -483,13 +485,23 @@ mod tests {
             .route(
                 "/api/v1/auth/device/login",
                 post(
-                    |State(f): State<Arc<Fake>>, Json(body): Json<serde_json::Value>| async move {
+                    |State(f): State<Arc<Fake>>,
+                     headers: HeaderMap,
+                     Json(body): Json<serde_json::Value>| async move {
                         let sig: [u8; 64] = B64
                             .decode(body["signature"].as_str().unwrap())
                             .unwrap()
                             .try_into()
                             .unwrap();
-                        let msg = device::login_message(&[9u8; 32], &f.origin);
+                        // Like lb-server: the login is bound to the request's Origin.
+                        let origin = headers
+                            .get(header::ORIGIN)
+                            .and_then(|v| v.to_str().ok())
+                            .unwrap_or("");
+                        if origin != f.origin {
+                            return StatusCode::BAD_REQUEST.into_response();
+                        }
+                        let msg = device::login_message(&[9u8; 32], origin);
                         if f.public_key
                             .verify_strict(&msg, &Signature::from_bytes(&sig))
                             .is_err()
@@ -497,14 +509,14 @@ mod tests {
                             return StatusCode::UNAUTHORIZED.into_response();
                         }
                         let n = f.logins.fetch_add(1, Ordering::SeqCst) + 1;
-                        let cookie = format!("s{n}");
-                        *f.valid.lock().unwrap() = cookie.clone();
+                        let token = format!("lbs_{n}");
+                        *f.valid.lock().unwrap() = token.clone();
                         (
                             [(
                                 header::SET_COOKIE,
-                                format!("lb_session={cookie}; HttpOnly; SameSite=Strict"),
+                                format!("lb_session={token}; HttpOnly; SameSite=Strict"),
                             )],
-                            Json(serde_json::json!({})),
+                            Json(serde_json::json!({ "user": {}, "token": token })),
                         )
                             .into_response()
                     },
@@ -514,20 +526,18 @@ mod tests {
                 "/api/v1/session",
                 get(
                     |State(f): State<Arc<Fake>>, headers: HeaderMap| async move {
-                        let cookie = headers
-                            .get(header::COOKIE)
+                        let auth = headers
+                            .get(header::AUTHORIZATION)
                             .and_then(|v| v.to_str().ok())
                             .unwrap_or("")
                             .to_owned();
                         let csrf = headers.contains_key("x-librebooks");
-                        let leaked = headers.contains_key(header::AUTHORIZATION);
-                        if cookie != format!("lb_session={}", f.valid.lock().unwrap()) {
+                        let cookie = headers.contains_key(header::COOKIE);
+                        if auth != format!("Bearer {}", f.valid.lock().unwrap()) {
                             return StatusCode::UNAUTHORIZED.into_response();
                         }
-                        Json(
-                            serde_json::json!({ "cookie": cookie, "csrf": csrf, "leaked": leaked }),
-                        )
-                        .into_response()
+                        Json(serde_json::json!({ "auth": auth, "csrf": csrf, "cookie": cookie }))
+                            .into_response()
                     },
                 ),
             )
@@ -583,19 +593,21 @@ mod tests {
             .unwrap();
         assert_eq!(r.status(), 401);
 
-        // With it: signed in by device key, forwarded with the session cookie
-        // and the CSRF header, and without our bearer token.
+        // With it: signed in by device key, forwarded with the session as the
+        // bearer token (our local token replaced, not passed on) and the CSRF
+        // header, and no cookies.
         let r = client
             .get(format!("{base}/api/v1/session"))
             .bearer_auth("tok")
+            .header(header::COOKIE, "something=local")
             .send()
             .await
             .unwrap();
         assert_eq!(r.status(), 200);
         let v: serde_json::Value = r.json().await.unwrap();
-        assert_eq!(v["cookie"], "lb_session=s1");
+        assert_eq!(v["auth"], "Bearer lbs_1");
         assert_eq!(v["csrf"], true);
-        assert_eq!(v["leaked"], false);
+        assert_eq!(v["cookie"], false);
         assert_eq!(fake.logins.load(Ordering::SeqCst), 1);
 
         // The server forgets the session: the proxy signs in again and retries.

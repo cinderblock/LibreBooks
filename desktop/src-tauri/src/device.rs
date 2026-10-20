@@ -179,9 +179,13 @@ async fn post_json(
     url: Url,
     body: &serde_json::Value,
 ) -> Result<reqwest::Response, DeviceError> {
+    // The server binds a device login to the request's Origin, and the
+    // signature covers the same origin: say it explicitly.
+    let origin = url.origin().ascii_serialization();
     let resp = client
         .post(url.clone())
         .header("X-LibreBooks", "1")
+        .header(reqwest::header::ORIGIN, origin)
         .json(body)
         .send()
         .await
@@ -215,9 +219,14 @@ pub async fn enroll(
     token: &str,
     name: &str,
 ) -> Result<DeviceEnrollment, DeviceError> {
+    // `{ user, key: DeviceKeyInfo { id, … } }` (lb-auth `enrol_device`).
+    #[derive(Deserialize)]
+    struct Key {
+        id: String,
+    }
     #[derive(Deserialize)]
     struct Enrolled {
-        key_id: String,
+        key: Key,
     }
     let origin = base.origin().ascii_serialization();
     let key = DeviceKey::generate();
@@ -238,9 +247,9 @@ pub async fn enroll(
     }
     .await;
     match result {
-        Ok(Enrolled { key_id }) => Ok(DeviceEnrollment {
+        Ok(Enrolled { key }) => Ok(DeviceEnrollment {
             origin,
-            key_id,
+            key_id: key.id,
             name: name.to_owned(),
             public_key,
         }),
@@ -271,8 +280,8 @@ pub async fn load_identity(enrollment: DeviceEnrollment) -> Result<Identity, Dev
 /// A signed-in session with a remote server.
 #[derive(Clone)]
 pub struct Session {
-    /// The `lb_session` cookie value.
-    pub cookie: String,
+    /// The session token (`lbs_…`), sent upstream as `Authorization: Bearer`.
+    pub token: String,
 }
 
 impl std::fmt::Debug for Session {
@@ -297,15 +306,15 @@ pub fn session_from_headers(headers: &reqwest::header::HeaderMap) -> Option<Stri
 /// Sign in to `base` with this computer's device key.
 ///
 /// ┌────────────────────────────────────────────────────────────────────────┐
-/// │ DEVICE-KEY LOGIN HANDSHAKE: written to the contract in `plans/api.md`   │
-/// │ and `plans/auth.md` (decision 9) but NOT YET VERIFIED against a real    │
-/// │ server: `/auth/device/*` doesn't exist in lb-server yet. Assumptions:   │
-/// │  - `POST auth/device/challenge` → `{challenge_id, challenge}` with the  │
-/// │    challenge as 32 bytes, base64url without padding;                    │
-/// │  - the signature is over `login_message(challenge, origin)`, sent as    │
-/// │    base64url without padding;                                           │
-/// │  - `POST auth/device/login` sets the `lb_session` cookie.               │
-/// │ Re-check these once lb-auth is wired into lb-server.                    │
+/// │ DEVICE-KEY LOGIN HANDSHAKE: matches lb-server/lb-auth on master as of   │
+/// │ d15f35d, checked by reading that code; this branch predates the merge,  │
+/// │ so it has only run against the fake server in `proxy`'s tests. Shape:   │
+/// │  - `POST auth/device/challenge` → `{challenge_id, challenge}`, the      │
+/// │    challenge 32 bytes base64url;                                        │
+/// │  - signature (base64url) over `login_message(challenge, origin)`, with  │
+/// │    `Origin: <origin>` sent so the server binds to the same origin (it   │
+/// │    must be one of its relying-party or `extra_device_origins`);         │
+/// │  - `POST auth/device/login` → `{user, token, expires_at}` + cookie.     │
 /// └────────────────────────────────────────────────────────────────────────┘
 pub async fn login(
     client: &reqwest::Client,
@@ -322,10 +331,14 @@ pub async fn login(
     if enrollment.origin != origin {
         return Err(DeviceError::NotEnrolled);
     }
+    #[derive(Deserialize)]
+    struct LoggedIn {
+        token: Option<String>,
+    }
     let challenge: Challenge = post_json(
         client,
         api(base, "auth/device/challenge")?,
-        &serde_json::json!({ "key_id": enrollment.key_id }),
+        &serde_json::json!({}),
     )
     .await?
     .json()
@@ -345,10 +358,13 @@ pub async fn login(
         }),
     )
     .await?;
-    let cookie = session_from_headers(resp.headers()).ok_or_else(|| {
-        DeviceError::Protocol("signed in, but the server sent no session cookie".into())
+    // The token is in the body for thin clients; the cookie is the fallback.
+    let from_cookie = session_from_headers(resp.headers());
+    let from_body = resp.json::<LoggedIn>().await.ok().and_then(|b| b.token);
+    let token = from_body.or(from_cookie).ok_or_else(|| {
+        DeviceError::Protocol("signed in, but the server sent no session token".into())
     })?;
-    Ok(Session { cookie })
+    Ok(Session { token })
 }
 
 #[cfg(test)]

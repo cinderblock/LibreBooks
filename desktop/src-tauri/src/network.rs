@@ -14,21 +14,21 @@
 //!
 //! Two states would open every company file twice and split the event bus (a
 //! check entered on a phone would not appear in the desktop's open register), so
-//! the state must be shared and the auth chosen per listener. lb-server today
-//! keeps `AuthMode` inside `AppState`; it needs one small addition, described in
-//! `plans/desktop.md` ("Needed from lb-server"):
+//! the state must be shared.
 //!
-//! ```ignore
-//! /// The application with requests authenticated by `auth` rather than the state's own mode.
-//! pub fn router_with_auth(state: AppState, auth: AuthMode) -> Router;
-//! ```
+//! lb-server on master (after the lb-auth merge) already lets one state accept
+//! both: `AuthMode::LocalToken` plus `ServerConfig::sessions: Some(Sessions)`.
+//! What's still missing, described in `plans/desktop.md` ("Needed from
+//! lb-server"): the local token must only be accepted from **loopback peers**
+//! (serve with `into_make_service_with_connect_info` and check `ConnectInfo`
+//! in the `Principal` extractor), so the network listener can safely share the
+//! router. Then this module only needs the desktop's own `Sessions` (an
+//! `AuthStore` in the data folder, and the address people use as
+//! `public_origin`).
 //!
-//! (implemented by a layer that puts the listener's `AuthMode` in the request
-//! extensions, which the `Principal` extractor prefers over `state.auth`).
-//!
-//! Until passkey sessions land, [`available`] refuses, the settings page shows
-//! why, and nothing listens beyond loopback. `lb_server::check_bind` is a second
-//! line of defence: it refuses `AuthMode::Open` on a non-loopback address.
+//! Until then [`available`] refuses, the settings page shows why, and nothing
+//! listens beyond loopback. `lb_server::check_bind` is a second line of
+//! defence: it refuses unauthenticated serving on a non-loopback address.
 
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -62,18 +62,19 @@ pub fn available() -> Result<(), NetworkError> {
     network_auth().map(|_| ())
 }
 
-/// How network clients authenticate. Passkey/device-key sessions from lb-auth,
-/// once lb-server exposes them as an `AuthMode`. Never `Open`, never the local
-/// token (which must not leave this computer).
+/// How network clients authenticate: passkey/device-key sessions (lb-auth).
+/// Never `Open`, and never the local token (which must not leave this
+/// computer).
 fn network_auth() -> Result<AuthMode, NetworkError> {
     Err(NetworkError::NeedsPasskeys)
 }
 
 /// The router for the network listener: the shared state, network auth.
 fn network_router(_state: &AppState, _auth: AuthMode) -> Result<Router, NetworkError> {
-    // Becomes `Ok(lb_server::router_with_auth(state.clone(), auth))` once that
-    // exists. Using `lb_server::router(state)` here would apply the *local*
-    // auth mode to network clients, so it stays refused instead.
+    // Becomes `Ok(lb_server::router(state.clone()))` once the state carries
+    // `Sessions` and lb-server accepts the local token only from loopback
+    // peers. Before that, sharing the router would let network clients use
+    // the local token's auth mode, so it stays refused.
     Err(NetworkError::NeedsPasskeys)
 }
 
