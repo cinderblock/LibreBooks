@@ -7,7 +7,7 @@ use jiff::{Timestamp, Zoned};
 use lb_store::Books;
 use serde::{Deserialize, Serialize};
 
-use crate::config::{BackupConfig, Destination, Encryption, Retention};
+use crate::config::{BackupConfig, Destination, Encryption, Retention, RetentionScope};
 use crate::dest::Store;
 use crate::dest::local::blocking;
 use crate::manifest::{self, EncryptionKind, MANIFEST_SUFFIX, Manifest};
@@ -185,7 +185,11 @@ pub async fn backup_now(
             Ok(store) => {
                 outcome.stored = true;
                 let now = Zoned::new(Timestamp::now(), tz.clone());
-                match prune(&store, &company_slug, &config.retention, &now).await {
+                let scope = match config.retention_scope {
+                    RetentionScope::CompanySlug => Some(company_slug.as_str()),
+                    RetentionScope::Destination => None,
+                };
+                match prune(&store, scope, &config.retention, &now).await {
                     Ok(pruned) => outcome.pruned = pruned,
                     Err(e) => {
                         tracing::warn!(destination = %outcome.destination, error = %e, "pruning failed");
@@ -238,13 +242,15 @@ async fn store_one(
 
 /// Apply retention to one company's backups in one destination. Returns the ids
 /// deleted.
+/// Apply `retention` to the backups under `company_slug` (or, with `None`, to
+/// every backup in the store: a destination that holds one company).
 async fn prune(
     store: &Store,
-    company_slug: &str,
+    company_slug: Option<&str>,
     retention: &Retention,
     now: &Zoned,
 ) -> Result<Vec<String>> {
-    let manifests = read_manifests(store, Some(company_slug)).await?;
+    let manifests = read_manifests(store, company_slug).await?;
     let dated: Vec<Dated> = manifests
         .iter()
         .map(|m| Dated::new(m.id.clone(), m.created_at))

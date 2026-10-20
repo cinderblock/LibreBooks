@@ -229,6 +229,9 @@ pub fn load_or_create(data_dir: &Path) -> std::io::Result<(PathBuf, ServerSettin
 pub fn company_backup_config(config: &BackupConfig, company: CompanyId) -> BackupConfig {
     let id = company.to_string();
     let mut out = config.clone();
+    // The folder (or key prefix) below is this company's alone, so retention
+    // may prune backups made under an earlier name too.
+    out.retention_scope = lb_backup::RetentionScope::Destination;
     for d in &mut out.destinations {
         match d {
             Destination::Local { dir } => *dir = dir.join(&id),

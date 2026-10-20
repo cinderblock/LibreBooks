@@ -10,8 +10,8 @@ use age::secrecy::{ExposeSecret, SecretString};
 use jiff::SignedDuration;
 use lb_backup::{
     BackupConfig, BackupError, Destination, Encryption, EncryptionKind, EnvAndFiles, Retention,
-    Schedule, Scheduler, SecretRef, SecretResolver, Unlock, backup_now, export_lbk, import_lbk,
-    list_backups, restore, verify,
+    RetentionScope, Schedule, Scheduler, SecretRef, SecretResolver, Unlock, backup_now, export_lbk,
+    import_lbk, list_backups, restore, verify,
 };
 use lb_store::Books;
 
@@ -470,4 +470,68 @@ async fn wait_for(s: &Scheduler, n: usize) -> lb_backup::SchedulerStatus {
         );
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
+}
+
+/// A renamed company's backups sit under its old slug. In a destination of its
+/// own (the server's per-company folders) retention covers them too; in a
+/// shared one it stays within the current slug.
+#[tokio::test]
+async fn a_renamed_companys_old_backups_age_out_in_its_own_destination() {
+    let dir = tempfile::tempdir().unwrap();
+    let (books, _) = common::company(dir.path(), "Acme");
+    let mut config = local(dir.path());
+    config.retention = Retention {
+        keep_last: 1,
+        daily: 0,
+        weekly: 0,
+        monthly: 0,
+        yearly: 0,
+    };
+    backup_now(&books, "Acme", &config, &EnvAndFiles)
+        .await
+        .unwrap();
+    tokio::time::sleep(Duration::from_millis(5)).await;
+
+    // Shared destination: the rename starts a new folder and the old one stays.
+    let r = backup_now(&books, "Acme Widgets", &config, &EnvAndFiles)
+        .await
+        .unwrap();
+    assert_eq!(r.destinations[0].pruned, Vec::<String>::new());
+    let slugs = |entries: Vec<lb_backup::BackupEntry>| -> Vec<String> {
+        let mut v: Vec<String> = entries
+            .into_iter()
+            .map(|e| e.manifest.company_slug)
+            .collect();
+        v.sort();
+        v
+    };
+    let all = list_backups(&config.destinations[0], &EnvAndFiles, None)
+        .await
+        .unwrap();
+    assert_eq!(slugs(all), ["acme", "acme-widgets"]);
+    tokio::time::sleep(Duration::from_millis(5)).await;
+
+    // A destination of its own: everything in it is this company's.
+    config.retention_scope = RetentionScope::Destination;
+    let r = backup_now(&books, "Acme Widgets", &config, &EnvAndFiles)
+        .await
+        .unwrap();
+    assert_eq!(
+        r.destinations[0].pruned.len(),
+        2,
+        "{:?}",
+        r.destinations[0].pruned
+    );
+    let all = list_backups(&config.destinations[0], &EnvAndFiles, None)
+        .await
+        .unwrap();
+    assert_eq!(slugs(all), ["acme-widgets"]);
+    assert!(
+        !dir.path().join("backups").join("acme").exists()
+            || std::fs::read_dir(dir.path().join("backups").join("acme"))
+                .unwrap()
+                .count()
+                == 0,
+        "the old slug's folder is empty"
+    );
 }

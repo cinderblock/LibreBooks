@@ -41,7 +41,7 @@ pub mod scheduler;
 pub mod secret;
 pub mod sigv4;
 
-pub use config::{BackupConfig, Destination, Encryption, Retention, Schedule};
+pub use config::{BackupConfig, Destination, Encryption, Retention, RetentionScope, Schedule};
 pub use lbk::{PortableManifest, export_lbk, import_lbk};
 pub use manifest::{EncryptionKind, Manifest, slug};
 pub use retention::{Dated, plan_retention};

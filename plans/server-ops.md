@@ -253,7 +253,9 @@ or `sc create` with a wrapper) that forwards stop as Ctrl+C.
   the upload to `.restore/` under the data folder, then `import_lbk`); the CLI's
   `backup restore x.lbk` does the same from a path.
 - **A renamed company's older backups** (under its old slug, inside its id
-  folder) are listed but no longer pruned by retention.
+  folder) are pruned too: the server sets `RetentionScope::Destination` on
+  each company's config, since the folder/prefix is that company's alone.
+  The library default stays `CompanySlug` for shared destinations.
 - **Settings races**: the store re-reads on change, but two processes writing
   `secrets.age` at the same instant can lose one write (last writer wins).
 - **Access check success path** is tested in lb-tunnel (signed JWTs against a

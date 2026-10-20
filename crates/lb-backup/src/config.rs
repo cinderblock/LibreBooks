@@ -31,6 +31,25 @@ pub struct BackupConfig {
     /// Where the working copy is made. `None`: next to the company file (same disk,
     /// and `/tmp` is often a small RAM disk).
     pub work_dir: Option<PathBuf>,
+    /// Which backups in a destination retention may prune.
+    pub retention_scope: RetentionScope,
+}
+
+/// Which backups retention considers its own. Backups are filed under the
+/// company's name slug, so a renamed company starts a new folder; whether the
+/// old folder is still "this company" depends on who else shares the
+/// destination.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum RetentionScope {
+    /// Only backups under the current name's slug: safe when companies share a
+    /// destination, but a renamed company's older backups are never pruned.
+    #[default]
+    CompanySlug,
+    /// Everything in the destination: for a destination that holds one company
+    /// (the server gives each company its own folder or key prefix), so backups
+    /// made under earlier names age out too.
+    Destination,
 }
 
 impl Default for BackupConfig {
@@ -43,6 +62,7 @@ impl Default for BackupConfig {
             compression_level: 9,
             time_zone: None,
             work_dir: None,
+            retention_scope: RetentionScope::CompanySlug,
         }
     }
 }
@@ -262,6 +282,7 @@ mod tests {
             compression_level: 3,
             time_zone: Some("America/Los_Angeles".into()),
             work_dir: None,
+            retention_scope: RetentionScope::Destination,
         };
         let json = serde_json::to_string(&c).unwrap();
         assert!(json.contains("\"every\":\"PT6H\""), "{json}");
