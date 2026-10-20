@@ -11,7 +11,7 @@ import { useState } from 'react';
 import { useApi, useCompanyId } from '~/api/context';
 import { describeError } from '~/api/errors';
 import { useAccountIndex, useAccounts, useFeedConnections, useFeedInvalidate } from '~/api/hooks';
-import { asNumber, type FeedConnection, type ProviderSettings, type StatementAccount } from '~/api/types';
+import type { FeedConnection, ProviderSettings, StatementAccount } from '~/api/types';
 import { DateField } from '~/inputs/DateField';
 import { AccountQuickFill } from '~/inputs/pickers';
 import { formatDate } from '~/lib/dates';
@@ -62,7 +62,7 @@ export function FeedConnections({ onImport }: { onImport(accountId: string | nul
   const remove = async (c: FeedConnection) => {
     if (!window.confirm(`Remove "${c.name}"? Its downloads stay; its credentials are deleted unless another connection uses them.`)) return;
     try {
-      await api.deleteFeedConnection(co, c.id, asNumber(c.edit_seq));
+      await api.deleteFeedConnection(co, c.id, c.edit_seq);
       refresh();
     } catch (e) {
       notifications.show({ color: 'red', message: describeError(e) });

@@ -14,10 +14,13 @@ import type {
   DateRange,
   Entity,
   FeedQuery,
+  ImportStatus,
   Item,
   ListName,
   ListQuery,
   ListRecords,
+  NameBalance,
+  ParityStatus,
   ReconciliationView,
   RegisterResponse,
   ReportRequest,
@@ -134,16 +137,11 @@ export function useAttachments(query: AttachmentQuery = {}, enabled = true) {
   return useQuery({ queryKey: qk.attachments(co, query), queryFn: () => api.attachments(co, query), enabled, staleTime: 15_000 });
 }
 
-export function useQbdSettings(enabled = true) {
-  const api = useApi();
-  const co = useCompanyId();
-  return useQuery({ queryKey: qk.qbdSettings(co), queryFn: () => api.qbdSettings(co), enabled, staleTime: 30_000 });
-}
-
 /**
- * Where the import is. While a sync runs the server long-polls (`wait`) and
- * we ask again as soon as it answers, so the progress bar moves without a
- * fast timer; idle, a plain fetch now and then.
+ * The QuickBooks import in one document (`ImportStatus`): the settings, what
+ * is set, the running job and the last reports. While a job runs the server
+ * long-polls (`wait`) and we ask again as soon as it answers, so the progress
+ * bar moves without a fast timer; idle, a plain fetch now and then.
  */
 export function useQbdStatus(enabled = true) {
   const api = useApi();
@@ -152,7 +150,7 @@ export function useQbdStatus(enabled = true) {
   return useQuery({
     queryKey: qk.qbdStatus(co),
     queryFn: () => {
-      const running = qc.getQueryData<{ running: boolean }>(qk.qbdStatus(co))?.running;
+      const running = !!qc.getQueryData<ImportStatus>(qk.qbdStatus(co))?.running;
       return api.qbdStatus(co, running ? 20 : undefined);
     },
     enabled,
@@ -161,10 +159,21 @@ export function useQbdStatus(enabled = true) {
   });
 }
 
+/** The last parity report; polled the same way while a parity job runs. */
 export function useQbdParity(enabled = true) {
   const api = useApi();
   const co = useCompanyId();
-  return useQuery({ queryKey: qk.qbdParity(co), queryFn: () => api.qbdParity(co), enabled, staleTime: 30_000 });
+  const qc = useQueryClient();
+  return useQuery({
+    queryKey: qk.qbdParity(co),
+    queryFn: () => {
+      const running = !!qc.getQueryData<ParityStatus>(qk.qbdParity(co))?.running;
+      return api.qbdParity(co, running ? 20 : undefined);
+    },
+    enabled,
+    staleTime: 2_000,
+    refetchInterval: (q) => (q.state.data?.running ? 400 : false),
+  });
 }
 
 export function useCompanyInfo() {
@@ -258,6 +267,19 @@ export function useBalances(range: Partial<DateRange> = {}) {
 export function useBalanceMap(): Map<string, number> {
   const { data } = useBalances();
   return useMemo(() => new Map((data ?? []).map((b) => [b.account_id, b.debit_positive])), [data]);
+}
+
+/** Per-name A/R and A/P balances with jobs rolled up (the centres' Balance and Balance Total). */
+export function useNameBalances(enabled = true) {
+  const api = useApi();
+  const co = useCompanyId();
+  return useQuery({ queryKey: qk.nameBalances(co), queryFn: () => api.nameBalances(co), enabled, staleTime: 30_000 });
+}
+
+/** entity id → its `NameBalance`; names with nothing open are absent (a zero balance). */
+export function useNameBalanceMap(enabled = true): Map<string, NameBalance> {
+  const { data } = useNameBalances(enabled);
+  return useMemo(() => new Map((data ?? []).map((b) => [b.entity_id, b])), [data]);
 }
 
 /** The next number in a series: per bank account for checks, per type otherwise. */

@@ -20,7 +20,9 @@ import type {
   ImportSettings,
   Item,
   MergeRequest,
+  NameBalance,
   NewEnrolment,
+  QbdParityOptions,
   QbdSyncOptions,
   RestoreRequest,
   Role,
@@ -99,6 +101,8 @@ const STRESS_ACCOUNT_ID = '00000000-0000-4000-9fff-000000000001';
 const AR_TYPES: TxnType[] = ['Invoice', 'CreditMemo', 'StatementCharge'];
 const AP_TYPES: TxnType[] = ['Bill', 'VendorCredit'];
 const PAYMENT_TYPES: TxnType[] = ['ReceivePayment', 'BillPaymentCheck', 'BillPaymentCreditCard'];
+/** Open items that count *against* a name's balance (what the server's `name_balances` treats as credits). */
+const CREDIT_TYPES: TxnType[] = ['CreditMemo', 'ReceivePayment', 'VendorCredit', 'BillPaymentCheck', 'BillPaymentCreditCard'];
 
 export class FixtureApiClient implements ApiClient {
   readonly mode = 'fixtures' as const;
@@ -195,10 +199,10 @@ export class FixtureApiClient implements ApiClient {
     });
   }
 
-  /** The books' closing date lock, as the server applies it to every write. */
+  /** The books' closing date lock, as the server applies it to every write: 423 `closed_period` with the date. */
   private checkClosed(date: string) {
     if (this.closing && date <= this.closing) {
-      throw new ApiError(409, 'closed_period', `The books are closed through ${this.closing}; this transaction is dated inside the closed period.`, { closing_date: this.closing });
+      throw new ApiError(423, 'closed_period', `The books are closed through ${this.closing}; this transaction is dated inside the closed period.`, { closing_date: this.closing });
     }
   }
 
@@ -722,15 +726,14 @@ export class FixtureApiClient implements ApiClient {
         memo: s.txn.memo ?? mine[0]?.memo ?? null,
         amount,
         cleared,
-        downloaded: false,
+        // QBD's lightning bolt: a bank feed matched or added this line.
+        downloaded: this.downloaded.get(s.txn.id)?.has(accountId) ?? false,
         balance,
         is_void: s.txn.is_void,
         edit_seq: s.txn.edit_seq,
         due_date: s.txn.due_date,
         open_balance: this.openBalance(s, applied),
-        // QBD's lightning bolt: a bank feed matched or added this line (not yet in the generated type).
-        ...(this.downloaded.get(s.txn.id)?.has(accountId) ? { downloaded: true } : {}),
-      } as RegisterLine);
+      });
     }
     return { opening, lines };
   }
@@ -798,6 +801,57 @@ export class FixtureApiClient implements ApiClient {
   balances(co: CompanyId, range: Partial<DateRange> = {}): Promise<AccountBalance[]> {
     this.checkCompany(co);
     return this.delay(() => this.balanceRows(range));
+  }
+
+  /**
+   * `GET /balances/names`, built from open balances as the server's
+   * `name_balances` is: a charge counts what is still owed on it, a credit
+   * (credit memo, unapplied payment, vendor credit, unapplied bill payment)
+   * counts against; a name's `*_total` adds its jobs. Names with nothing open
+   * are absent, parents appear for their jobs' totals.
+   */
+  private nameBalanceRows(): NameBalance[] {
+    const applied = this.appliedTo();
+    const own = new Map<string, { receivable: number; payable: number }>();
+    for (const s of this.txnStore.values()) {
+      const t = s.txn;
+      if (t.is_void || !t.entity_id) continue;
+      const open = this.openBalance(s, applied);
+      if (!open) continue;
+      const receivable = AR_TYPES.includes(t.txn_type) || t.txn_type === 'ReceivePayment';
+      const payable = AP_TYPES.includes(t.txn_type) || t.txn_type === 'BillPaymentCheck' || t.txn_type === 'BillPaymentCreditCard';
+      if (!receivable && !payable) continue;
+      const amount = CREDIT_TYPES.includes(t.txn_type) ? -open : open;
+      const b = own.get(t.entity_id) ?? { receivable: 0, payable: 0 };
+      if (receivable) b.receivable += amount;
+      else b.payable += amount;
+      own.set(t.entity_id, b);
+    }
+    for (const [id, b] of own) if (b.receivable === 0 && b.payable === 0) own.delete(id);
+    // Roll each balance up to the name's parents.
+    const parents = new Map(this.lists.entities.map((e) => [e.id, e.parent_id]));
+    const totals = new Map<string, { receivable: number; payable: number }>();
+    for (const [id, b] of own) {
+      let at: string | null | undefined = id;
+      for (let hops = 0; at && hops < 16; hops++) {
+        const t = totals.get(at) ?? { receivable: 0, payable: 0 };
+        t.receivable += b.receivable;
+        t.payable += b.payable;
+        totals.set(at, t);
+        at = parents.get(at);
+      }
+    }
+    return [...totals]
+      .map(([entity_id, t]) => {
+        const o = own.get(entity_id);
+        return { entity_id, receivable: o?.receivable ?? 0, payable: o?.payable ?? 0, receivable_total: t.receivable, payable_total: t.payable };
+      })
+      .sort((a, b) => a.entity_id.localeCompare(b.entity_id));
+  }
+
+  nameBalances(co: CompanyId): Promise<NameBalance[]> {
+    this.checkCompany(co);
+    return this.delay(() => this.nameBalanceRows());
   }
 
   /**
@@ -1482,26 +1536,26 @@ export class FixtureApiClient implements ApiClient {
   attachmentUrl(_co: CompanyId, id: string) {
     return this.admin.attachmentUrl(id);
   }
-  qbdSettings(co: CompanyId) {
-    return this.adm(() => this.admin.qbdSettings(), co);
+  qbdStatus(co: CompanyId, wait?: number) {
+    this.checkCompany(co);
+    // Long-poll like the server: answer when the running job finishes, or when `wait` runs out.
+    return this.admin.qbdWaitIdle(wait ?? 0).then(() => this.delay(() => this.admin.qbdStatus()));
   }
-  putQbdSettings(co: CompanyId, settings: ImportSettings) {
-    return this.adm(() => this.admin.putQbdSettings(settings), co);
-  }
-  qbdStatus(co: CompanyId, _wait?: number) {
-    return this.adm(() => this.admin.qbdStatus(), co);
-  }
-  qbdParity(co: CompanyId, _wait?: number) {
-    return this.adm(() => this.admin.qbdParity(), co);
+  putQbdSettings(co: CompanyId, settings: ImportSettings, bridgeKey?: string | null) {
+    return this.adm(() => this.admin.putQbdSettings(settings, bridgeKey), co);
   }
   qbdSync(co: CompanyId, opts?: QbdSyncOptions) {
     return this.adm(() => this.admin.qbdSync(opts), co);
   }
-  qbdParityRun(co: CompanyId) {
-    return this.adm(() => this.admin.qbdParityRun(), co);
+  qbdParityRun(co: CompanyId, opts?: QbdParityOptions) {
+    return this.adm(() => this.admin.qbdParityRun(opts), co);
+  }
+  qbdParity(co: CompanyId, wait?: number) {
+    this.checkCompany(co);
+    return this.admin.qbdWaitIdle(wait ?? 0).then(() => this.delay(() => this.admin.qbdParity()));
   }
   qbwcFile(co: CompanyId): Promise<FileDownload> {
-    return this.adm(() => ({ blob: this.admin.qbwcFile(), filename: 'librebooks.qwc' }), co);
+    return this.adm(() => ({ blob: this.admin.qbwcFile(), filename: `librebooks-${slug(this.info.name)}.qwc` }), co);
   }
   qbwcPassword(co: CompanyId, password?: string | null) {
     return this.adm(() => this.admin.qbwcPassword(password), co);
@@ -1562,6 +1616,16 @@ function kindOfList(list: ListName): string {
     case 'types':
       return 'type';
   }
+}
+
+/** A file-name-safe form of a company name, as lb-backup's `slug` makes it. */
+function slug(name: string): string {
+  return (
+    name
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '') || 'company'
+  );
 }
 
 export { FIXTURE_COMPANY_ID, STRESS_ACCOUNT_ID };

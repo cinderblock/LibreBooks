@@ -16,9 +16,14 @@ import type { DeviceKeyInfo } from './generated/DeviceKeyInfo';
 import type { EnrolmentPurpose } from './generated/EnrolmentPurpose';
 import type { FeedFilter } from './generated/FeedFilter';
 import type { FileKind } from './generated/FileKind';
+import type { ImportSettings } from './generated/ImportSettings';
+import type { ParityReport } from './generated/ParityReport';
 import type { PasskeyInfo } from './generated/PasskeyInfo';
+import type { QbdEntity } from './generated/QbdEntity';
+import type { QbdTransport } from './generated/QbdTransport';
 import type { Statement } from './generated/Statement';
 import type { StatementAccount } from './generated/StatementAccount';
+import type { StatementCharge } from './generated/StatementCharge';
 import type { User } from './generated/User';
 import type { CompanyId } from './generated/CompanyId';
 import type { Entity } from './generated/Entity';
@@ -97,10 +102,12 @@ export type { TxnLine } from './generated/TxnLine';
 export type { TxnSummary } from './generated/TxnSummary';
 export type { TxnType } from './generated/TxnType';
 export type { TypeEntry } from './generated/TypeEntry';
+export type { NameBalance } from './generated/NameBalance';
 export type { Reconciliation } from './generated/Reconciliation';
 export type { ReconciliationId } from './generated/ReconciliationId';
 export type { ReconcileLine } from './generated/ReconcileLine';
 export type { ReconcileStatus } from './generated/ReconcileStatus';
+export type { StatementCharge } from './generated/StatementCharge';
 export type { Saved } from './generated/Saved';
 export type { Memorized } from './generated/Memorized';
 export type { Repeat } from './generated/Repeat';
@@ -185,16 +192,12 @@ export type { ParitySummary } from './generated/ParitySummary';
 export type { TrialBalanceParity } from './generated/TrialBalanceParity';
 export type { QbdEntity } from './generated/QbdEntity';
 export type { Severity } from './generated/Severity';
-
-/**
- * ts-rs writes Rust `u64`/`i64` fields as `bigint` (`AttachmentMeta.size`,
- * `FeedConnection.edit_seq`, `FeedRule.priority`…) but the server serialises
- * them as plain JSON numbers, which is what arrives at runtime. Read such a
- * field through this so the code is honest about both.
- */
-export function asNumber(v: number | bigint): number {
-  return typeof v === 'bigint' ? Number(v) : v;
-}
+export type { ImportSettings } from './generated/ImportSettings';
+export type { QbdTransport } from './generated/QbdTransport';
+export type { BridgeSettings } from './generated/BridgeSettings';
+export type { QbwcSettings } from './generated/QbwcSettings';
+export type { SdkSettings } from './generated/SdkSettings';
+export type { FileMode } from './generated/FileMode';
 
 // ---------------------------------------------------------------------------
 // Server-level
@@ -583,13 +586,6 @@ export interface ReconcileOverview {
   beginning_balance: Money;
 }
 
-/** A service charge or interest entered when a reconciliation starts. */
-export interface StatementCharge {
-  amount: Money;
-  date: string;
-  account_id: string;
-}
-
 export interface StartReconcile {
   statement_date: string;
   ending_balance: Money;
@@ -606,9 +602,14 @@ export interface ReconciliationView {
 // ---------------------------------------------------------------------------
 // Attachments
 
+/**
+ * `GET /attachments`: the inbox by default; `record_kind` + `record_id` for one
+ * record's files; `all` for every document, attached or not (the Attached tab).
+ */
 export interface AttachmentQuery {
   record_kind?: string;
   record_id?: string;
+  all?: boolean;
 }
 
 export type AttachmentRecord = { record_kind: string; record_id: string } | null;
@@ -665,52 +666,63 @@ export interface AmazonPreview {
 }
 
 // ---------------------------------------------------------------------------
-// QuickBooks import (`/import/qbd/*`; routes being added server-side)
+// QuickBooks import (`/import/qbd/*`, admin). `ImportSettings` and its parts,
+// the reports and `SyncProgress` are lb-qbd's generated types. The server's
+// envelopes around them (`ImportStatus`, `RunningJob`, the request bodies) are
+// lb-server structs with no ts-rs export, so they live here (plans/api.md).
 
-// LOCAL STAND-INS for lb-qbd's `ImportSettings`, `QbdTransport`, `BridgeSettings`,
-// `QbwcSettings` and `FileMode` (generated after the server merge lands; swap
-// these for the generated files then and fix what the compiler flags).
-export type QbdTransport = 'bridge' | 'qbwc' | 'sdk';
-export type FileMode = 'ReadOnly' | 'ReadWrite';
-export interface BridgeSettings {
-  url: string;
-  /** Write-only: set to replace; never returned. */
-  bridge_key?: string | null;
-  key_set: boolean;
-}
-export interface QbwcSettings {
-  username: string;
-  password_set: boolean;
-  file_mode: FileMode;
-  company_file: string | null;
-}
-export interface ImportSettings {
+export type QbdJobKind = 'sync' | 'parity';
+
+/** A job in progress, as `ImportStatus.running` shows it. */
+export interface RunningJob {
+  kind: QbdJobKind;
   transport: QbdTransport;
-  bridge: BridgeSettings;
-  qbwc: QbwcSettings;
-  /** Pause between requests to the bridge, ms. */
-  pause_ms: number;
-  auto_sync: boolean;
-  /** ISO 8601 duration. */
-  every: string;
+  started_at: string;
+  progress: SyncProgress | null;
+  /** 1–99, what the Web Connector is told. */
+  percent: number;
+  /** A Web Connector job that is waiting for the Web Connector to poll. */
+  waiting_for_web_connector: boolean;
+  /** A Web Connector session is open right now. */
+  web_connector_connected: boolean;
 }
 
-/** `GET /import/qbd/status`: where a sync is, and the last report. */
-export interface QbdImportStatus {
-  /** `qbd:ein-…` once the books are bound to a QBD company; null before any import. */
-  source_id: string | null;
-  running: boolean;
-  progress: SyncProgress | null;
-  last: SyncReport | null;
+/** `GET /import/qbd` and `…/status`: the settings, what is set, what runs, the last reports. */
+export interface ImportStatus {
+  settings: ImportSettings;
+  /** The bridge key and Web Connector password are set (never their values). */
+  bridge_key_set: boolean;
+  qbwc_password_set: boolean;
+  sdk_available: boolean;
+  running: RunningJob | null;
+  last_sync: SyncReport | null;
+  last_parity: ParityReport | null;
+  /** Why the last job failed outright (a report carries its own issues). */
   last_error: string | null;
 }
 
+/** `POST /import/qbd/sync` body; everything optional. */
 export interface QbdSyncOptions {
   full?: boolean;
   sweep?: boolean;
+  reimport?: boolean;
+  txn_limit?: number | null;
+  txn_from?: string | null;
+  txn_to?: string | null;
+  apply_credits?: boolean | null;
+  entities?: QbdEntity[] | null;
 }
 
-/** `POST /import/qbd/qbwc/password`: the Web Connector password, shown once. */
-export interface QbwcPassword {
-  password: string;
+/** `POST /import/qbd/parity` body. */
+export interface QbdParityOptions {
+  as_of?: string | null;
+  trial_balance?: boolean | null;
+}
+
+/** `GET /import/qbd/parity`: the last report, and whether a parity job is running. */
+export interface ParityStatus {
+  running: boolean;
+  job: RunningJob | null;
+  report: ParityReport | null;
+  error: string | null;
 }

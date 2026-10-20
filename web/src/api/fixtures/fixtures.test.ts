@@ -439,9 +439,14 @@ describe('administration', () => {
     const txn = (await api.txns(co, { types: ['Check'], limit: 1 }))[0]!;
     const meta = await api.uploadAttachment(co, new File(['receipt'], 'receipt.txt', { type: 'text/plain' }), { record_kind: 'txn', record_id: txn.id });
     expect(meta).toMatchObject({ record_kind: 'txn', record_id: txn.id, filename: 'receipt.txt', mime: 'text/plain' });
-    expect(Number(meta.size)).toBe(7);
+    expect(meta.size).toBe(7);
     expect(await api.attachments(co, { record_kind: 'txn', record_id: txn.id })).toHaveLength(1);
     expect(await api.attachments(co)).toHaveLength(2);
+    // `all`: everything, attached or not, newest first.
+    const all = await api.attachments(co, { all: true });
+    expect(all).toHaveLength(3);
+    expect(all[0]!.id).toBe(meta.id);
+    expect(all.filter((a) => a.record_kind === 'txn')).toHaveLength(1);
     const first = inbox[0]!;
     await api.attachRecord(co, first.id, { record_kind: 'txn', record_id: txn.id });
     expect(await api.attachments(co, { record_kind: 'txn', record_id: txn.id })).toHaveLength(2);
@@ -460,6 +465,8 @@ describe('administration', () => {
     expect(await api.putClosingDate(co, oldest.date)).toBe(oldest.date);
     const full = await api.txn(co, oldest.id);
     const err = await rejects(api.updateTxn(co, { ...full.txn, memo: 'changed' }));
+    // As the server answers: 423 `closed_period` with the date in `detail`.
+    expect(err.status).toBe(423);
     expect(err.code).toBe('closed_period');
     expect(err.closingDate).toBe(oldest.date);
     expect((await rejects(api.deleteTxn(co, oldest.id, full.txn.edit_seq))).code).toBe('closed_period');
@@ -501,40 +508,90 @@ describe('administration', () => {
     expect((await rejects(api.merge(co, { kind: 'entity', from: b!.id, into: b!.id }))).code).toBe('invalid');
   });
 
+  test('name balances: open items per name, credits count against, jobs roll up to the parent', async () => {
+    const api = make();
+    const rows = await api.nameBalances(co);
+    const entities = await api.list(co, 'entities', { include_inactive: true });
+    const byId = new Map(entities.map((e) => [e.id, e]));
+    const bal = new Map(rows.map((r) => [r.entity_id, r]));
+    expect(rows.length).toBeGreaterThan(0);
+    // Every row's totals are its own balance plus its children's totals.
+    for (const r of rows) {
+      const kids = entities.filter((e) => e.parent_id === r.entity_id);
+      expect(r.receivable_total).toBe(r.receivable + kids.reduce((s, k) => s + (bal.get(k.id)?.receivable_total ?? 0), 0));
+      expect(r.payable_total).toBe(r.payable + kids.reduce((s, k) => s + (bal.get(k.id)?.payable_total ?? 0), 0));
+    }
+    // A job with an open invoice carries the balance; its customer shows it in Balance Total only.
+    const job = rows.find((r) => r.receivable > 0 && byId.get(r.entity_id)?.parent_id);
+    expect(job).toBeDefined();
+    const parent = bal.get(byId.get(job!.entity_id)!.parent_id!)!;
+    expect(parent.receivable).toBe(0);
+    expect(parent.receivable_total).toBeGreaterThanOrEqual(job!.receivable_total);
+    // The balance is what `open` adds up to, credits against.
+    const open = await api.open(co, job!.entity_id, 'receivable');
+    expect(open.reduce((s, t) => s + (t.txn_type === 'CreditMemo' || t.txn_type === 'ReceivePayment' ? -1 : 1) * (t.open_balance ?? 0), 0)).toBe(job!.receivable);
+    // An unpaid bill: we owe the vendor; it owes us nothing.
+    const vendor = rows.find((r) => r.payable > 0)!;
+    expect(byId.get(vendor.entity_id)?.kind).toBe('Vendor');
+    expect(vendor.receivable).toBe(0);
+    // An unapplied payment is a credit against the customer, and against the parent's total.
+    const customer = byId.get(job!.entity_id)!;
+    const saved = await api.createTxn(co, { ...blankTxn('ReceivePayment', today), entity_id: customer.id, amount: 1_000, applications: [] });
+    const after = new Map((await api.nameBalances(co)).map((r) => [r.entity_id, r]));
+    expect(after.get(customer.id)!.receivable).toBe(job!.receivable - 1_000);
+    expect(after.get(parent.entity_id)!.receivable_total).toBe(parent.receivable_total - 1_000);
+    // Voided, it counts for nothing again.
+    await api.voidTxn(co, saved.txn.id, saved.txn.edit_seq);
+    expect(new Map((await api.nameBalances(co)).map((r) => [r.entity_id, r])).get(customer.id)!.receivable).toBe(job!.receivable);
+  });
+
   test('QuickBooks import: settings (key write-only), a sync that runs and reports, parity, Web Connector password', async () => {
     const api = make();
-    const s = await api.qbdSettings(co);
-    expect(s.transport).toBe('bridge');
-    expect(s.bridge.bridge_key).toBeUndefined();
-    const saved = await api.putQbdSettings(co, { ...s, bridge: { ...s.bridge, bridge_key: 'secret-key' }, pause_ms: 500 });
-    expect(saved.bridge.key_set).toBe(true);
-    expect(saved.bridge.bridge_key).toBeUndefined();
-    expect(saved.pause_ms).toBe(500);
-    expect((await rejects(api.putQbdSettings(co, { ...s, bridge: { ...s.bridge, url: 'nope' } }))).code).toBe('invalid');
-    const idle = await api.qbdStatus(co);
-    expect(idle.running).toBe(false);
-    expect(idle.last?.entities.length).toBeGreaterThan(5);
-    await api.qbdSync(co, { full: true });
+    const st = await api.qbdStatus(co);
+    expect(st.settings.transport).toBe('bridge');
+    expect(st.bridge_key_set).toBe(true);
+    expect(st.running).toBeNull();
+    expect(st.last_sync?.entities.length).toBeGreaterThan(5);
+    // The key is write-only: it becomes a secret reference and never comes back; the .qwc ids can't be changed.
+    const saved = await api.putQbdSettings(co, { ...st.settings, bridge: { ...st.settings.bridge, delay_ms: 500 }, qbwc: { ...st.settings.qbwc, owner_id: 'nope' } }, 'secret-key');
+    expect(saved.settings.bridge.delay_ms).toBe(500);
+    expect(saved.settings.bridge.key_ref).toBe(`secret:qbd.${co}.bridge-key`);
+    expect(saved.settings.qbwc.owner_id).toBe(st.settings.qbwc.owner_id);
+    expect(JSON.stringify(saved)).not.toContain('secret-key');
+    const bad = await rejects(api.putQbdSettings(co, { ...st.settings, bridge: { ...st.settings.bridge, url: 'nope' } }));
+    expect(bad.code).toBe('invalid');
+    expect((bad.detail as { problems: string[] }).problems[0]).toContain('bridge URL');
+    // One job at a time; `wait` long-polls until it is done.
+    const sync = await api.qbdSync(co, { full: true });
+    expect(sync.running?.kind).toBe('sync');
     expect((await rejects(api.qbdSync(co))).code).toBe('running');
-    const running = await api.qbdStatus(co);
-    expect(running.running).toBe(true);
-    expect(running.progress?.phase).toBe('Listing');
-    await new Promise((r) => setTimeout(r, 2_400));
-    const done = await api.qbdStatus(co);
-    expect(done.running).toBe(false);
-    expect(done.last?.full).toBe(true);
-    expect(await api.qbdParity(co)).toBeNull();
-    await api.qbdParityRun(co);
-    const parity = await api.qbdParity(co);
+    expect((await rejects(api.qbdParityRun(co))).code).toBe('running');
+    const done = await api.qbdStatus(co, 10);
+    expect(done.running).toBeNull();
+    expect(done.last_sync?.full).toBe(true);
+    expect((await api.qbdParity(co)).report).toBeNull();
+    const started = await api.qbdParityRun(co);
+    expect(started.running?.kind).toBe('parity');
+    expect((await api.qbdParity(co)).running).toBe(true);
+    const parity = (await api.qbdParity(co, 10)).report;
     expect(parity?.summary.accounts_off).toBe(2);
     expect(parity?.accounts.filter((a) => a.difference !== 0).length).toBe(2);
     expect(parity?.summary.total_abs_difference).toBe(12_501);
+    expect((await api.qbdStatus(co)).last_parity?.generated_at).toBe(parity!.generated_at);
+    // The Web Connector password: generated and shown once, or chosen (nothing back); at least 8 characters.
     const pw = await api.qbwcPassword(co, null);
-    expect(pw.password.length).toBe(12);
-    expect((await api.qbdSettings(co)).qbwc.password_set).toBe(true);
+    expect(pw?.length).toBe(12);
+    expect((await api.qbdStatus(co)).qbwc_password_set).toBe(true);
+    expect(await api.qbwcPassword(co, 'longenough')).toBeNull();
     expect((await rejects(api.qbwcPassword(co, 'short'))).code).toBe('invalid');
     const qwc = await api.qbwcFile(co);
-    expect(await qwc.blob.text()).toContain('<QBWCXML>');
+    expect(qwc.filename).toBe('librebooks-juniper-hill-woodworks.qwc');
+    const xml = await qwc.blob.text();
+    expect(xml).toContain('<QBWCXML>');
+    expect(xml).toContain(`<OwnerID>{${st.settings.qbwc.owner_id.toUpperCase()}}</OwnerID>`);
+    // Over the Web Connector a job waits for QuickBooks to poll.
+    await api.putQbdSettings(co, { ...st.settings, transport: 'qbwc' });
+    expect((await api.qbdSync(co)).running?.waiting_for_web_connector).toBe(true);
     api.dispose();
   });
 });

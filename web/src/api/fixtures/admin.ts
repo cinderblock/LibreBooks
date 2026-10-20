@@ -22,15 +22,18 @@ import type {
   DeviceKeyInfo,
   EnrolmentInfo,
   ImportSettings,
+  ImportStatus,
   MintedEnrolmentLink,
   NewEnrolment,
   ParityReport,
   ParityRow,
+  ParityStatus,
   PasskeyInfo,
-  QbdImportStatus,
+  QbdJobKind,
+  QbdParityOptions,
   QbdSyncOptions,
-  QbwcPassword,
   RestoreRequest,
+  RunningJob,
   Restored,
   Role,
   SecretInfo,
@@ -38,6 +41,7 @@ import type {
   ServerSettings,
   ServerView,
   SessionInfo,
+  SyncProgress,
   SyncReport,
   TunnelUpdate,
   TunnelView,
@@ -87,11 +91,15 @@ export class FixtureAdmin {
   private lastBackup: { started_at: string; finished_at: string; record: BackupRecord | null; error: string | null } | null = null;
   private attachmentStore = new Map<string, StoredAttachment>();
   private qbd: ImportSettings;
-  private qbdRunning = false;
-  private qbdProgress: QbdImportStatus['progress'] = null;
-  private qbdLast: SyncReport | null;
-  private qbdTimers: ReturnType<typeof setTimeout>[] = [];
+  /** The Web Connector password is a secret: only whether it is set. */
+  private qbwcPasswordSet = false;
+  /** The one job (sync or parity) running for this company, or none. */
+  private qbdJob: RunningJob | null = null;
+  private lastSync: SyncReport | null;
   private parity: ParityReport | null = null;
+  private qbdTimers: ReturnType<typeof setTimeout>[] = [];
+  /** Who waits for the running job to finish (`?wait=` long-polls). */
+  private qbdIdleWaiters: Array<() => void> = [];
 
   constructor(private host: AdminHost) {
     this.seedPeople();
@@ -144,13 +152,12 @@ export class FixtureAdmin {
     this.seedAttachments();
     this.qbd = {
       transport: 'bridge',
-      bridge: { url: 'http://192.168.1.40:8750', key_set: true },
-      qbwc: { username: 'librebooks', password_set: false, file_mode: 'ReadOnly', company_file: null },
-      pause_ms: 250,
-      auto_sync: false,
-      every: 'PT1H',
+      bridge: { url: 'http://192.168.1.40:8750', key_ref: `secret:${this.bridgeKeyName()}`, delay_ms: 250 },
+      qbwc: { user_name: 'librebooks', app_url: null, run_every_minutes: 60, owner_id: '90a44fb5-33d9-4815-ac85-bc87a7e7d1eb', file_id: '57f3b9b6-86f1-4fcc-b1ee-566de1813d20' },
+      sdk: { file_mode: 'dont_care' },
+      company_file: '',
     };
-    this.qbdLast = this.sampleReport(daysAgo(2), false);
+    this.lastSync = this.sampleReport(daysAgo(2), false);
   }
 
   // ---- seed -------------------------------------------------------------------
@@ -221,7 +228,6 @@ export class FixtureAdmin {
 
   private put(filename: string, blob: Blob, record: AttachmentRecord, createdAt = new Date().toISOString()): AttachmentMeta {
     const id = crypto.randomUUID();
-    // ts-rs writes `size` as bigint; the server sends a plain number (see `asNumber`).
     // The media type without parameters (`text/plain;charset=utf-8` → `text/plain`), as the server records it.
     const mime = (blob.type || 'application/octet-stream').split(';')[0]!.trim();
     const meta: AttachmentMeta = { id, record_kind: record?.record_kind ?? null, record_id: record?.record_id ?? null, filename, mime, size: blob.size, sha256: id.replace(/-/g, '').padEnd(64, 'a'), created_at: createdAt, created_by: 'Demo User' };
@@ -542,9 +548,10 @@ export class FixtureAdmin {
 
   // ---- attachments ------------------------------------------------------------
 
+  /** `all` → every document; a record → its files; otherwise the inbox (as the server's route chooses). */
   attachments(query: AttachmentQuery = {}): AttachmentMeta[] {
     const all = [...this.attachmentStore.values()].map((a) => a.meta);
-    const rows = query.record_kind && query.record_id ? all.filter((a) => a.record_kind === query.record_kind && a.record_id === query.record_id) : all.filter((a) => !a.record_kind);
+    const rows = query.all ? all : query.record_kind && query.record_id ? all.filter((a) => a.record_kind === query.record_kind && a.record_id === query.record_id) : all.filter((a) => !a.record_kind);
     return rows.sort((a, b) => b.created_at.localeCompare(a.created_at));
   }
 
@@ -581,38 +588,109 @@ export class FixtureAdmin {
 
   // ---- QuickBooks import ------------------------------------------------------
 
-  qbdSettings(): ImportSettings {
-    // Write-only: the bridge key never comes back.
-    return { ...this.qbd, bridge: { ...this.qbd.bridge, bridge_key: undefined } };
+  private bridgeKeyName(): string {
+    return `qbd.${this.host.companyId}.bridge-key`;
   }
 
-  putQbdSettings(s: ImportSettings): ImportSettings {
-    if (s.transport === 'bridge') {
+  /** Mirrors lb-qbd's `ImportSettings::problems()`: what must be fixed before a job can run. */
+  private qbdProblems(s: ImportSettings): string[] {
+    const out: string[] = [];
+    const isUrl = (u: string) => {
       try {
-        new URL(s.bridge.url);
+        new URL(u);
+        return true;
       } catch {
-        throw new ApiError(400, 'invalid', 'The bridge URL is not a URL', { field: 'bridge.url' });
+        return false;
       }
+    };
+    if (s.transport === 'bridge') {
+      if (!s.bridge.url.trim()) out.push('the bridge URL is empty');
+      else if (!isUrl(s.bridge.url)) out.push(`the bridge URL ${JSON.stringify(s.bridge.url)} is invalid`);
+      if (!s.bridge.key_ref) out.push("the bridge's API key hasn't been set");
+    } else if (s.transport === 'qbwc') {
+      if (!s.qbwc.user_name.trim()) out.push('the Web Connector user name is empty');
+      if (s.qbwc.app_url && !isUrl(s.qbwc.app_url)) out.push(`the Web Connector app URL ${JSON.stringify(s.qbwc.app_url)} is invalid`);
+      if (s.qbwc.run_every_minutes === 0) out.push("the Web Connector schedule can't be every 0 minutes");
     }
-    if (s.transport === 'qbwc' && !s.qbwc.username.trim()) throw new ApiError(400, 'invalid', 'The Web Connector needs a user name', { field: 'qbwc.username' });
-    if (s.pause_ms < 0 || s.pause_ms > 60_000) throw new ApiError(400, 'invalid', 'Pause is 0–60000 ms', { field: 'pause_ms' });
-    const keySet = s.bridge.bridge_key ? true : this.qbd.bridge.key_set;
-    this.qbd = { ...structuredClone(s), bridge: { url: s.bridge.url, key_set: keySet }, qbwc: { ...s.qbwc, password_set: this.qbd.qbwc.password_set } };
+    return out;
+  }
+
+  /** `GET /import/qbd` (and `…/status`). */
+  qbdStatus(): ImportStatus {
+    return {
+      settings: structuredClone(this.qbd),
+      bridge_key_set: this.qbd.bridge.key_ref !== null,
+      qbwc_password_set: this.qbwcPasswordSet,
+      sdk_available: false,
+      running: this.qbdJob ? { ...this.qbdJob } : null,
+      last_sync: this.lastSync,
+      last_parity: this.parity,
+      last_error: null,
+    };
+  }
+
+  /** `?wait=N`: resolves when no job runs, or after `wait` seconds (at most 120, as the server caps it). */
+  qbdWaitIdle(wait: number): Promise<void> {
+    if (!this.qbdJob || wait <= 0) return Promise.resolve();
+    return new Promise<void>((resolve) => {
+      const timer = setTimeout(done, Math.min(wait, 120) * 1000);
+      function done() {
+        clearTimeout(timer);
+        resolve();
+      }
+      this.qbdIdleWaiters.push(done);
+    });
+  }
+
+  private qbdFinished() {
+    this.qbdJob = null;
+    const waiters = this.qbdIdleWaiters;
+    this.qbdIdleWaiters = [];
+    for (const w of waiters) w();
+  }
+
+  /**
+   * `PUT /import/qbd`, as the server does it: the `.qwc` ids can't change, an
+   * empty user name keeps the old one, a given bridge key becomes the secret
+   * reference (and is never returned), and problems are a 400 listing them.
+   */
+  putQbdSettings(s: ImportSettings, bridgeKey?: string | null): ImportStatus {
+    const next: ImportSettings = structuredClone(s);
+    next.qbwc.owner_id = this.qbd.qbwc.owner_id;
+    next.qbwc.file_id = this.qbd.qbwc.file_id;
+    next.qbwc.user_name = next.qbwc.user_name.trim() || this.qbd.qbwc.user_name;
+    next.bridge.url = next.bridge.url.trim();
+    if (bridgeKey?.trim()) next.bridge.key_ref = `secret:${this.bridgeKeyName()}`;
+    else if (!next.bridge.key_ref && this.qbd.bridge.key_ref) next.bridge.key_ref = this.qbd.bridge.key_ref;
+    const problems = this.qbdProblems(next);
+    if (problems.length) throw new ApiError(400, 'invalid', problems.join('; '), { problems });
+    this.qbd = next;
     this.host.emit('import', 'qbd', 'updated');
-    return this.qbdSettings();
+    return this.qbdStatus();
   }
 
-  qbdStatus(): QbdImportStatus {
-    return { source_id: this.qbdLast?.source_id ?? null, running: this.qbdRunning, progress: this.qbdProgress, last: this.qbdLast, last_error: null };
+  /** One job per company at a time; the settings must be sound; the SDK needs a Windows build with it. */
+  private startJob(kind: QbdJobKind): RunningJob {
+    if (this.qbdJob) throw new ApiError(409, 'running', `a ${this.qbdJob.kind} job is already running for this company`);
+    const problems = this.qbdProblems(this.qbd);
+    if (problems.length) throw new ApiError(400, 'invalid', problems.join('; '), { problems });
+    if (this.qbd.transport === 'sdk') throw new ApiError(501, 'unsupported', 'the QuickBooks SDK transport needs LibreBooks running on the Windows machine that has QuickBooks (this build has no SDK support)');
+    this.qbdJob = {
+      kind,
+      transport: this.qbd.transport,
+      started_at: new Date().toISOString(),
+      progress: null,
+      percent: 1,
+      waiting_for_web_connector: this.qbd.transport === 'qbwc',
+      web_connector_connected: false,
+    };
+    return this.qbdJob;
   }
 
-  /** A sync runs for about two seconds, stepping through the phases, then lands a report. */
-  qbdSync(opts: QbdSyncOptions = {}) {
-    if (this.qbdRunning) throw new ApiError(409, 'running', 'A sync is already running');
-    if (this.qbd.transport === 'bridge' && !this.qbd.bridge.key_set) throw new ApiError(400, 'invalid', 'Set the bridge key first', { field: 'bridge.bridge_key' });
-    this.qbdRunning = true;
-    const started = new Date().toISOString();
-    const steps: NonNullable<QbdImportStatus['progress']>[] = [
+  /** A sync runs for about two seconds, stepping through the phases, then lands a report (202). */
+  qbdSync(opts: QbdSyncOptions = {}): ImportStatus {
+    const job = this.startJob('sync');
+    const steps: SyncProgress[] = [
       { entity: 'Account', phase: 'Listing', done: 0, total: 56 },
       { entity: 'Account', phase: 'Importing', done: 56, total: 56 },
       { entity: 'Customer', phase: 'Importing', done: 9, total: 18 },
@@ -620,33 +698,50 @@ export class FixtureAdmin {
       { entity: 'Check', phase: 'Importing', done: 30, total: 41 },
       { entity: 'Deposit', phase: opts.sweep ? 'Sweeping' : 'Checking', done: 6, total: 6 },
     ];
-    this.qbdProgress = steps[0]!;
-    this.host.emit('import', 'qbd', 'updated');
     steps.forEach((p, i) => {
       this.qbdTimers.push(
         setTimeout(() => {
-          this.qbdProgress = p;
+          // Over the Web Connector the first poll arrives with the first step.
+          job.waiting_for_web_connector = false;
+          job.web_connector_connected = job.transport === 'qbwc';
+          job.progress = p;
+          job.percent = Math.min(99, Math.round((100 * (i + 1)) / (steps.length + 1)));
           this.host.emit('import', 'qbd', 'updated');
         }, 300 * (i + 1)),
       );
     });
     this.qbdTimers.push(
       setTimeout(() => {
-        this.qbdRunning = false;
-        this.qbdProgress = null;
-        this.qbdLast = this.sampleReport(started, !!opts.full);
+        this.lastSync = this.sampleReport(job.started_at, !!opts.full);
+        this.qbdFinished();
         // `finished` (not `updated`): the books changed, so registers and reports are stale.
         this.host.emit('import', 'qbd', 'finished');
       }, 300 * (steps.length + 1)),
     );
+    this.host.emit('import', 'qbd', 'updated');
+    return this.qbdStatus();
   }
 
-  qbdParity(): ParityReport | null {
-    return this.parity;
+  /** `GET /import/qbd/parity`. */
+  qbdParity(): ParityStatus {
+    return { running: this.qbdJob?.kind === 'parity', job: this.qbdJob ? { ...this.qbdJob } : null, report: this.parity, error: null };
   }
 
-  qbdParityRun() {
-    if (this.qbdRunning) throw new ApiError(409, 'running', 'A sync is running; try again when it finishes');
+  /** A parity check asks QuickBooks for every balance; here it answers in a moment (202). */
+  qbdParityRun(opts: QbdParityOptions = {}): ImportStatus {
+    this.startJob('parity');
+    this.qbdTimers.push(
+      setTimeout(() => {
+        this.parity = this.buildParity(opts);
+        this.qbdFinished();
+        this.host.emit('import', 'parity', 'updated');
+      }, 400),
+    );
+    this.host.emit('import', 'qbd', 'updated');
+    return this.qbdStatus();
+  }
+
+  private buildParity(opts: QbdParityOptions): ParityReport {
     const balances = new Map(this.host.balances().map((b) => [b.account_id, b.debit_positive]));
     const rows: ParityRow[] = this.host
       .accounts()
@@ -659,26 +754,34 @@ export class FixtureAdmin {
         return { account_id: a.id, qbd_list_id: `8000${String(i).padStart(4, '0')}-1700000000`, full_name: a.full_name, account_type: a.account_type, qbd, ours, difference: ours - qbd, qbd_total: null, ours_total: null, note: off === 1 ? 'Sales tax rounding (QBD rounds per line)' : off ? 'A bill with a payroll item the bridge does not list' : null };
       });
     const off = rows.filter((r) => r.difference !== 0);
-    this.parity = {
+    const notes = [opts.as_of ? `Balances as of ${opts.as_of}.` : 'The bridge reports account balances as of today only; dated trial balances are not available over this transport.'];
+    if (opts.trial_balance) notes.push('A trial balance is not available over the bridge; the account balances were compared instead.');
+    return {
       generated_at: new Date().toISOString(),
-      source_id: this.qbdLast?.source_id ?? 'qbd:ein-94-0000000',
+      source_id: this.lastSync?.source_id ?? 'qbd:ein-94-0000000',
       accounts: rows,
       trial_balance: null,
-      summary: { accounts_compared: rows.length, accounts_matching: rows.length - off.length, accounts_off: off.length, total_abs_difference: off.reduce((s, r) => s + Math.abs(r.difference), 0), trial_balance_rows: 0, trial_balance_matching: 0, notes: ['The bridge reports account balances as of today only; dated trial balances are not available over this transport.'] },
+      summary: { accounts_compared: rows.length, accounts_matching: rows.length - off.length, accounts_off: off.length, total_abs_difference: off.reduce((s, r) => s + Math.abs(r.difference), 0), trial_balance_rows: 0, trial_balance_matching: 0, notes },
     };
-    this.host.emit('import', 'parity', 'updated');
   }
 
-  qbwcPassword(password?: string | null): QbwcPassword {
-    const pw = password?.trim() || Array.from(crypto.getRandomValues(new Uint8Array(12)), (b) => 'abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789'[b % 54]).join('');
-    if (pw.length < 8) throw new ApiError(400, 'invalid', 'At least 8 characters', { field: 'password' });
-    this.qbd = { ...this.qbd, qbwc: { ...this.qbd.qbwc, password_set: true } };
+  /** `POST …/qbwc/password`: a chosen password (≥ 8 characters; nothing back) or a generated one, shown this once. */
+  qbwcPassword(password?: string | null): string | null {
+    const given = password?.trim() ?? '';
+    if (given && given.length < 8) throw new ApiError(400, 'invalid', 'the Web Connector password needs at least 8 characters');
+    this.qbwcPasswordSet = true;
     this.host.emit('import', 'qbd', 'updated');
-    return { password: pw };
+    if (given) return null;
+    return Array.from(crypto.getRandomValues(new Uint8Array(12)), (b) => 'abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789'[b % 54]).join('');
   }
 
+  /** `GET …/qbwc.qwc`: `AppURL` is the company's `app_url`, else the server's public URL; always read-only. */
   qbwcFile(): Blob {
-    const xml = `<?xml version="1.0"?>\n<QBWCXML>\n  <AppName>LibreBooks (${this.host.companyName()})</AppName>\n  <AppID></AppID>\n  <AppURL>https://books.example.com/api/v1/c/${this.host.companyId}/import/qbd/qbwc</AppURL>\n  <AppDescription>Imports this company file into LibreBooks</AppDescription>\n  <AppSupport>https://books.example.com/</AppSupport>\n  <UserName>${this.qbd.qbwc.username}</UserName>\n  <OwnerID>{90A44FB5-33D9-4815-AC85-BC87A7E7D1EB}</OwnerID>\n  <FileID>{57F3B9B6-86F1-4FCC-B1EE-566DE1813D20}</FileID>\n  <QBType>QBFS</QBType>\n  <Scheduler><RunEveryNMinutes>60</RunEveryNMinutes></Scheduler>\n  <IsReadOnly>${this.qbd.qbwc.file_mode === 'ReadOnly'}</IsReadOnly>\n</QBWCXML>\n`;
+    const q = this.qbd.qbwc;
+    const base = (q.app_url ?? this.settings.public_urls[0] ?? 'https://books.example.com').replace(/\/$/, '');
+    const braces = (uuid: string) => `{${uuid.toUpperCase()}}`;
+    const scheduler = q.run_every_minutes ? `  <Scheduler><RunEveryNMinutes>${q.run_every_minutes}</RunEveryNMinutes></Scheduler>\n` : '';
+    const xml = `<?xml version="1.0"?>\n<QBWCXML>\n  <AppName>LibreBooks (${this.host.companyName()})</AppName>\n  <AppID></AppID>\n  <AppURL>${base}/qbwc</AppURL>\n  <AppDescription>Imports this company file into LibreBooks</AppDescription>\n  <AppSupport>${base}/</AppSupport>\n  <UserName>${q.user_name}</UserName>\n  <OwnerID>${braces(q.owner_id)}</OwnerID>\n  <FileID>${braces(q.file_id)}</FileID>\n  <QBType>QBFS</QBType>\n${scheduler}  <IsReadOnly>true</IsReadOnly>\n</QBWCXML>\n`;
     return new Blob([xml], { type: 'application/xml' });
   }
 
@@ -714,9 +817,10 @@ export class FixtureAdmin {
     } as SyncReport;
   }
 
-  /** Tests and teardown: stop a running sync's timers. */
+  /** Tests and teardown: stop a running job's timers and let any long-poll go. */
   dispose() {
     for (const t of this.qbdTimers) clearTimeout(t);
     this.qbdTimers = [];
+    this.qbdFinished();
   }
 }

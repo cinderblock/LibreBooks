@@ -490,6 +490,35 @@ test('attachments: upload to the inbox, then attach to a transaction', async ({ 
   await dialog.getByTestId('attach-target').first().click();
   await expect(page.getByText('Attached.')).toBeVisible();
   await expect(win.getByTestId('attachment-row')).toHaveCount(2);
+  // The Attached tab lists what has found its record, with a way into it.
+  await win.getByRole('tab', { name: 'Attached' }).click();
+  await expect(win.getByTestId('attachment-row')).toHaveCount(1);
+  await expect(win.getByTestId('attachment-row')).toContainText('receipt.txt');
+  await expect(win.getByRole('button', { name: 'Open transaction' })).toBeVisible();
+  await win.getByRole('button', { name: 'Detach' }).click();
+  await expect(page.getByText('Moved back to the inbox.')).toBeVisible();
+  await expect(win.getByTestId('attachment-row')).toHaveCount(0);
+  await win.getByRole('tab', { name: 'Inbox' }).click();
+  await expect(win.getByTestId('attachment-row')).toHaveCount(3);
+});
+
+test('the Customer Center shows Balance and Balance Total: a job carries its invoice, the customer rolls it up', async ({ page }) => {
+  await start(page, `${CO}/customers`);
+  const list = page.getByRole('grid', { name: 'Customer list' });
+  await expect(list.getByRole('columnheader', { name: 'Balance', exact: true })).toBeVisible();
+  await expect(list.getByRole('columnheader', { name: 'Balance Total' })).toBeVisible();
+  const cells = (name: string) => list.getByRole('row').filter({ has: page.getByRole('gridcell', { name, exact: true }) }).getByRole('gridcell');
+  // Thompson Dental has no invoices of its own; its Reception Desk job has an open one.
+  await expect(cells('Thompson Dental').nth(1)).toHaveText('');
+  const total = await cells('Thompson Dental').nth(2).innerText();
+  expect(total).toMatch(/\d/);
+  await expect(cells('Reception Desk').nth(1)).toHaveText(total);
+  await expect(cells('Reception Desk').nth(2)).toHaveText(total);
+  await list.getByRole('gridcell', { name: 'Thompson Dental', exact: true }).click();
+  const card = page.getByTestId('name-balance');
+  await expect(card).toContainText('$0.00');
+  await expect(card).toContainText(total);
+  await expect(card).toContainText('with jobs');
 });
 
 test('QuickBooks import: a sync runs with progress and lands a report; parity compares balances', async ({ page }) => {

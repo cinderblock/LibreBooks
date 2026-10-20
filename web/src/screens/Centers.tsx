@@ -1,21 +1,21 @@
 // Customer, Vendor and Employee Centers: the names on the left (customers with
-// their jobs underneath, open balances alongside), the selected name's details
-// and transactions on the right. On a phone: the list, then the detail as its
-// own screen with a back arrow.
+// their jobs underneath, Balance and Balance Total alongside as QBD shows
+// them, from `GET /balances/names`), the selected name's details and
+// transactions on the right. On a phone: the list, then the detail as its own
+// screen with a back arrow.
 
 import { ActionIcon, Alert, Badge, Button, Card, Checkbox, Group, Menu, Modal, SimpleGrid, Skeleton, Stack, Table, Text, TextInput, Title } from '@mantine/core';
 import { IconChevronDown, IconPencil, IconPlus, IconSearch } from '@tabler/icons-react';
 import { useEffect, useMemo, useState } from 'react';
 import { describeError } from '~/api/errors';
-import { useEntities, useSaveRecord, useTxns } from '~/api/hooks';
-import type { Entity, EntityKind, TxnType } from '~/api/types';
+import { useEntities, useNameBalanceMap, useSaveRecord, useTxns } from '~/api/hooks';
+import type { Entity, EntityKind, NameBalance, TxnType } from '~/api/types';
 import { KeyList } from '~/components/KeyList';
 import { useQuickCreate } from '~/inputs/QuickCreate';
 import { useShortcut } from '~/keyboard/KeyboardProvider';
 import { formatDateShort } from '~/lib/dates';
 import { formatMoney } from '~/lib/money';
 import { prepare, search } from '~/lib/quickfill';
-import { rollUp } from '~/lib/tree';
 import { TXN_LABEL } from '~/lib/txnTypes';
 import { useIsMobile } from '~/lib/useMobile';
 import { useOpenWindow, useWindow } from '~/windows/WindowsProvider';
@@ -25,10 +25,24 @@ import classes from './screens.module.css';
 interface CenterConfig {
   kind: EntityKind;
   title: string;
-  /** Transactions whose open balance makes up a name's balance (credits subtract). */
+  /** Transactions that show an Open column in the detail (A/R or A/P items). */
   openTypes: TxnType[];
-  creditTypes: TxnType[];
+  /** Which side of `NameBalance` this centre's Balance is, or none (employees). */
+  balance: 'receivable' | 'payable' | null;
   newTxns: Array<{ label: string; path: string }>;
+}
+
+/** A name's own balance and the one with its jobs rolled in, positive = owed. */
+interface Balances {
+  own: number;
+  total: number;
+}
+
+const NOTHING_OPEN: Balances = { own: 0, total: 0 };
+
+function balancesOf(nb: NameBalance | undefined, side: CenterConfig['balance']): Balances {
+  if (!nb || !side) return NOTHING_OPEN;
+  return side === 'receivable' ? { own: nb.receivable, total: nb.receivable_total } : { own: nb.payable, total: nb.payable_total };
 }
 
 const CONFIGS: Record<'customers' | 'vendors' | 'employees', CenterConfig> = {
@@ -36,7 +50,7 @@ const CONFIGS: Record<'customers' | 'vendors' | 'employees', CenterConfig> = {
     kind: 'Customer',
     title: 'Customer Center',
     openTypes: ['Invoice', 'StatementCharge', 'CreditMemo'],
-    creditTypes: ['CreditMemo'],
+    balance: 'receivable',
     newTxns: [
       { label: 'Create Invoice', path: paths.form('invoice') },
       { label: 'Receive Payment', path: paths.form('receive-payment') },
@@ -48,7 +62,7 @@ const CONFIGS: Record<'customers' | 'vendors' | 'employees', CenterConfig> = {
     kind: 'Vendor',
     title: 'Vendor Center',
     openTypes: ['Bill', 'VendorCredit'],
-    creditTypes: ['VendorCredit'],
+    balance: 'payable',
     newTxns: [
       { label: 'Write Check', path: paths.newCheck() },
       { label: 'Enter Bill', path: paths.form('bill') },
@@ -60,7 +74,7 @@ const CONFIGS: Record<'customers' | 'vendors' | 'employees', CenterConfig> = {
     kind: 'Employee',
     title: 'Employee Center',
     openTypes: [],
-    creditTypes: [],
+    balance: null,
     newTxns: [{ label: 'Write Check', path: paths.newCheck() }],
   },
 };
@@ -85,17 +99,9 @@ export function Center({ which }: { which: 'customers' | 'vendors' | 'employees'
     return order.map((i) => names[i]!).filter((e) => showInactive || e.is_active);
   }, [names, prepared, query, showInactive]);
 
-  // Open balances per name (jobs roll up into their customer), from open transactions.
-  const open_ = useTxns({ types: cfg.openTypes, open_only: true }, cfg.openTypes.length > 0);
-  const balances = useMemo(() => {
-    const own = new Map<string, number>();
-    for (const t of open_.data ?? []) {
-      if (!t.entity_id || t.open_balance == null) continue;
-      const sign = cfg.creditTypes.includes(t.txn_type) ? -1 : 1;
-      own.set(t.entity_id, (own.get(t.entity_id) ?? 0) + sign * t.open_balance);
-    }
-    return rollUp(names, own);
-  }, [open_.data, names, cfg.creditTypes]);
+  // Balance (the name's own open items) and Balance Total (with its jobs), from the server.
+  const nameBalances = useNameBalanceMap(cfg.balance !== null);
+  const balances = (id: string): Balances => balancesOf(nameBalances.get(id), cfg.balance);
 
   // `?select=<id>` (from the palette or a report) picks a name.
   const selectParam = win.desc.params.select;
@@ -155,8 +161,11 @@ export function Center({ which }: { which: 'customers' | 'vendors' | 'employees'
           rowAttrs={(e) => ({ 'data-inactive': !e.is_active || undefined })}
           columns={[
             { key: 'name', header: 'Name', width: 'minmax(160px, 1fr)', render: (e) => <span style={{ paddingLeft: query ? 0 : e.sublevel * 16 }}>{query ? e.full_name : e.name}</span> },
-            ...(cfg.openTypes.length
-              ? [{ key: 'bal', header: 'Balance Total', width: '110px', align: 'right' as const, render: (e: Entity) => formatMoney(balances.get(e.id) ?? 0, { blankZero: true }) }]
+            ...(cfg.balance
+              ? [
+                  { key: 'bal', header: 'Balance', width: '110px', align: 'right' as const, render: (e: Entity) => formatMoney(balances(e.id).own, { blankZero: true }) },
+                  { key: 'total', header: 'Balance Total', width: '110px', align: 'right' as const, render: (e: Entity) => formatMoney(balances(e.id).total, { blankZero: true }) },
+                ]
               : []),
           ]}
           renderMobile={(e) => (
@@ -172,7 +181,7 @@ export function Center({ which }: { which: 'customers' | 'vendors' | 'employees'
                 )}
               </span>
               <Text size="sm" className={classes.num}>
-                {formatMoney(balances.get(e.id) ?? 0, { blankZero: true })}
+                {formatMoney(balances(e.id).total, { blankZero: true })}
               </Text>
             </>
           )}
@@ -182,7 +191,7 @@ export function Center({ which }: { which: 'customers' | 'vendors' | 'employees'
   );
 
   const detail = current ? (
-    <NameDetail entity={current} balance={balances.get(current.id) ?? 0} cfg={cfg} onEdit={() => setEditing(current)} phone={mobile} />
+    <NameDetail entity={current} balance={balances(current.id)} cfg={cfg} onEdit={() => setEditing(current)} phone={mobile} />
   ) : (
     <Text c="dimmed" p="md">
       Choose a name.
@@ -202,7 +211,7 @@ export function Center({ which }: { which: 'customers' | 'vendors' | 'employees'
   );
 }
 
-function NameDetail({ entity, balance, cfg, onEdit, phone }: { entity: Entity; balance: number; cfg: CenterConfig; onEdit(): void; phone: boolean }) {
+function NameDetail({ entity, balance, cfg, onEdit, phone }: { entity: Entity; balance: Balances; cfg: CenterConfig; onEdit(): void; phone: boolean }) {
   const open = useOpenWindow();
   const txns = useTxns({ entity_id: entity.id, include_jobs: true, descending: true, limit: 200 });
   const addr = entity.bill_address;
@@ -257,14 +266,19 @@ function NameDetail({ entity, balance, cfg, onEdit, phone }: { entity: Entity; b
           </Text>
           {address.length ? address.map((l) => <Text key={l} size="sm">{l}</Text>) : <Text size="sm">—</Text>}
         </Card>
-        {cfg.openTypes.length > 0 && (
-          <Card withBorder padding="xs">
+        {cfg.balance && (
+          <Card withBorder padding="xs" data-testid="name-balance">
             <Text size="xs" c="dimmed">
-              Open balance
+              Balance
             </Text>
             <Text size="xl" fw={700} className={classes.num}>
-              {formatMoney(balance, { symbol: true })}
+              {formatMoney(balance.own, { symbol: true })}
             </Text>
+            {balance.total !== balance.own && (
+              <Text size="sm" c="dimmed" className={classes.num}>
+                {formatMoney(balance.total, { symbol: true })} with jobs
+              </Text>
+            )}
           </Card>
         )}
       </SimpleGrid>
