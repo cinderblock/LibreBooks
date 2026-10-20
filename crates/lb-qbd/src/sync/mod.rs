@@ -281,6 +281,18 @@ pub async fn sync<S: QbdSource>(
         gap_links: BTreeMap::new(),
         consecutive_bridge_failures: 0,
     };
+    // Files written before checks and deposits in A/R or A/P counted as open
+    // items need their links before payments can apply to them.
+    let repaired = books.write(
+        &lb_store::Actor::system(),
+        lb_store::txns::repair_ar_ap_links,
+    )?;
+    if repaired > 0 {
+        tracing::info!(
+            repaired,
+            "backfilled A/R and A/P links on older transactions"
+        );
+    }
     for entity in QbdEntity::SYNC_ORDER {
         if !options.includes(entity) {
             continue;

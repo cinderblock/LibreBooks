@@ -78,7 +78,7 @@ currency: string | null, exchange_rate: string | null, lines: Array<TxnLine>, ap
 /**
  * Edit sequence (optimistic concurrency); 0 for a transaction not yet saved.
  */
-edit_seq: bigint, created_at: string | null, modified_at: string | null, created_by: UserId | null, modified_by: UserId | null, 
+edit_seq: number, created_at: string | null, modified_at: string | null, created_by: UserId | null, modified_by: UserId | null, 
 /**
  * Fields an import carried that have no home yet, kept verbatim.
  */

@@ -6,4 +6,4 @@ import type { TermsKind } from "./TermsKind";
  * Payment terms. Standard terms count days from the transaction date; date-driven
  * terms name a day of the month (QBD's two kinds).
  */
-export type Terms = { id: TermsId, name: string, is_active: boolean, kind: TermsKind, edit_seq: bigint, };
+export type Terms = { id: TermsId, name: string, is_active: boolean, kind: TermsKind, edit_seq: number, };

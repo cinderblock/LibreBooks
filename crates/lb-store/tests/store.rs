@@ -901,3 +901,86 @@ fn targeted_credit_application_stops_at_the_cap_and_prefers_credit_memos() {
         "the overpayment stays unapplied"
     );
 }
+
+#[test]
+fn older_files_get_their_ar_links_backfilled() {
+    let b = books();
+    let s = setup(&b);
+    let ar = b
+        .read(|c| accounts::by_role(c, AccountRole::AccountsReceivable))
+        .unwrap()
+        .unwrap()
+        .id;
+    let mut chk = Txn::new(TxnType::Check, date(2026, 10, 1));
+    chk.account_id = Some(s.bank);
+    chk.lines
+        .push(TxnLine::account(ar, Money(1_000)).with_entity(s.customer));
+    let chk = b.write(&me(), |w| txns::save(w, chk)).unwrap().txn;
+    // Pretend the file predates the link: strip it.
+    b.write(&me(), |w| {
+        w.tx.execute(
+            "UPDATE txn SET ar_ap_account_id = NULL, open_balance = NULL, doc = json_remove(doc, '$.ar_ap_account_id') WHERE id = ?1",
+            [chk.id.to_string()],
+        )?;
+        Ok(())
+    })
+    .unwrap();
+    assert_eq!(b.write(&me(), txns::repair_ar_ap_links).unwrap(), 1);
+    assert_eq!(
+        b.write(&me(), txns::repair_ar_ap_links).unwrap(),
+        0,
+        "idempotent"
+    );
+    let open = b
+        .read(|c| {
+            Ok(txns::query(c, &txns::TxnFilter::default())?
+                .into_iter()
+                .find(|t| t.id == chk.id)
+                .unwrap()
+                .open_balance)
+        })
+        .unwrap();
+    assert_eq!(open, Some(Money(1_000)));
+}
+
+#[test]
+fn a_refund_check_made_out_to_another_name_is_still_the_customers_receivable() {
+    let b = books();
+    let s = setup(&b);
+    let ar = b
+        .read(|c| accounts::by_role(c, AccountRole::AccountsReceivable))
+        .unwrap()
+        .unwrap()
+        .id;
+    let other = b
+        .write(&me(), |w| {
+            entities::save(
+                w,
+                Entity::blank(EntityKind::OtherName, "Acme Accounts Payable Dept"),
+            )
+        })
+        .unwrap()
+        .id;
+    let mut chk = Txn::new(TxnType::Check, date(2026, 10, 1));
+    chk.account_id = Some(s.bank);
+    chk.entity_id = Some(other);
+    chk.lines
+        .push(TxnLine::account(ar, Money(4_040)).with_entity(s.job));
+    let chk = b.write(&me(), |w| txns::save(w, chk)).unwrap().txn;
+    let mut pmt = Txn::new(TxnType::ReceivePayment, date(2026, 10, 10));
+    pmt.entity_id = Some(s.customer);
+    pmt.amount = Money(4_040);
+    pmt.applications
+        .push(Application::cash(chk.id, Money(4_040)));
+    b.write(&me(), |w| txns::save(w, pmt)).unwrap();
+    let open = b
+        .read(|c| {
+            Ok(txns::query(c, &txns::TxnFilter::default())?
+                .into_iter()
+                .find(|t| t.id == chk.id)
+                .unwrap()
+                .open_balance)
+        })
+        .unwrap();
+    assert_eq!(open, Some(Money::ZERO));
+}

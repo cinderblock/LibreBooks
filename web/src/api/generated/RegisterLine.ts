@@ -21,7 +21,7 @@ amount: Money, cleared: ClearedStatus,
 /**
  * Running balance, debit-positive (the UI shows it naturally for the type).
  */
-balance: Money, is_void: boolean, edit_seq: bigint, 
+balance: Money, is_void: boolean, edit_seq: number, 
 /**
  * For A/R and A/P registers: due date and what is still open.
  */

@@ -60,4 +60,4 @@ print_components: boolean,
 /**
  * Payment items: deposit to Undeposited Funds or this account.
  */
-deposit_account_id: AccountId | null, edit_seq: bigint, };
+deposit_account_id: AccountId | null, edit_seq: number, };

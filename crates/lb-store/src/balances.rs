@@ -64,6 +64,7 @@ pub struct RegisterLine {
     /// Running balance, debit-positive (the UI shows it naturally for the type).
     pub balance: Money,
     pub is_void: bool,
+    #[ts(type = "number")]
     pub edit_seq: i64,
     /// For A/R and A/P registers: due date and what is still open.
     pub due_date: Option<jiff::civil::Date>,

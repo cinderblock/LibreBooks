@@ -358,6 +358,7 @@ pub struct Account {
     /// QBD's cash flow classification for the statement of cash flows.
     pub cash_flow_class: Option<CashFlowClass>,
     /// Edit sequence, bumped on every save (optimistic concurrency).
+    #[ts(type = "number")]
     pub edit_seq: i64,
 }
 

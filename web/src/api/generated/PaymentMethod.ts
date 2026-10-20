@@ -2,4 +2,4 @@
 import type { PaymentMethodId } from "./PaymentMethodId";
 import type { PaymentMethodKind } from "./PaymentMethodKind";
 
-export type PaymentMethod = { id: PaymentMethodId, name: string, kind: PaymentMethodKind, is_active: boolean, edit_seq: bigint, };
+export type PaymentMethod = { id: PaymentMethodId, name: string, kind: PaymentMethodKind, is_active: boolean, edit_seq: number, };

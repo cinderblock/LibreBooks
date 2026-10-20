@@ -176,6 +176,7 @@ pub struct Entity {
     /// User-defined fields, keyed by the field's label.
     #[ts(type = "Record<string, string>")]
     pub custom_fields: serde_json::Map<String, serde_json::Value>,
+    #[ts(type = "number")]
     pub edit_seq: i64,
 }
 

@@ -507,6 +507,7 @@ pub struct Txn {
     pub lines: Vec<TxnLine>,
     pub applications: Vec<Application>,
     /// Edit sequence (optimistic concurrency); 0 for a transaction not yet saved.
+    #[ts(type = "number")]
     pub edit_seq: i64,
     pub created_at: Option<jiff::Timestamp>,
     pub modified_at: Option<jiff::Timestamp>,

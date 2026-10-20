@@ -4,4 +4,4 @@ import type { SalesTaxCodeId } from "./SalesTaxCodeId";
 /**
  * Taxable or not. QBD ships `Tax` and `Non`; companies add more for reporting.
  */
-export type SalesTaxCode = { id: SalesTaxCodeId, name: string, description: string | null, is_taxable: boolean, is_active: boolean, edit_seq: bigint, };
+export type SalesTaxCode = { id: SalesTaxCodeId, name: string, description: string | null, is_taxable: boolean, is_active: boolean, edit_seq: number, };

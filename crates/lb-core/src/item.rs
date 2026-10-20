@@ -156,6 +156,7 @@ pub struct Item {
 
     /// Payment items: deposit to Undeposited Funds or this account.
     pub deposit_account_id: Option<AccountId>,
+    #[ts(type = "number")]
     pub edit_seq: i64,
 }
 

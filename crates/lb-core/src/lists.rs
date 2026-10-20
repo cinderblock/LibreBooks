@@ -16,6 +16,7 @@ pub struct Class {
     pub parent_id: Option<ClassId>,
     pub sublevel: u32,
     pub is_active: bool,
+    #[ts(type = "number")]
     pub edit_seq: i64,
 }
 
@@ -28,6 +29,7 @@ pub struct Terms {
     pub name: String,
     pub is_active: bool,
     pub kind: TermsKind,
+    #[ts(type = "number")]
     pub edit_seq: i64,
 }
 
@@ -118,6 +120,7 @@ pub struct PaymentMethod {
     pub name: String,
     pub kind: PaymentMethodKind,
     pub is_active: bool,
+    #[ts(type = "number")]
     pub edit_seq: i64,
 }
 
@@ -146,6 +149,7 @@ pub struct SalesTaxCode {
     pub description: Option<String>,
     pub is_taxable: bool,
     pub is_active: bool,
+    #[ts(type = "number")]
     pub edit_seq: i64,
 }
 
@@ -158,6 +162,7 @@ pub struct SalesRep {
     /// The employee, vendor or other name this rep is.
     pub entity_id: Option<EntityId>,
     pub is_active: bool,
+    #[ts(type = "number")]
     pub edit_seq: i64,
 }
 
@@ -178,6 +183,7 @@ pub struct TypeEntry {
     pub full_name: String,
     pub parent_id: Option<TypeId>,
     pub is_active: bool,
+    #[ts(type = "number")]
     pub edit_seq: i64,
 }
 

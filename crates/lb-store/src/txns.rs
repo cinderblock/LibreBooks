@@ -617,9 +617,33 @@ fn check_applications(c: &Connection, txn: &Txn) -> Result<()> {
                 target.txn_type.label()
             )));
         }
-        if let Some(e) = target.entity_id
-            && entities::root_of(c, e)? != root
+        // The name a target belongs to: its header's, or, for a check or
+        // deposit with a line in A/R or A/P, the names on those lines (a refund
+        // check may be made out to someone other than the customer record).
+        let mut names: Vec<EntityId> = target.entity_id.into_iter().collect();
+        if let Some(acct) = target
+            .ar_ap_account_id
+            .filter(|_| posts_into_ar_ap_by_line(target.txn_type))
         {
+            let mut stmt = c.prepare(
+                "SELECT DISTINCT entity_id FROM posting WHERE txn_id = ?1 AND account_id = ?2 AND entity_id IS NOT NULL",
+            )?;
+            let rows = stmt.query_map(
+                params![a.target_txn_id.to_string(), acct.to_string()],
+                |r| r.get::<_, String>(0),
+            )?;
+            for row in rows {
+                names.push(codec::parse_id(&row?)?);
+            }
+        }
+        let mut same_name = names.is_empty();
+        for e in names {
+            if entities::root_of(c, e)? == root {
+                same_name = true;
+                break;
+            }
+        }
+        if !same_name {
             return Err(PostingError::TargetForOtherName(a.target_txn_id).into());
         }
         if let Some(credit) = a.credit_txn_id {
@@ -729,6 +753,7 @@ pub struct TxnSummary {
     pub memo: Option<String>,
     pub is_void: bool,
     pub is_pending: bool,
+    #[ts(type = "number")]
     pub edit_seq: i64,
 }
 
@@ -1038,6 +1063,50 @@ pub fn undeposited(c: &Connection) -> Result<Vec<TxnSummary>> {
 /// today's average costs. `pub(crate)` because only the store decides when.
 pub(crate) fn repost(w: &mut Writer<'_>, txn: Txn) -> Result<SaveOutcome> {
     save_inner(w, txn, false)
+}
+
+/// Backfill the A/R or A/P link on transactions saved before checks, card
+/// charges and deposits with a line in A/R or A/P counted as open items, and
+/// recompute their open balances. Idempotent and cheap when there is nothing
+/// to do; returns how many were fixed.
+pub fn repair_ar_ap_links(w: &mut Writer<'_>) -> Result<usize> {
+    let types = [
+        "JournalEntry",
+        "Check",
+        "CreditCardCharge",
+        "CreditCardCredit",
+        "Deposit",
+    ]
+    .iter()
+    .map(|t| format!("'{t}'"))
+    .collect::<Vec<_>>()
+    .join(",");
+    let sql = format!(
+        "SELECT DISTINCT t.id FROM txn t JOIN posting p ON p.txn_id = t.id JOIN account a ON a.id = p.account_id
+         WHERE t.txn_type IN ({types}) AND t.ar_ap_account_id IS NULL
+           AND a.account_type IN ('AccountsReceivable', 'AccountsPayable')"
+    );
+    let ids: Vec<String> = {
+        let mut stmt = w.tx.prepare(&sql)?;
+        stmt.query_map([], |r| r.get(0))?
+            .collect::<rusqlite::Result<_>>()?
+    };
+    let mut fixed = 0;
+    for id in ids {
+        let id: TxnId = codec::parse_id(&id)?;
+        let postings = postings(&w.tx, id)?;
+        let Some(acct) = journal_ar_ap(&w.tx, &postings)? else {
+            continue;
+        };
+        w.tx.execute(
+            "UPDATE txn SET ar_ap_account_id = ?2, doc = json_set(doc, '$.ar_ap_account_id', ?2) WHERE id = ?1",
+            params![id.to_string(), acct.to_string()],
+        )?;
+        refresh_open_balance(&w.tx, id)?;
+        w.changed("txn", id.to_string(), "update");
+        fixed += 1;
+    }
+    Ok(fixed)
 }
 
 #[cfg(test)]

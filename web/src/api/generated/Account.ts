@@ -43,4 +43,4 @@ cash_flow_class: CashFlowClass | null,
 /**
  * Edit sequence, bumped on every save (optimistic concurrency).
  */
-edit_seq: bigint, };
+edit_seq: number, };

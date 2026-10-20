@@ -8,4 +8,4 @@ import type { TxnType } from "./TxnType";
 /**
  * A row in a transaction list.
  */
-export type TxnSummary = { id: TxnId, txn_type: TxnType, date: string, number: string | null, entity_id: EntityId | null, entity_name: string | null, account_id: AccountId | null, account_name: string | null, amount: Money, open_balance: Money | null, due_date: string | null, memo: string | null, is_void: boolean, is_pending: boolean, edit_seq: bigint, };
+export type TxnSummary = { id: TxnId, txn_type: TxnType, date: string, number: string | null, entity_id: EntityId | null, entity_name: string | null, account_id: AccountId | null, account_name: string | null, amount: Money, open_balance: Money | null, due_date: string | null, memo: string | null, is_void: boolean, is_pending: boolean, edit_seq: number, };

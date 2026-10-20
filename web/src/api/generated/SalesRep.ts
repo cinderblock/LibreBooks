@@ -10,4 +10,4 @@ initials: string,
 /**
  * The employee, vendor or other name this rep is.
  */
-entity_id: EntityId | null, is_active: boolean, edit_seq: bigint, };
+entity_id: EntityId | null, is_active: boolean, edit_seq: number, };

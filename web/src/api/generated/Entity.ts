@@ -57,4 +57,4 @@ hired_date: string | null, released_date: string | null,
 /**
  * User-defined fields, keyed by the field's label.
  */
-custom_fields: Record<string, string>, edit_seq: bigint, };
+custom_fields: Record<string, string>, edit_seq: number, };
