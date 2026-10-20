@@ -678,3 +678,72 @@ fn memorized_rent_enters_itself_each_month() {
     let sums = b.read(|c| balances::sums(c, None, None)).unwrap();
     assert_eq!(sums[&s.rent], Money(450_000));
 }
+
+#[test]
+fn a_backdated_purchase_recosts_later_sales() {
+    let b = books();
+    let s = setup(&b);
+    let (part, cogs, asset) = b
+        .write(&me(), |w| {
+            let cogs = accounts::save(
+                w,
+                accounts::new_account("COGS", AccountType::CostOfGoodsSold),
+            )?
+            .id;
+            let asset = accounts::save(
+                w,
+                accounts::new_account("Inventory", AccountType::OtherCurrentAsset),
+            )?
+            .id;
+            let mut i = Item::blank(ItemType::Inventory, "Widget");
+            i.income_account_id = Some(s.income);
+            i.expense_account_id = Some(cogs);
+            i.asset_account_id = Some(asset);
+            Ok((items::save(w, i)?.id, cogs, asset))
+        })
+        .unwrap();
+    let buy = |b: &Books, d, qty: i64, cost_each: i64| {
+        let mut t = Txn::new(TxnType::Bill, d);
+        t.entity_id = Some(s.vendor);
+        let mut l = TxnLine::item(part, Decimal::from(qty), Decimal::from(cost_each));
+        l.kind = LineKind::Item;
+        t.lines.push(l);
+        b.write(&me(), |w| txns::save(w, t)).unwrap().txn
+    };
+    // 10 at $10, then sell 5 on the 20th: COGS $50.
+    buy(&b, date(2026, 10, 1), 10, 10);
+    let mut sale = Txn::new(TxnType::Invoice, date(2026, 10, 20));
+    sale.entity_id = Some(s.customer);
+    sale.lines
+        .push(TxnLine::item(part, Decimal::from(5), Decimal::from(30)));
+    let sale = b.write(&me(), |w| txns::save(w, sale)).unwrap().txn;
+    let cogs_total = |b: &Books| {
+        b.read(|c| balances::sums(c, None, None))
+            .unwrap()
+            .get(&cogs)
+            .copied()
+            .unwrap_or_default()
+    };
+    assert_eq!(cogs_total(&b), Money(5_000));
+
+    // Another 10 at $20 entered back on the 15th: the sale's average is now $15.
+    let back = buy(&b, date(2026, 10, 15), 10, 20);
+    assert_eq!(cogs_total(&b), Money(7_500));
+    let resaved = b.read(|c| txns::get(c, sale.id)).unwrap();
+    assert_eq!(
+        resaved.edit_seq,
+        sale.edit_seq + 1,
+        "the re-posted sale moved on"
+    );
+    let item = b.read(|c| items::get(c, part)).unwrap();
+    assert_eq!(item.quantity_on_hand, Decimal::from(15));
+    assert_eq!(item.average_cost, Decimal::from(15));
+
+    // Deleting that purchase puts the sale back at $10 each.
+    b.write(&me(), |w| txns::delete(w, back.id, back.edit_seq))
+        .unwrap();
+    assert_eq!(cogs_total(&b), Money(5_000));
+    let sums = b.read(|c| balances::sums(c, None, None)).unwrap();
+    assert_eq!(sums[&asset], Money(5_000));
+    assert_eq!(b.check_integrity().unwrap(), Vec::<String>::new());
+}

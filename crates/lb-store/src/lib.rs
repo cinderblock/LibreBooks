@@ -25,6 +25,7 @@ pub mod context;
 pub mod entities;
 pub mod extref;
 pub mod hier;
+pub mod inventory;
 pub mod items;
 pub mod lists;
 pub mod merge;

@@ -107,7 +107,11 @@ pub fn cleared_str(c: ClearedStatus) -> &'static str {
 
 /// Create or update a transaction. `txn.edit_seq` must match what is stored (0
 /// for a new one).
-pub fn save(w: &mut Writer<'_>, mut txn: Txn) -> Result<SaveOutcome> {
+pub fn save(w: &mut Writer<'_>, txn: Txn) -> Result<SaveOutcome> {
+    save_inner(w, txn, true)
+}
+
+fn save_inner(w: &mut Writer<'_>, mut txn: Txn, recost_after: bool) -> Result<SaveOutcome> {
     let existing = find(&w.tx, txn.id)?;
     match &existing {
         Some(x) => {
@@ -173,6 +177,8 @@ pub fn save(w: &mut Writer<'_>, mut txn: Txn) -> Result<SaveOutcome> {
     }
 
     let old_targets: BTreeSet<TxnId> = existing.as_ref().map(touched_txns).unwrap_or_default();
+    let mut inventory_items = crate::inventory::items_in_postings(&w.tx, txn.id)?;
+    let earliest = existing.as_ref().map_or(txn.date, |x| x.date.min(txn.date));
     let old_cleared = existing_cleared(&w.tx, txn.id)?;
 
     let now = crate::now();
@@ -323,6 +329,19 @@ pub fn save(w: &mut Writer<'_>, mut txn: Txn) -> Result<SaveOutcome> {
     audit::record(w, "txn", &id, action, existing.as_ref(), Some(&txn), None)?;
     w.changed("txn", id, action);
 
+    inventory_items.extend(
+        postings
+            .iter()
+            .filter(|p| p.quantity.is_some())
+            .filter_map(|p| p.item_id),
+    );
+    if !inventory_items.is_empty() {
+        if recost_after {
+            crate::inventory::recost(w, &inventory_items, earliest, txn.id)?;
+        }
+        crate::inventory::refresh_items(w, &inventory_items)?;
+    }
+
     Ok(SaveOutcome {
         txn,
         postings,
@@ -395,7 +414,12 @@ pub fn delete(w: &mut Writer<'_>, id: TxnId, edit_seq: i64) -> Result<()> {
         ));
     }
     let targets = touched_txns(&txn);
+    let inventory_items = crate::inventory::items_in_postings(&w.tx, id)?;
     w.tx.execute("DELETE FROM txn WHERE id = ?1", [&sid])?;
+    if !inventory_items.is_empty() {
+        crate::inventory::recost(w, &inventory_items, txn.date, id)?;
+        crate::inventory::refresh_items(w, &inventory_items)?;
+    }
     w.tx.execute(
         "DELETE FROM external_ref WHERE local_kind = 'txn' AND local_id = ?1",
         [&sid],
@@ -987,6 +1011,12 @@ pub fn undeposited(c: &Connection) -> Result<Vec<TxnSummary>> {
         out.push(r??);
     }
     Ok(out)
+}
+
+/// Save again with the same form, for re-costing: postings are recomputed from
+/// today's average costs. `pub(crate)` because only the store decides when.
+pub(crate) fn repost(w: &mut Writer<'_>, txn: Txn) -> Result<SaveOutcome> {
+    save_inner(w, txn, false)
 }
 
 #[cfg(test)]
