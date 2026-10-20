@@ -182,10 +182,15 @@ Phases are ordered; each ends usable. **Current step is marked ▶.**
   (`51d6943`), lb-backup/lb-update/lb-tunnel (`bc44451`). Still running: lb-qbd,
   web UI phase A (fixture mode), desktop (Tauri), and a server-ops integration
   agent (secret store, settings, backups/update/tunnel/feeds routes and CLI).
-  Merged since: lb-qbd (`a0a7559`), web UI (`web UI foundation`), desktop
-  (`5951bd2`). ▶ Still running: server-ops integration agent (resumed after a
-  usage-limit cut-off). Next: rerun the import with the two fixes, wire QBD
-  import routes into the server, web UI phase B (the other forms).
+  Merged since: lb-qbd (`a0a7559`), web UI, desktop (`5951bd2`), server ops
+  (`ef1d3e4`: secret store, settings, backups/update/tunnel/feeds routes).
+  **2026-10-20 ~01:00: the account's weekly usage limit hit (resets Oct 23,
+  3am PT).** The server-ops agent still has its CLI wiring uncommitted in
+  `.claude/worktrees/agent-a16c3059f0635380d` (`crates/librebooks/src/ops.rs`,
+  main.rs, README); the web phase B agent died before starting (worktree
+  `agent-a493abfcafa87a0b2`, nothing done). ▶ Next session: resume both agents
+  (SendMessage to their ids, or relaunch with the same briefs), then the QBD
+  import routes in lb-server (on the merged secret store), then forms.
 - Phase 1 — Ledger core
   - Domain types, chart of accounts (all QBD account types), names (customers +
     jobs, vendors, employees, other names), items (all QBD item types), classes,
@@ -320,8 +325,11 @@ Phases are ordered; each ends usable. **Current step is marked ▶.**
       purchases, JE lines in A/R-A/P as open items: still to do.
 - [x] Phase 2: server API (`84edc4c`), auth integration (`49063f0`), reports API
       (`c33ee6c`). Feeds/backup/update/tunnel routes: server-ops agent running.
-- [x] Phase 3: QBD read-only import + parity (`a0a7559`, `b580484`); first
-      full import done, 143/159 accounts match; rerun with fixes pending.
+- [x] Phase 3: QBD read-only import + parity (`a0a7559`, `b580484`). Full import
+      of the real company done; after the open-item fixes (`9f68491`, `55e9c3a`,
+      `ff88706`) the rerun has 0 failures, 0 open-balance mismatches, 145/159
+      accounts exact. The 14 still off are all bridge gaps (card charges,
+      transfers): see question 7.
 - [~] Phase 4: web UI foundation merged (`web UI`, 157 tests, Playwright);
       other forms, reports catalog UI, admin screens, register editing next.
 - [x] Phase 5: desktop merged (`5951bd2`): local + thin-client modes, NSIS built.
