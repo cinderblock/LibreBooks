@@ -22,14 +22,15 @@ import type {
   DeviceKeyInfo,
   EnrolmentInfo,
   ImportSettings,
+  ImportStatus,
   MergeRequest,
   MintedEnrolmentLink,
+  NameBalance,
   NewEnrolment,
-  ParityReport,
+  ParityStatus,
   PasskeyInfo,
-  QbdImportStatus,
+  QbdParityOptions,
   QbdSyncOptions,
-  QbwcPassword,
   RestoreRequest,
   Restored,
   Role,
@@ -293,6 +294,9 @@ export class HttpApiClient implements ApiClient {
   }
   balances(co: CompanyId, range?: Partial<DateRange>) {
     return this.request<AccountBalance[]>('GET', this.co(co, '/balances'), { query: rangeParams(range) });
+  }
+  nameBalances(co: CompanyId) {
+    return this.request<NameBalance[]>('GET', this.co(co, '/balances/names'));
   }
   open(co: CompanyId, entityId: string, kind: 'receivable' | 'payable') {
     return this.request<TxnSummary[]>('GET', this.co(co, '/open'), {
@@ -604,6 +608,7 @@ export class HttpApiClient implements ApiClient {
   }
   attachments(co: CompanyId, query: AttachmentQuery = {}) {
     const p = new URLSearchParams();
+    if (query.all) p.set('all', 'true');
     if (query.record_kind) p.set('record_kind', query.record_kind);
     if (query.record_id) p.set('record_id', query.record_id);
     return this.request<AttachmentMeta[]>('GET', this.co(co, '/attachments'), { query: p });
@@ -635,34 +640,34 @@ export class HttpApiClient implements ApiClient {
 
   // ---- QuickBooks import -----------------------------------------------------
 
-  qbdSettings(co: CompanyId) {
-    return this.request<ImportSettings>('GET', this.co(co, '/import/qbd'));
-  }
-  putQbdSettings(co: CompanyId, settings: ImportSettings) {
-    return this.request<ImportSettings>('PUT', this.co(co, '/import/qbd'), { body: settings });
+  private waitParams(wait?: number): URLSearchParams {
+    const p = new URLSearchParams();
+    if (wait) p.set('wait', String(Math.min(wait, 120)));
+    return p;
   }
   qbdStatus(co: CompanyId, wait?: number) {
-    const p = new URLSearchParams();
-    if (wait) p.set('wait', String(wait));
-    return this.request<QbdImportStatus>('GET', this.co(co, '/import/qbd/status'), { query: p });
+    return this.request<ImportStatus>('GET', this.co(co, '/import/qbd/status'), { query: this.waitParams(wait) });
   }
-  async qbdParity(co: CompanyId, wait?: number) {
-    const p = new URLSearchParams();
-    if (wait) p.set('wait', String(wait));
-    const r = await this.request<ParityReport | null | undefined>('GET', this.co(co, '/import/qbd/parity'), { query: p });
-    return r ?? null;
+  putQbdSettings(co: CompanyId, settings: ImportSettings, bridgeKey?: string | null) {
+    // The key rides beside the flattened settings and is saved as a secret; it never comes back.
+    return this.request<ImportStatus>('PUT', this.co(co, '/import/qbd'), { body: bridgeKey ? { ...settings, bridge_key: bridgeKey } : settings });
   }
   qbdSync(co: CompanyId, opts: QbdSyncOptions = {}) {
-    return this.request<void>('POST', this.co(co, '/import/qbd/sync'), { body: opts });
+    return this.request<ImportStatus>('POST', this.co(co, '/import/qbd/sync'), { body: opts });
   }
-  qbdParityRun(co: CompanyId) {
-    return this.request<void>('POST', this.co(co, '/import/qbd/parity'));
+  qbdParityRun(co: CompanyId, opts: QbdParityOptions = {}) {
+    return this.request<ImportStatus>('POST', this.co(co, '/import/qbd/parity'), { body: opts });
+  }
+  qbdParity(co: CompanyId, wait?: number) {
+    return this.request<ParityStatus>('GET', this.co(co, '/import/qbd/parity'), { query: this.waitParams(wait) });
   }
   qbwcFile(co: CompanyId) {
     return this.download('GET', this.co(co, '/import/qbd/qbwc.qwc'), 'librebooks.qwc');
   }
-  qbwcPassword(co: CompanyId, password?: string | null) {
-    return this.request<QbwcPassword>('POST', this.co(co, '/import/qbd/qbwc/password'), { body: password ? { password } : {} });
+  async qbwcPassword(co: CompanyId, password?: string | null) {
+    // `{ value }` → 204; no value → `{ password }`, generated and shown once.
+    const r = await this.request<{ password: string } | undefined>('POST', this.co(co, '/import/qbd/qbwc/password'), { body: password ? { value: password } : {} });
+    return r?.password ?? null;
   }
 
   /**

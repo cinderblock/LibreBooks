@@ -13,14 +13,15 @@ import type {
   DeviceKeyInfo,
   EnrolmentInfo,
   ImportSettings,
+  ImportStatus,
   MergeRequest,
   MintedEnrolmentLink,
+  NameBalance,
   NewEnrolment,
-  ParityReport,
+  ParityStatus,
   PasskeyInfo,
-  QbdImportStatus,
+  QbdParityOptions,
   QbdSyncOptions,
-  QbwcPassword,
   RestoreRequest,
   Restored,
   Role,
@@ -147,6 +148,13 @@ export interface ApiClient {
   setCleared(co: CompanyId, accountId: string, txnId: string, status: ClearedStatus): Promise<void>;
   balances(co: CompanyId, range?: Partial<DateRange>): Promise<AccountBalance[]>;
   /**
+   * Every name with an open A/R or A/P item: what it owes us (`receivable`) and
+   * what we owe it (`payable`), both positive, credits and unapplied payments
+   * counting against; `*_total` rolls jobs up to their parent (the Customer and
+   * Vendor Centers' Balance and Balance Total).
+   */
+  nameBalances(co: CompanyId): Promise<NameBalance[]>;
+  /**
    * Open items for a name and its jobs: invoices, charges and unused credits /
    * unapplied payments (receivable), or bills and unused credits (payable).
    */
@@ -257,7 +265,7 @@ export interface ApiClient {
   /** Restores into a NEW company; nothing existing is replaced. */
   restoreBackup(co: CompanyId, id: string, destination: number, body: RestoreRequest): Promise<Restored>;
   exportCompany(co: CompanyId): Promise<FileDownload>;
-  /** The inbox (nothing attached yet) or what's attached to one record. */
+  /** The inbox (nothing attached yet), what's attached to one record, or (`all`) every document. */
   attachments(co: CompanyId, query?: AttachmentQuery): Promise<AttachmentMeta[]>;
   uploadAttachment(co: CompanyId, file: File, record?: AttachmentRecord): Promise<AttachmentMeta>;
   /** Attach to a record, or detach (null) back into the inbox. */
@@ -268,17 +276,25 @@ export interface ApiClient {
   merge(co: CompanyId, req: MergeRequest): Promise<void>;
 
   // ---- QuickBooks import (`/import/qbd/*`, admin) ----
-  qbdSettings(co: CompanyId): Promise<ImportSettings>;
-  putQbdSettings(co: CompanyId, settings: ImportSettings): Promise<ImportSettings>;
-  /** `wait` seconds: long-poll until the running sync moves or finishes. */
-  qbdStatus(co: CompanyId, wait?: number): Promise<QbdImportStatus>;
-  qbdParity(co: CompanyId, wait?: number): Promise<ParityReport | null>;
-  /** 202; 409 `running` while one is going. */
-  qbdSync(co: CompanyId, opts?: QbdSyncOptions): Promise<void>;
-  qbdParityRun(co: CompanyId): Promise<void>;
+  /** `wait` seconds (at most 120): long-poll until the running job finishes. */
+  qbdStatus(co: CompanyId, wait?: number): Promise<ImportStatus>;
+  /**
+   * The settings whole, plus the write-only bridge key (saved as a secret;
+   * never returned). 400 `invalid` lists `detail.problems`; 409 `duplicate`
+   * when another company uses the Web Connector user name.
+   */
+  putQbdSettings(co: CompanyId, settings: ImportSettings, bridgeKey?: string | null): Promise<ImportStatus>;
+  /** 202 with the status; 409 `running` while a job is going. */
+  qbdSync(co: CompanyId, opts?: QbdSyncOptions): Promise<ImportStatus>;
+  qbdParityRun(co: CompanyId, opts?: QbdParityOptions): Promise<ImportStatus>;
+  /** The last parity report and whether a parity job runs; `wait` long-polls like `qbdStatus`. */
+  qbdParity(co: CompanyId, wait?: number): Promise<ParityStatus>;
   qbwcFile(co: CompanyId): Promise<FileDownload>;
-  /** Set the Web Connector password, or let the server make one; shown once. */
-  qbwcPassword(co: CompanyId, password?: string | null): Promise<QbwcPassword>;
+  /**
+   * Set the Web Connector password (null back), or let the server make one:
+   * the generated password, shown this once and never again.
+   */
+  qbwcPassword(co: CompanyId, password?: string | null): Promise<string | null>;
 
   /** Live changes (SSE `/events?company=`); the fixture client emits its own. */
   subscribe(co: CompanyId, handlers: EventHandlers): EventSubscription;

@@ -79,6 +79,31 @@ describe('HttpApiClient', () => {
     }
   });
 
+  test('name balances, the all-attachments listing and the import routes take the documented shapes', async () => {
+    const calls: Array<{ url: string; init: RequestInit }> = [];
+    const fake = (async (url: string, init: RequestInit) => {
+      calls.push({ url, init });
+      if (url.endsWith('/qbwc/password')) return new Response(null, { status: 204 });
+      return new Response('[]', { status: 200 });
+    }) as unknown as FetchFn;
+    const api = new HttpApiClient({ fetch: fake });
+    await api.nameBalances('co1');
+    await api.attachments('co1', { all: true });
+    await api.attachments('co1', { record_kind: 'txn', record_id: 't1' });
+    await api.qbdStatus('co1', 500);
+    await api.qbdParity('co1');
+    const settings = { transport: 'bridge', bridge: { url: 'http://b', key_ref: null, delay_ms: 100 }, qbwc: { user_name: 'lb', app_url: null, run_every_minutes: null, owner_id: 'o', file_id: 'f' }, sdk: { file_mode: 'dont_care' }, company_file: '' } as const;
+    await api.putQbdSettings('co1', settings, 'k3y');
+    await api.putQbdSettings('co1', settings);
+    expect(await api.qbwcPassword('co1', 'chosen-one')).toBeNull();
+    const urls = calls.map((c) => c.url.replace('/api/v1/c/co1', ''));
+    expect(urls.slice(0, 5)).toEqual(['/balances/names', '/attachments?all=true', '/attachments?record_kind=txn&record_id=t1', '/import/qbd/status?wait=120', '/import/qbd/parity']);
+    // The key rides beside the flattened settings only when given.
+    expect(JSON.parse(calls[5]!.init.body as string)).toEqual({ ...settings, bridge_key: 'k3y' });
+    expect(JSON.parse(calls[6]!.init.body as string)).toEqual(settings);
+    expect(JSON.parse(calls[7]!.init.body as string)).toEqual({ value: 'chosen-one' });
+  });
+
   test('network failures are ApiError("network")', async () => {
     const fake = (async () => {
       throw new TypeError('Failed to fetch');

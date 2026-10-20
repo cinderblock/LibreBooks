@@ -17,6 +17,8 @@ export const qk = {
   register: (co: CompanyId, accountId: string, range: Partial<DateRange> = {}) => ['c', co, 'register', accountId, range] as const,
   balancesAll: (co: CompanyId) => ['c', co, 'balances'] as const,
   balances: (co: CompanyId, range: Partial<DateRange> = {}) => ['c', co, 'balances', range] as const,
+  /** Under `balancesAll`, so every transaction change refreshes it with the account balances. */
+  nameBalances: (co: CompanyId) => ['c', co, 'balances', 'names'] as const,
   open: (co: CompanyId, entityId: string, kind: string) => ['c', co, 'open', entityId, kind] as const,
   openAll: (co: CompanyId) => ['c', co, 'open'] as const,
   nextNumber: (co: CompanyId, type: string, accountId: string | null) => ['c', co, 'next-number', type, accountId] as const,
@@ -44,7 +46,7 @@ export const qk = {
   attachmentsAll: (co: CompanyId) => ['c', co, 'attachments'] as const,
   attachments: (co: CompanyId, q: AttachmentQuery = {}) => ['c', co, 'attachments', q] as const,
   qbdAll: (co: CompanyId) => ['c', co, 'qbd'] as const,
-  qbdSettings: (co: CompanyId) => ['c', co, 'qbd', 'settings'] as const,
+  /** `ImportStatus`: settings, what's set, the running job and the last reports in one. */
   qbdStatus: (co: CompanyId) => ['c', co, 'qbd', 'status'] as const,
   qbdParity: (co: CompanyId) => ['c', co, 'qbd', 'parity'] as const,
 };

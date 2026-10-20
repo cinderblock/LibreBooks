@@ -1,19 +1,21 @@
 // Attachments (Company → Attachments, and the paperclip on a form): receipts
 // and documents. Upload a file or take a photo (`<input capture>` opens the
 // camera on a phone); what isn't attached to anything yet waits in the inbox
-// until it's attached to a transaction. Opened from a form, the window shows
-// that record's files first and offers to attach inbox items to it.
+// until it's attached to a transaction. The Attached tab lists every document
+// that has found its record (`GET /attachments?all=true`). Opened from a form,
+// the window shows that record's files first and offers to attach inbox items
+// to it.
 
-import { ActionIcon, Alert, Anchor, Badge, Button, Card, FileButton, Group, Image, Modal, SimpleGrid, Stack, Table, Text, TextInput, Title, Tooltip } from '@mantine/core';
+import { ActionIcon, Alert, Anchor, Badge, Button, Card, FileButton, Group, Image, Modal, SimpleGrid, Stack, Table, Tabs, Text, TextInput, Title, Tooltip } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { IconCamera, IconExternalLink, IconPaperclip, IconTrash, IconUpload } from '@tabler/icons-react';
 import { useMutation } from '@tanstack/react-query';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useApi, useCompanyId } from '~/api/context';
 import { describeError } from '~/api/errors';
 import { useAttachments, useEntityIndex, useInvalidate, useTxns } from '~/api/hooks';
 import { qk } from '~/api/keys';
-import { asNumber, type AttachmentMeta, type AttachmentRecord } from '~/api/types';
+import type { AttachmentMeta, AttachmentRecord } from '~/api/types';
 import { formatDateShort } from '~/lib/dates';
 import { formatBytes } from '~/lib/format';
 import { formatMoney } from '~/lib/money';
@@ -33,8 +35,12 @@ export function Attachments() {
   const kind = win.desc.params.kind;
   const id = win.desc.params.id;
   const record: AttachmentRecord = kind && id ? { record_kind: kind, record_id: id } : null;
+  const [tab, setTab] = useState<'inbox' | 'attached'>('inbox');
   const inbox = useAttachments({});
   const mine = useAttachments(record ? { record_kind: record.record_kind, record_id: record.record_id } : {}, !!record);
+  // Every document, fetched only while the Attached tab shows; the inbox rows are already on their own tab.
+  const everything = useAttachments({ all: true }, tab === 'attached');
+  const attached = useMemo(() => (everything.data ?? []).filter((a) => a.record_kind && a.record_id), [everything.data]);
   const [attaching, setAttaching] = useState<AttachmentMeta | null>(null);
   const [deleting, setDeleting] = useState<AttachmentMeta | null>(null);
   const camera = useRef<HTMLInputElement>(null);
@@ -110,18 +116,31 @@ export function Attachments() {
       )}
 
       <Card withBorder>
-        <Group gap="xs" mb="xs">
-          <Text fw={600}>Inbox</Text>
-          {(inbox.data?.length ?? 0) > 0 && <Badge variant="light">{inbox.data!.length}</Badge>}
-        </Group>
-        <AttachmentTable
-          rows={inbox.data ?? []}
-          loading={inbox.isLoading}
-          empty="The inbox is empty."
-          onAttach={record ? (a) => attach.mutate({ a, to: record }) : setAttaching}
-          attachLabel={record ? 'Attach here' : 'Attach to…'}
-          onDelete={setDeleting}
-        />
+        <Tabs value={tab} onChange={(v) => setTab(v === 'attached' ? 'attached' : 'inbox')} keepMounted={false}>
+          <Tabs.List mb="xs">
+            <Tabs.Tab value="inbox" rightSection={(inbox.data?.length ?? 0) > 0 ? <Badge variant="light" size="sm">{inbox.data!.length}</Badge> : undefined}>
+              Inbox
+            </Tabs.Tab>
+            <Tabs.Tab value="attached">Attached</Tabs.Tab>
+          </Tabs.List>
+          <Tabs.Panel value="inbox">
+            <AttachmentTable
+              rows={inbox.data ?? []}
+              loading={inbox.isLoading}
+              empty="The inbox is empty."
+              onAttach={record ? (a) => attach.mutate({ a, to: record }) : setAttaching}
+              attachLabel={record ? 'Attach here' : 'Attach to…'}
+              onDelete={setDeleting}
+            />
+          </Tabs.Panel>
+          <Tabs.Panel value="attached">
+            {everything.error ? (
+              <Alert color="red">{describeError(everything.error)}</Alert>
+            ) : (
+              <AttachmentTable rows={attached} loading={everything.isLoading} empty="Nothing is attached to a record yet." showRecord onDetach={(a) => attach.mutate({ a, to: null })} onDelete={setDeleting} />
+            )}
+          </Tabs.Panel>
+        </Tabs>
       </Card>
 
       <AttachToModal attachment={attaching} onClose={() => setAttaching(null)} onPick={(to) => attaching && attach.mutate({ a: attaching, to })} busy={attach.isPending} error={attach.error} />
@@ -133,11 +152,30 @@ export function Attachments() {
   );
 }
 
-function AttachmentTable({ rows, loading, empty, onAttach, attachLabel, onDetach, onDelete }: { rows: AttachmentMeta[]; loading: boolean; empty: string; onAttach?(a: AttachmentMeta): void; attachLabel?: string; onDetach?(a: AttachmentMeta): void; onDelete(a: AttachmentMeta): void }) {
+/** What a document is attached to, for the Attached tab: a button into a transaction, a label for other records. */
+function RecordLink({ a }: { a: AttachmentMeta }) {
+  const open = useOpenWindow();
+  if (!a.record_kind || !a.record_id) return null;
+  if (a.record_kind === 'txn') {
+    return (
+      <Button size="compact-xs" variant="subtle" rightSection={<IconExternalLink size={12} />} onClick={() => open(paths.txn(a.record_id!))}>
+        Open transaction
+      </Button>
+    );
+  }
+  return (
+    <Text size="xs" c="dimmed">
+      Attached to {RECORD_LABEL[a.record_kind] ?? a.record_kind}
+    </Text>
+  );
+}
+
+const RECORD_LABEL: Record<string, string> = { txn: 'a transaction', entity: 'a name', account: 'an account', item: 'an item' };
+
+function AttachmentTable({ rows, loading, empty, onAttach, attachLabel, onDetach, onDelete, showRecord }: { rows: AttachmentMeta[]; loading: boolean; empty: string; onAttach?(a: AttachmentMeta): void; attachLabel?: string; onDetach?(a: AttachmentMeta): void; onDelete(a: AttachmentMeta): void; showRecord?: boolean }) {
   const api = useApi();
   const co = useCompanyId();
   const mobile = useIsMobile();
-  const open = useOpenWindow();
   if (!loading && rows.length === 0) {
     return (
       <Text size="sm" c="dimmed">
@@ -157,9 +195,10 @@ function AttachmentTable({ rows, loading, empty, onAttach, attachLabel, onDetach
                   {a.filename}
                 </Anchor>
                 <Text size="xs" c="dimmed">
-                  {formatBytes(asNumber(a.size))} · <When iso={a.created_at} />
+                  {formatBytes(a.size)} · <When iso={a.created_at} />
                 </Text>
                 <Group gap={4} mt={4}>
+                  {showRecord && <RecordLink a={a} />}
                   {onAttach && (
                     <Button size="compact-xs" variant="light" leftSection={<IconPaperclip size={12} />} onClick={() => onAttach(a)}>
                       {attachLabel}
@@ -194,20 +233,14 @@ function AttachmentTable({ rows, loading, empty, onAttach, attachLabel, onDetach
                 {a.filename}
               </Anchor>
               <Text size="xs" c="dimmed">
-                {a.mime} · {formatBytes(asNumber(a.size))}
+                {a.mime} · {formatBytes(a.size)}
                 {a.created_by ? ` · ${a.created_by}` : ''}
               </Text>
             </Table.Td>
             <Table.Td>
               <When iso={a.created_at} />
             </Table.Td>
-            <Table.Td>
-              {a.record_kind === 'txn' && a.record_id && (
-                <Button size="compact-xs" variant="subtle" rightSection={<IconExternalLink size={12} />} onClick={() => open(paths.txn(a.record_id!))}>
-                  Open transaction
-                </Button>
-              )}
-            </Table.Td>
+            <Table.Td>{showRecord && <RecordLink a={a} />}</Table.Td>
             <Table.Td ta="right">
               <Group gap={4} justify="flex-end" wrap="nowrap">
                 {onAttach && (
