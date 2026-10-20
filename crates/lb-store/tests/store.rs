@@ -594,3 +594,51 @@ fn a_journal_entry_in_ar_is_an_open_item_a_payment_can_pay() {
     b.write(&me(), |w| txns::save(w, pmt)).unwrap();
     assert_eq!(open(je.id), Some(Money::ZERO));
 }
+
+#[test]
+fn merging_names_and_accounts_moves_everything_onto_the_survivor() {
+    let b = books();
+    let s = setup(&b);
+    let (dup_vendor, utilities) = b
+        .write(&me(), |w| {
+            Ok((
+                entities::save(w, Entity::blank(EntityKind::Vendor, "Landlord LLC"))?.id,
+                accounts::save(w, accounts::new_account("Utilities", AccountType::Expense))?.id,
+            ))
+        })
+        .unwrap();
+    let mut t = Txn::new(TxnType::Check, date(2026, 10, 1));
+    t.account_id = Some(s.bank);
+    t.entity_id = Some(dup_vendor);
+    t.lines.push(TxnLine::account(utilities, Money(4_200)));
+    let t = b.write(&me(), |w| txns::save(w, t)).unwrap().txn;
+
+    b.write(&me(), |w| {
+        lb_store::merge::merge_entities(w, dup_vendor, s.vendor)
+    })
+    .unwrap();
+    b.write(&me(), |w| {
+        lb_store::merge::merge_accounts(w, utilities, s.rent)
+    })
+    .unwrap();
+
+    let after = b.read(|c| txns::get(c, t.id)).unwrap();
+    assert_eq!(after.entity_id, Some(s.vendor));
+    assert_eq!(after.lines[0].account_id, Some(s.rent));
+    assert_eq!(
+        after.edit_seq,
+        t.edit_seq + 2,
+        "each merge bumps it, so a form open on the old version can't save over it"
+    );
+    assert!(b.read(|c| entities::find(c, dup_vendor)).unwrap().is_none());
+    let sums = b.read(|c| balances::sums(c, None, None)).unwrap();
+    assert_eq!(sums[&s.rent], Money(4_200));
+    // Different lists don't merge.
+    assert!(
+        b.write(&me(), |w| lb_store::merge::merge_entities(
+            w, s.customer, s.vendor
+        ))
+        .is_err()
+    );
+    assert_eq!(b.check_integrity().unwrap(), Vec::<String>::new());
+}

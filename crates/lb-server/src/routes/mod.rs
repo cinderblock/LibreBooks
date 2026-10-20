@@ -10,6 +10,7 @@ mod banking;
 mod company;
 mod events;
 mod lists;
+mod merge;
 mod reports;
 mod system;
 mod txns;
@@ -49,6 +50,7 @@ pub fn api() -> Router<AppState> {
         .route("/open", get(txns::open_items))
         .route("/undeposited", get(txns::undeposited))
         .route("/audit", get(company::audit))
+        .route("/merge", post(merge::merge))
         .route("/reports", get(reports::catalog))
         .route("/reports/run", post(reports::run_report))
         .route("/reports/export", post(reports::export))
