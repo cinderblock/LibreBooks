@@ -8,6 +8,7 @@
 
 mod client;
 mod common;
+mod live;
 mod normalise;
 mod parity;
 mod read_only;
