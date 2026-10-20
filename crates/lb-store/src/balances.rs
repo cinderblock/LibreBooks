@@ -61,6 +61,8 @@ pub struct RegisterLine {
     /// This transaction's effect on the account, debit-positive.
     pub amount: Money,
     pub cleared: ClearedStatus,
+    /// Matched to (or made from) a bank-feed download: QBD's lightning bolt.
+    pub downloaded: bool,
     /// Running balance, debit-positive (the UI shows it naturally for the type).
     pub balance: Money,
     pub is_void: bool,
@@ -92,7 +94,7 @@ pub fn register(
     let mut stmt = c.prepare(
         "SELECT t.id, t.txn_type, t.date, t.number, t.entity_id, e.full_name, t.memo, t.is_void, t.edit_seq,
                 t.due_date, t.open_balance,
-                SUM(p.amount), MIN(p.cleared), MIN(p.memo), MIN(p.entity_id),
+                SUM(p.amount), MIN(p.cleared), MIN(p.memo), MIN(p.entity_id), MAX(p.downloaded),
                 (SELECT COUNT(DISTINCT o.account_id) FROM posting o WHERE o.txn_id = t.id AND o.account_id <> ?1),
                 (SELECT MIN(o.account_id) FROM posting o WHERE o.txn_id = t.id AND o.account_id <> ?1)
          FROM posting p JOIN txn t ON t.id = p.txn_id LEFT JOIN entity e ON e.id = t.entity_id
@@ -119,8 +121,9 @@ pub fn register(
             cleared: r.get(12)?,
             posting_memo: r.get(13)?,
             posting_entity: r.get(14)?,
-            others: r.get(15)?,
-            other: r.get(16)?,
+            others: r.get(16)?,
+            other: r.get(17)?,
+            downloaded: r.get(15)?,
         })
     })?;
     let mut balance = Money(opening);
@@ -154,6 +157,7 @@ pub fn register(
             memo: r.memo.or(r.posting_memo),
             amount: Money(r.amount),
             cleared: parse_cleared(&r.cleared),
+            downloaded: r.downloaded,
             balance,
             is_void: r.is_void,
             edit_seq: r.edit_seq,
@@ -182,6 +186,7 @@ struct RawLine {
     posting_entity: Option<String>,
     others: i64,
     other: Option<String>,
+    downloaded: bool,
 }
 
 pub fn account_names(c: &Connection) -> Result<HashMap<AccountId, String>> {
@@ -229,5 +234,27 @@ pub fn set_cleared(
         });
     }
     w.changed("txn", txn.to_string(), "cleared");
+    Ok(())
+}
+
+/// Set the bank-feed "downloaded" mark on a transaction's postings in one
+/// account (matching a download, or undoing that).
+pub fn set_downloaded(
+    w: &mut crate::Writer<'_>,
+    txn: TxnId,
+    account: AccountId,
+    downloaded: bool,
+) -> Result<()> {
+    let n = w.tx.execute(
+        "UPDATE posting SET downloaded = ?3 WHERE txn_id = ?1 AND account_id = ?2",
+        params![txn.to_string(), account.to_string(), downloaded],
+    )?;
+    if n == 0 {
+        return Err(StoreError::NotFound {
+            kind: "register line",
+            id: txn.to_string(),
+        });
+    }
+    w.changed("txn", txn.to_string(), "downloaded");
     Ok(())
 }

@@ -4,7 +4,8 @@
 //! A candidate is a register transaction in the same account whose effect on
 //! that account is exactly the downloaded amount (sign included: a deposit never
 //! matches a check), dated within a window either side of the bank's date, not
-//! void, not already cleared, and not already linked to another download. Each
+//! void, not already matched to a download (QBD's "downloaded" mark, kept apart
+//! from the reconcile check mark), and not linked to another download. Each
 //! candidate is scored:
 //!
 //! | Signal | Points |
@@ -28,7 +29,7 @@
 use std::collections::HashMap;
 
 use jiff::civil::Date;
-use lb_core::{ClearedStatus, EntityId, Money, TxnId, TxnType};
+use lb_core::{EntityId, Money, TxnId, TxnType};
 use lb_store::codec::{self, SqlDate};
 use lb_store::{Writer, balances};
 use rusqlite::{Connection, params};
@@ -186,7 +187,7 @@ pub fn candidates(c: &Connection, f: &FeedTxn, opts: MatchOptions) -> Result<Vec
            AND NOT EXISTS (SELECT 1 FROM feed_txn f
                            WHERE f.matched_txn_id = t.id AND f.status IN ('matched', 'added') AND f.id <> ?5)
          GROUP BY t.id
-         HAVING SUM(p.amount) = ?4 AND SUM(p.cleared <> 'Uncleared') = 0",
+         HAVING SUM(p.amount) = ?4 AND SUM(p.downloaded) = 0",
     )?;
     let rows = stmt.query_map(
         params![
@@ -284,7 +285,7 @@ pub fn accept(w: &mut Writer<'_>, feed: FeedTxnId, txn: TxnId) -> Result<()> {
     }
     let (effect, cleared, is_void): (Option<i64>, i64, bool) =
         w.tx.query_row(
-            "SELECT SUM(p.amount), SUM(p.cleared <> 'Uncleared'), t.is_void
+            "SELECT SUM(p.amount), SUM(p.downloaded), t.is_void
          FROM txn t LEFT JOIN posting p ON p.txn_id = t.id AND p.account_id = ?2
          WHERE t.id = ?1 GROUP BY t.id",
             params![txn.to_string(), f.account_id.to_string()],
@@ -322,7 +323,7 @@ pub fn accept(w: &mut Writer<'_>, feed: FeedTxnId, txn: TxnId) -> Result<()> {
     }
     if cleared > 0 {
         return Err(FeedError::Invalid(
-            "that transaction is already cleared in this account".into(),
+            "that transaction is already matched to a download in this account".into(),
         ));
     }
     if let Some(other) = queue::linked_to(&w.tx, txn)?
@@ -332,7 +333,7 @@ pub fn accept(w: &mut Writer<'_>, feed: FeedTxnId, txn: TxnId) -> Result<()> {
             "that transaction is already matched to another downloaded transaction".into(),
         ));
     }
-    balances::set_cleared(w, txn, f.account_id, ClearedStatus::Cleared)?;
+    balances::set_downloaded(w, txn, f.account_id, true)?;
     queue::set_status(w, feed, FeedStatus::Matched, Some(txn))?;
     Ok(())
 }

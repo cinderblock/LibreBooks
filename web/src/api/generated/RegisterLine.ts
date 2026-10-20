@@ -19,6 +19,10 @@ other_account_id: AccountId | null, other_account: string | null, is_split: bool
  */
 amount: Money, cleared: ClearedStatus, 
 /**
+ * Matched to (or made from) a bank-feed download: QBD's lightning bolt.
+ */
+downloaded: boolean, 
+/**
  * Running balance, debit-positive (the UI shows it naturally for the type).
  */
 balance: Money, is_void: boolean, edit_seq: number, 

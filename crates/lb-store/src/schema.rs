@@ -265,4 +265,9 @@ CREATE TABLE feed_rule (
     doc       TEXT NOT NULL
 ) STRICT;
 ",
+    // 3: the bank-feed "downloaded" mark. QBD keeps it apart from the reconcile
+    // check mark: a line matched to a download is not thereby reconciled.
+    r"
+ALTER TABLE posting ADD COLUMN downloaded INTEGER NOT NULL DEFAULT 0;
+",
 ];

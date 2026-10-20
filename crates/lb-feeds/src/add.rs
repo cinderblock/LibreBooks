@@ -13,9 +13,7 @@
 //! balances, respects the closing date and is audited), then marked cleared in
 //! the bank's register and linked to the download.
 
-use lb_core::{
-    AccountId, AccountType, ClassId, ClearedStatus, EntityId, Txn, TxnId, TxnLine, TxnType,
-};
+use lb_core::{AccountId, AccountType, ClassId, EntityId, Txn, TxnId, TxnLine, TxnType};
 use lb_store::{Writer, accounts, balances, txns};
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
@@ -177,7 +175,7 @@ pub fn add(w: &mut Writer<'_>, feed: FeedTxnId, req: &AddRequest) -> Result<AddO
     let txn_type = txn.txn_type;
     let saved = txns::save(w, txn)?;
     let id = saved.txn.id;
-    balances::set_cleared(w, id, f.account_id, ClearedStatus::Cleared)?;
+    balances::set_downloaded(w, id, f.account_id, true)?;
     queue::set_status(w, feed, FeedStatus::Added, Some(id))?;
     Ok(AddOutcome {
         feed_txn_id: feed,

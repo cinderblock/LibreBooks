@@ -336,11 +336,12 @@ Commits on `worktree-agent-a4a0c4227d387787c`: `de88d57` (crate), `6370cb9`
 
 ## Open questions for the user
 
-1. **Cleared vs "downloaded".** Matching and adding mark the register line
-   *Cleared* (as this crate's brief asked). QBD keeps reconciliation's check
-   mark separate from the bank-feed "downloaded" mark. Recommendation: add a
-   `downloaded` flag (new lb-store migration) and leave Cleared to
-   reconciliation, so reconciling still means something.
+1. **Cleared vs "downloaded".** Decided 2026-10-20 (user: "I trust your rec"):
+   matching or adding a download sets a separate `downloaded` mark on the
+   register line (lb-store migration 3, `balances::set_downloaded`,
+   `RegisterLine.downloaded`), shown as QBD's lightning bolt. Cleared keeps
+   meaning reconciled. Candidates for matching exclude lines already matched to
+   a download, not cleared ones.
 2. **Auto-add default.** Rules only add by themselves when the rule says so
    and nothing in the register resembles the download. Keep it that strict?
    Recommendation: yes.

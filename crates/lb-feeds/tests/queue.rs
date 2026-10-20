@@ -124,12 +124,12 @@ fn by_payee(list: &[queue::FeedTxn], payee: &str) -> FeedTxnId {
         .id
 }
 
-fn cleared_in(co: &Co, account: AccountId, txn: TxnId) -> ClearedStatus {
+fn downloaded_in(co: &Co, account: AccountId, txn: TxnId) -> bool {
     let (_, lines) = co
         .books
         .read(|c| balances::register(c, account, None, None))
         .unwrap();
-    lines.iter().find(|l| l.txn_id == txn).unwrap().cleared
+    lines.iter().find(|l| l.txn_id == txn).unwrap().downloaded
 }
 
 /// A check written by hand in Checking.
@@ -284,7 +284,7 @@ fn downloads_match_what_was_entered_by_hand() {
     assert_eq!(matched.len(), 3, "{r:?}");
     for t in [check, dep, cable] {
         assert!(matched.contains(&t));
-        assert_eq!(cleared_in(&co, co.checking, t), ClearedStatus::Cleared);
+        assert!(downloaded_in(&co, co.checking, t));
     }
     assert_eq!(r.waiting, 2);
     let left: Vec<String> = waiting(&co, co.checking)
@@ -301,10 +301,7 @@ fn downloads_match_what_was_entered_by_hand() {
         .unwrap()
         .feed_txn_id;
     lb_feeds::write(&co.books, &me(), |w| queue::undo(w, feed)).unwrap();
-    assert_eq!(
-        cleared_in(&co, co.checking, check),
-        ClearedStatus::Uncleared
-    );
+    assert!(!downloaded_in(&co, co.checking, check));
     let f = lb_feeds::read(&co.books, |c| queue::get(c, feed)).unwrap();
     let cands = lb_feeds::read(&co.books, |c| {
         matching::candidates(c, &f, MatchOptions::default())
@@ -341,12 +338,12 @@ fn ambiguous_matches_wait_for_a_person() {
     ]);
     let r = ingest_into(&co, co.checking, &twins);
     assert_eq!(r.matched.len(), 0);
-    assert_eq!(cleared_in(&co, co.checking, only), ClearedStatus::Uncleared);
+    assert!(!downloaded_in(&co, co.checking, only));
 
     // A person picks: the first gets it, and the second no longer sees it.
     let ids = r.import.imported.clone();
     lb_feeds::write(&co.books, &me(), |w| matching::accept(w, ids[0], only)).unwrap();
-    assert_eq!(cleared_in(&co, co.checking, only), ClearedStatus::Cleared);
+    assert!(downloaded_in(&co, co.checking, only));
     let second = lb_feeds::read(&co.books, |c| queue::get(c, ids[1])).unwrap();
     let cands = lb_feeds::read(&co.books, |c| {
         matching::candidates(c, &second, MatchOptions::default())
@@ -354,7 +351,7 @@ fn ambiguous_matches_wait_for_a_person() {
     .unwrap();
     assert_eq!(cands.len(), 0);
     let err = lb_feeds::write(&co.books, &me(), |w| matching::accept(w, ids[1], only)).unwrap_err();
-    assert!(err.to_string().contains("already cleared"), "{err}");
+    assert!(err.to_string().contains("already matched to a download"), "{err}");
 }
 
 #[test]
@@ -411,10 +408,7 @@ fn adding_makes_checks_deposits_and_card_transactions_that_balance() {
     assert_eq!(t.entity_id, Some(co.comcast));
     assert_eq!(t.amount, Money(120_000));
     assert_eq!(t.date, date(2026, 10, 3));
-    assert_eq!(
-        cleared_in(&co, co.checking, o.txn_id),
-        ClearedStatus::Cleared
-    );
+    assert!(downloaded_in(&co, co.checking, o.txn_id));
 
     // Money in: a deposit, the name on the line.
     let o = add_one(

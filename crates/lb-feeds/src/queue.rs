@@ -15,7 +15,7 @@
 //! (`matched_txn_id`). [`undo`] reverses any of the three decisions.
 
 use jiff::civil::Date;
-use lb_core::{AccountId, ClassId, ClearedStatus, EntityId, Money, TxnId};
+use lb_core::{AccountId, ClassId, EntityId, Money, TxnId};
 use lb_store::codec::{self, SqlDate};
 use lb_store::{Writer, balances, txns};
 use rusqlite::{Connection, OptionalExtension, ToSql, params};
@@ -532,7 +532,7 @@ pub fn undo(w: &mut Writer<'_>, id: FeedTxnId) -> Result<FeedTxn> {
         (FeedStatus::Matched, Some(t)) => {
             set_status(w, id, FeedStatus::New, None)?;
             if txns::find(&w.tx, t)?.is_some() {
-                balances::set_cleared(w, t, f.account_id, ClearedStatus::Uncleared)?;
+                balances::set_downloaded(w, t, f.account_id, false)?;
             }
         }
         (FeedStatus::Added, Some(t)) => {
