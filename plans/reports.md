@@ -168,7 +168,8 @@ Key semantics:
   folds it into the brought-forward balance and says so in a note).
 - Audit Trail ranges are UTC days of the change.
 - Export: CSV only; `ExportFormat` is where XLSX/PDF go.
-- Not yet: memorized reports storage (the store has a `saved` table), budgets,
+- Memorized reports are saved requests in the store's `saved` table (kind
+  `memorized_report`), via `/saved/...`; Ctrl+M in the web UI. Not yet: budgets,
   multi-currency, payroll, estimates/orders and time reports.
 
 ## Progress log
