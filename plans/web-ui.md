@@ -203,9 +203,8 @@ vendors and a 100,000-line "Stress Test Checking" register. Console handle:
 
 ## Findings / gotchas
 
-- **ts-rs `edit_seq` is `bigint`, JSON is a number.** `api/json.ts` revives it to
-  BigInt on read and writes it back as a number, so the generated types are
-  truthful at runtime. A cleaner fix on the Rust side: `#[ts(type = "number")]`.
+- **ts-rs `edit_seq` was `bigint`.** Fixed on the Rust side with
+  `#[ts(type = "number")]` (`1b44220`); `api/json.ts` no longer revives BigInt.
 - **Local stand-ins** to swap when generated: `Report`/`ReportRequest`
   (`reports/types.ts`), `SaveOutcome`/`PreviewOutcome`/`RegisterResponse`/
   `OpenTxn`/`Session` (`api/types.ts`).

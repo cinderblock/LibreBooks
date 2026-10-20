@@ -90,11 +90,11 @@ more can install from Cloudflare's signed apt/rpm repositories and set
 - The fake cloudflared used by tests is a `[[bin]]` of this crate
   (`lb-tunnel-fake-cloudflared`, `tests/support/fake_cloudflared.rs`), so the
   supervision tests run a real child process identically on Windows and Unix.
-- **Not yet compiled for Linux/macOS.** `cargo clippy --target
-  x86_64-unknown-linux-gnu` from Windows stops at `aws-lc-sys` (needs
-  `x86_64-linux-gnu-gcc`). The Unix-only code (`proc.rs` `pre_exec`/`prctl`, the
-  SIGTERM stop, permissions in tests) was reviewed by hand; CI on Linux is the
-  first real check.
+- **Linux build.** Cross-checking from Windows (`cargo clippy --target
+  x86_64-unknown-linux-gnu`) stops at `aws-lc-sys` (needs
+  `x86_64-linux-gnu-gcc`); CI's Ubuntu job is the real check and passes
+  (`5a2aa32`): the Unix-only code (`proc.rs` `pre_exec`/`prctl`, the SIGTERM
+  stop, permissions in tests) builds and its tests pass there. macOS: untried.
 - The CPU broker (`~/.claude/bin/cpu-slots.mjs`) sometimes fails with `EPERM`
   opening its `.mutex` while waiting for slots on Windows; rerunning works.
 
