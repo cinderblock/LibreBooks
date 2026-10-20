@@ -178,7 +178,8 @@ Key semantics:
 - [x] Engine: context, filters, fact source, cash basis, slots, trees.
 - [x] All 46 reports.
 - [x] Tests: 28 unit + 30 integration, hand-computed; clippy and fmt clean.
-- [ ] Server routes (`/reports`, `/reports/run`, `/reports/export`): lb-server's job.
+- [x] Server routes (`/reports`, `/reports/run`, `/reports/export`) (`c33ee6c`);
+      Report Center UI in web phase B.
 
 ## Things not to do
 

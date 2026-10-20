@@ -95,8 +95,9 @@ Stripe/PayPal/Gusto.
       OFX Direct Connect (request builder snapshot, mock server test).
 - [x] Amazon order-history CSV parser + charge matcher + annotate.
 - [x] ts-rs export, clippy pedantic clean, fmt, commit.
-- [ ] ▶ Next (other crates/threads): `/feeds` routes in lb-server (proposal
-      below), the Bank Feeds UI, a scheduler that calls `providers::sync`.
+- [x] `/feeds` routes in lb-server and the provider sync in housekeeping
+      (merged `ef1d3e4`); the "downloaded" mark (`b084b6f`).
+- [ ] ▶ Bank Feeds UI: web phase B (in progress 2026-10-20).
 
 ## Module map (`crates/lb-feeds/src`)
 

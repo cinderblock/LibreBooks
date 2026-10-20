@@ -123,7 +123,7 @@ more can install from Cloudflare's signed apt/rpm repositories and set
   cloudflared locate/download/update, supervisor, Access verifier. 35 tests pass on
   Windows (unit; real child-process supervision with the fake; downloads against
   a local GitHub stand-in; JWTs against a local key server).
-- [ ] Server wiring.
+- [x] Server wiring: `/tunnel` routes, supervisor started by `serve`, CLI `tunnel`.
 
 ## Things not to do
 

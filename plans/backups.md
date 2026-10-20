@@ -102,7 +102,8 @@ portable company file (`.lbk`) for moving books between machines.
   (aws-c-auth vectors + S3 docs examples pass), local and S3 destinations,
   pack/unpack pipeline, backup/list/verify/restore, retention, schedule,
   Scheduler, `.lbk`. 57 tests (unit + local round trips + mock-S3 flow).
-- [ ] Server wiring (lb-server thread).
+- [x] Server wiring: `/backups` routes, scheduler in housekeeping, CLI
+  `backup` commands (merged `ef1d3e4`, `5427aba`).
 
 ## Things not to do
 

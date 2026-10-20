@@ -348,24 +348,23 @@ Phases are ordered; each ends usable. **Current step is marked ▶.**
 
 ## Open questions for the user
 
-1. **Publish where?** Recommendation: public `github.com/cinderblock/LibreBooks`.
-   Not created yet (outward-facing; waiting for a yes).
+1. ~~Publish where?~~ Answered 2026-10-20: public `github.com/cinderblock/LibreBooks`, pushed.
 2. **Name.** "LibreBooks" is the working name; other unrelated projects have used
    it (e-book readers). Fine for now, worth a check before a 1.0.
 3. **Bank aggregator.** Recommendation: SimpleFIN first (≈$15/yr, the user holds
    the access token, no developer approval). Plaid needs a developer account and
    production approval per deployment.
-4. **Feeds and the cleared mark** (from `plans/feeds.md`): matching a download
-   marks the register line Cleared. QBD keeps "downloaded/matched" separate from
-   the reconcile check mark. Recommendation: a separate downloaded flag (new
-   migration), so Cleared still means reconciled.
-5. **Auto-add strictness** (feeds): only auto-add when nothing in the register
-   resembles the download. Recommendation: keep it strict.
-6. **Release signing key**: generating the minisign key and setting the GitHub
-   secret `MINISIGN_SECRET_KEY` needs your yes (steps in `plans/self-update.md`).
-7. **Bridge gaps.** The QB Bridge lacks CreditCardCharge/Credit, Transfer,
-   VendorCredit and others. Extend the bridge (a separate repo, separate thread),
-   or rely on the Web Connector transport?
+4. ~~Feeds and the cleared mark~~ Answered 2026-10-20 ("I trust your rec"): a
+   separate downloaded flag (migration 3, `b084b6f`); Cleared still means reconciled.
+5. ~~Auto-add strictness~~ Kept strict (explained to the user 2026-10-20; no
+   objection).
+6. ~~Release signing key~~ Answered 2026-10-20 ("Do it. Keep all the keys on gh
+   secrets"): keys generated, private halves only in GitHub secrets (`42946a7`).
+7. ~~Bridge gaps~~ Answered 2026-10-20: importing must not require the bridge,
+   so all three transports are supported; the Web Connector/SDK carry full qbXML
+   and should close the 14 gaps. Still to do with the user: the live Web
+   Connector sync on cad-3 (steps in `plans/qbd-import.md`); any tunnel or proxy
+   for it needs per-change authorisation.
 
 ## Things not to do
 
@@ -376,5 +375,5 @@ Phases are ordered; each ends usable. **Current step is marked ▶.**
   fixtures are synthetic.
 - Don't use floating point for money anywhere (Rust or TS). TS uses integer cents
   in `number` (safe to ±$90 trillion) and formats at the edge.
-- Don't create the GitHub repo or push without the user's yes.
+- The repo is public now; pushing `master` is routine, but never force-push.
 - Don't rename `master`.

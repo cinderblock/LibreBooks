@@ -168,9 +168,10 @@ draft, rc, stable, older).
 
 - [x] lb-update implemented: version, feed, trust, install, policy, updater.
   32 tests (unit + end-to-end against a local GitHub stand-in, both archive kinds).
-- [ ] Release workflow.
-- [ ] Production key + secret (user).
-- [ ] Server wiring.
+- [x] Release workflow (`4058946`), unexercised until the first tag.
+- [x] Production key + secret: `minisign.pub` at the repo root, private key only
+      in GitHub secrets (`42946a7`).
+- [x] Server wiring: `/update` routes, policy in housekeeping, CLI `update`.
 
 ## Things not to do
 
