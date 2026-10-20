@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { blankAccount } from '~/api/blank';
-import { blankEntry, isBlankEntry, registerEntryToTxn } from './registerEntry';
+import { applyEntryToTxn, blankEntry, isBlankEntry, registerEntryFromTxn, registerEntryToTxn } from './registerEntry';
 
 const day = '2026-10-19';
 const bank = blankAccount('Checking', 'Bank');
@@ -50,5 +50,42 @@ describe('register entry → transaction', () => {
   test('blank detection', () => {
     expect(isBlankEntry(blankEntry(day))).toBe(true);
     expect(isBlankEntry({ ...blankEntry(day), memo: 'x' })).toBe(false);
+  });
+});
+
+describe('editing a saved transaction in place', () => {
+  test('a one-line check round-trips through the entry and keeps its identity', () => {
+    const made = registerEntryToTxn(bank, { ...blankEntry(day), number: '1050', payee_id: 'v', left: 4_200, account_id: 'rent', memo: 'Rent' });
+    if (!made.ok) throw new Error('expected a check');
+    const saved = { ...made.txn, edit_seq: 3 };
+    const entry = registerEntryFromTxn(bank, saved);
+    expect(entry).toEqual({ date: day, number: '1050', payee_id: 'v', left: 4_200, right: null, account_id: 'rent', memo: 'Rent' });
+    const edited = applyEntryToTxn(bank, { ...entry!, left: 4_500, memo: 'Rent (Oct)' }, saved);
+    if (!edited.ok) throw new Error('expected ok');
+    expect(edited.txn).toMatchObject({ id: saved.id, edit_seq: 3, txn_type: 'Check', amount: 4_500, memo: 'Rent (Oct)' });
+    expect(edited.txn.lines[0]!.id).toBe(saved.lines[0]!.id);
+  });
+  test('a transfer edits from either side; a journal entry with two lines too', () => {
+    const t = registerEntryToTxn(prepaid, { ...blankEntry(day), right: 300, account_id: bank.id });
+    if (!t.ok) throw new Error('expected a journal');
+    expect(t.txn.txn_type).toBe('JournalEntry');
+    const e = registerEntryFromTxn(prepaid, t.txn);
+    expect(e).toMatchObject({ right: 300, account_id: bank.id });
+    const fromBank = registerEntryFromTxn(bank, t.txn);
+    expect(fromBank).toMatchObject({ left: 300, account_id: prepaid.id });
+  });
+  test('split or unsupported transactions are not editable in place', () => {
+    const made = registerEntryToTxn(bank, { ...blankEntry(day), left: 10, account_id: 'rent' });
+    if (!made.ok) throw new Error('expected a check');
+    const split = { ...made.txn, lines: [...made.txn.lines, { ...made.txn.lines[0]!, id: 'l2' }] };
+    expect(registerEntryFromTxn(bank, split)).toBeNull();
+    expect(registerEntryFromTxn(bank, { ...made.txn, txn_type: 'BillPaymentCheck' })).toBeNull();
+    expect(registerEntryFromTxn(card, made.txn)).toBeNull();
+  });
+  test('moving the amount to the other column is refused (it would change the kind)', () => {
+    const made = registerEntryToTxn(bank, { ...blankEntry(day), left: 10, account_id: 'rent' });
+    if (!made.ok) throw new Error('expected a check');
+    const r = applyEntryToTxn(bank, { ...registerEntryFromTxn(bank, made.txn)!, left: null, right: 10 }, made.txn);
+    expect(r).toMatchObject({ ok: false, field: 'amount' });
   });
 });

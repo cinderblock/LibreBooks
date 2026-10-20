@@ -191,6 +191,30 @@ test('receive a payment (auto-applied oldest first), deposit it, and balance a j
   await expect(page.getByText(/Journal entry .*for \$25\.00 saved/)).toBeVisible();
 });
 
+test('a register line edits in place with Ctrl+E; 1-Line mode; Ctrl+Q QuickZooms', async ({ page }) => {
+  const checking = '00000000-0000-4000-8000-000000000001';
+  await start(page, `/c/00000000-0000-4000-8000-00000000c0de/accounts/${checking}/register`);
+  const grid = page.getByTestId('register-grid');
+  // This month's rent check: one expense line, so it edits in place (a split opens its form).
+  await grid.getByText('Shop rent').last().click();
+  await page.keyboard.press('Control+E');
+  const editor = grid.locator('[data-editing]');
+  await expect(editor).toBeVisible();
+  const memo = editor.getByRole('textbox', { name: 'Memo' });
+  await memo.fill('edited in the register');
+  await page.keyboard.press('Enter');
+  await expect(page.getByText('Saved.')).toBeVisible();
+  await expect(editor).toBeHidden();
+  await expect(grid.getByText('edited in the register')).toBeVisible();
+  // 1-Line mode shows the memo on the same row as the date.
+  await page.getByRole('checkbox', { name: '1-Line' }).check();
+  await expect(grid.locator('[data-selected] [class*="one"]')).toHaveCount(1);
+  // Ctrl+Q opens the selected transaction's form.
+  await grid.focus();
+  await page.keyboard.press('Control+Q');
+  await expect(page.getByRole('tab', { name: /Check \d+/ })).toBeVisible();
+});
+
 test('saving an empty check shows the problem inline', async ({ page }) => {
   await start(page, '/c/00000000-0000-4000-8000-00000000c0de/checks/new');
   const form = page.getByTestId('write-checks');
