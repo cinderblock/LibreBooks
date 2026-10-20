@@ -180,6 +180,14 @@ impl QbdEntity {
         self.txn_type().is_some()
     }
 
+    /// A receivable a customer's credits can settle (not itself a credit).
+    pub const fn is_charge(self) -> bool {
+        matches!(
+            self,
+            QbdEntity::Invoice | QbdEntity::JournalEntry | QbdEntity::Check
+        )
+    }
+
     /// The LibreBooks transaction type it becomes.
     pub const fn txn_type(self) -> Option<TxnType> {
         Some(match self {

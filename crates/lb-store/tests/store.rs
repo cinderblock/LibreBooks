@@ -792,3 +792,112 @@ fn a_refund_check_in_ar_is_paid_down_by_a_payment() {
     assert_eq!(plain.ar_ap_account_id, None);
     assert_eq!(open(plain.id), None);
 }
+
+#[test]
+fn credits_apply_to_open_invoices_oldest_first_without_moving_the_ledger() {
+    let b = books();
+    let s = setup(&b);
+    let inv = |b: &Books, d, cents: i64| {
+        let mut t = Txn::new(TxnType::Invoice, d);
+        t.entity_id = Some(s.job);
+        t.lines.push(TxnLine::item_amount(s.labor, Money(cents)));
+        b.write(&me(), |w| txns::save(w, t)).unwrap().txn.id
+    };
+    let old = inv(&b, date(2026, 1, 10), 30_000);
+    let newer = inv(&b, date(2026, 2, 10), 20_000);
+    let mut cm = Txn::new(TxnType::CreditMemo, date(2026, 3, 1));
+    cm.entity_id = Some(s.customer);
+    cm.lines.push(TxnLine::item_amount(s.labor, Money(35_000)));
+    let cm = b.write(&me(), |w| txns::save(w, cm)).unwrap().txn.id;
+    let before = b.read(|c| balances::sums(c, None, None)).unwrap();
+    assert_eq!(
+        b.read(|c| lb_store::apply::names_with_unapplied_credits(c, true))
+            .unwrap(),
+        vec![s.customer]
+    );
+
+    let pmt = b
+        .write(&me(), |w| {
+            lb_store::apply::apply_customer_credits(w, s.customer)
+        })
+        .unwrap()
+        .unwrap();
+    let open = |id| {
+        b.read(|c| {
+            Ok(txns::query(c, &txns::TxnFilter::default())?
+                .into_iter()
+                .find(|t| t.id == id)
+                .unwrap()
+                .open_balance)
+        })
+        .unwrap()
+    };
+    assert_eq!(
+        open(old),
+        Some(Money::ZERO),
+        "the oldest invoice is settled first"
+    );
+    assert_eq!(
+        open(newer),
+        Some(Money(15_000)),
+        "the rest of the credit goes to the next"
+    );
+    assert_eq!(open(cm), Some(Money::ZERO), "the credit memo is used up");
+    assert_eq!(open(pmt), Some(Money::ZERO));
+    assert_eq!(
+        b.read(|c| txns::get(c, pmt)).unwrap().date,
+        date(2026, 3, 1)
+    );
+    let after = b.read(|c| balances::sums(c, None, None)).unwrap();
+    assert_eq!(before, after, "applying a credit posts nothing");
+    assert!(
+        b.write(&me(), |w| lb_store::apply::apply_customer_credits(
+            w, s.customer
+        ))
+        .unwrap()
+        .is_none(),
+        "nothing left to apply"
+    );
+}
+
+#[test]
+fn targeted_credit_application_stops_at_the_cap_and_prefers_credit_memos() {
+    let b = books();
+    let s = setup(&b);
+    let mut inv = Txn::new(TxnType::Invoice, date(2026, 1, 10));
+    inv.entity_id = Some(s.customer);
+    inv.lines.push(TxnLine::item_amount(s.labor, Money(50_000)));
+    let inv = b.write(&me(), |w| txns::save(w, inv)).unwrap().txn.id;
+    // An older overpayment and a newer credit memo both sit unapplied.
+    let mut over = Txn::new(TxnType::ReceivePayment, date(2026, 1, 5));
+    over.entity_id = Some(s.customer);
+    over.amount = Money(10_000);
+    let over = b.write(&me(), |w| txns::save(w, over)).unwrap().txn.id;
+    let mut cm = Txn::new(TxnType::CreditMemo, date(2026, 2, 1));
+    cm.entity_id = Some(s.customer);
+    cm.lines.push(TxnLine::item_amount(s.labor, Money(30_000)));
+    let cm = b.write(&me(), |w| txns::save(w, cm)).unwrap().txn.id;
+    let open = |id| {
+        b.read(|c| {
+            Ok(txns::query(c, &txns::TxnFilter::default())?
+                .into_iter()
+                .find(|t| t.id == id)
+                .unwrap()
+                .open_balance)
+        })
+        .unwrap()
+    };
+
+    b.write(&me(), |w| {
+        lb_store::apply::apply_credits_to(w, inv, Money(20_000))
+    })
+    .unwrap()
+    .unwrap();
+    assert_eq!(open(inv), Some(Money(30_000)), "only the cap was applied");
+    assert_eq!(open(cm), Some(Money(10_000)), "from the credit memo first");
+    assert_eq!(
+        open(over),
+        Some(Money(10_000)),
+        "the overpayment stays unapplied"
+    );
+}

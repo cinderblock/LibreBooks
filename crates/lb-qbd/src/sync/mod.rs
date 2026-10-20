@@ -78,6 +78,11 @@ pub struct SyncOptions {
     pub source_id: Option<String>,
     /// Copy QBD's company information and preferences.
     pub import_company_info: bool,
+    /// After the import, apply customers' open credits to their open invoices
+    /// wherever QBD shows the invoice settled and we don't. The bridge never
+    /// says which credit memo QBD applied to which invoice, so this is how
+    /// those settlements are reproduced (oldest first, as QBD applies them).
+    pub apply_credits: bool,
     /// Abort after this many consecutive failures to reach the bridge.
     pub max_consecutive_bridge_failures: u32,
 }
@@ -94,6 +99,7 @@ impl Default for SyncOptions {
             txn_to: None,
             source_id: None,
             import_company_info: true,
+            apply_credits: true,
             max_consecutive_bridge_failures: 5,
         }
     }
@@ -187,6 +193,7 @@ type Progress<'a> = &'a (dyn Fn(&SyncProgress) + Send + Sync);
 
 /// A transaction imported this run, to compare its open balance with QBD's once
 /// everything that pays it has been imported too.
+#[derive(Clone)]
 struct OpenCheck {
     entity: QbdEntity,
     qbd_id: String,
@@ -794,25 +801,50 @@ impl<S: QbdSource> Run<'_, S> {
         }
     }
 
-    /// Compare open balances once all payments are in.
+    /// Compare open balances once all payments are in. Where QBD shows an
+    /// invoice more settled than we do and the customer has unapplied credits,
+    /// apply them and compare again.
     fn check_open_balances(&mut self) -> Result<(), SyncError> {
         let checks = std::mem::take(&mut self.open_checks);
+        let mut off = self.open_mismatches(&checks)?;
+        if self.options.apply_credits && !off.is_empty() {
+            // Only charges QBD shows more settled than we do, and only by the
+            // difference: a credit QBD left unapplied must stay unapplied here.
+            for (c, ours) in &off {
+                let short = *ours - c.qbd;
+                if !short.is_positive() || !c.entity.is_charge() {
+                    continue;
+                }
+                self.books.write(&lb_store::Actor::system(), |w| {
+                    lb_store::apply::apply_credits_to(w, c.txn_id, short)
+                })?;
+            }
+            off = self.open_mismatches(&checks)?;
+        }
+        for (c, ours) in off {
+            self.report.mismatches.push(Mismatch {
+                entity: c.entity,
+                qbd_id: c.qbd_id,
+                record: c.record,
+                kind: MismatchKind::OpenBalance,
+                qbd: c.qbd,
+                ours,
+            });
+        }
+        Ok(())
+    }
+
+    fn open_mismatches(&self, checks: &[OpenCheck]) -> Result<Vec<(OpenCheck, Money)>, SyncError> {
         let total = checks.len();
-        for (i, c) in checks.into_iter().enumerate() {
+        let mut off = Vec::new();
+        for (i, c) in checks.iter().enumerate() {
             self.progress(c.entity, SyncPhase::Checking, i, total);
             let ours = import::open_balance(self.books, c.txn_id)?.unwrap_or(Money::ZERO);
             if ours != c.qbd {
-                self.report.mismatches.push(Mismatch {
-                    entity: c.entity,
-                    qbd_id: c.qbd_id,
-                    record: c.record,
-                    kind: MismatchKind::OpenBalance,
-                    qbd: c.qbd,
-                    ours,
-                });
+                off.push((c.clone(), ours));
             }
         }
-        Ok(())
+        Ok(off)
     }
 
     /// Delete what QBD deleted: dependants first (deposits, then payments, then
