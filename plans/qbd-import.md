@@ -49,12 +49,21 @@ QBD's own balances. Phase 3 of `plans/librebooks.md`.
 4. Normaliser for every exposed entity. (done)
 5. Sync engine + `SyncReport`. (done)
 6. Parity check + `ParityReport` (ts-rs). (done)
-7. qbXML XML → JSON converter; QBWC sketch below. (done; SOAP endpoint not built)
+7. qbXML XML → JSON converter; QBWC sketch below. (done)
 8. Tests: fixtures, mock bridge (axum), end-to-end sync, incremental, parity. (done)
 9. Light live smoke test (`tests/qbd/live.rs`, ignored by default). (done; see
    progress log)
-10. ▶ Hand over: the parent session runs the first full import with the user
-    (`sync` with default options into a real company file, then `parity`).
+10. First full import with the user through the bridge. (done, see
+    `plans/librebooks.md`)
+11. Transports beside the bridge: the qbXML source, the Web Connector queue
+    and SOAP endpoint, the SDK over COM, the server routes and settings, the
+    CLI. (done 2026-10-20, commits `548bef9`, `1f8fa94`; see "Transports")
+12. ▶ Hand over: the parent session tries the Web Connector against the
+    user's QuickBooks (set-up steps below) and, on cad-3, the SDK transport
+    from the desktop app or the CLI. The qbXML capability table
+    (`qbxml::request::capabilities`) is from the OSR, not yet from a live
+    QuickBooks: a parse error on one query (status 0x80040400 in the report)
+    means an element that query doesn't accept; fix the table.
 
 ## How to run it
 
@@ -63,6 +72,16 @@ let key = lb_qbd::client::read_env_value(path_to_env, "QB_API_KEY")?.unwrap();
 let client = lb_qbd::BridgeClient::new(lb_qbd::BridgeConfig::new("http://10.255.0.18:8743", key)?)?;
 let report = lb_qbd::sync(&books, &client, &lb_qbd::SyncOptions::default(), &|p| { /* progress */ }).await?;
 let parity = lb_qbd::parity(&books, &client, &lb_qbd::ParityOptions::default()).await?;
+```
+
+Over qbXML instead of the bridge (the Web Connector queue or the SDK):
+
+```rust
+// Web Connector: the server owns the queue; see lb_server::import. In short:
+let (source, handle) = lb_qbd::qbwc::queued_source(QueueConfig::default());
+// run `sync(&books, &source, …)` as a task; the SOAP handler drives `handle`
+// through `qbwc::Session`. SDK (Windows, feature `qbsdk`, same machine as QBD):
+let source = lb_qbd::sdk::sdk_source(&SdkConfig::default())?;
 ```
 
 `SyncOptions { sweep: true, .. }` finds deletions (lists every id again);
@@ -238,11 +257,114 @@ Everything a transaction carries that isn't listed here goes into `Txn.extra` /
 | `CompanyRet` | `CompanyInfo` (name, legal name, addresses, phone, email, website, EIN, fiscal/tax year start, tax form) | |
 | `PreferencesRet` | `Preferences` (account numbers, class tracking, JE numbering, estimates, progress invoicing, multi-currency, inventory, auto-apply, report basis, sales tax on/cash) | |
 
-## Web Connector (QBWC) transport sketch
+## Transports (2026-10-20, worktree `agent-a4dda2723616ac2bb`)
+
+Three ways to read QuickBooks Desktop, all feeding the one `QbdSource` →
+normaliser → `sync`/`parity` pipeline. Design decisions (don't re-ask):
+
+- **One qbXML source for two transports.** `qbxml::request` builds `…QueryRq`
+  documents from the same `ListQuery`/`ReportQuery` the bridge client takes;
+  `source::QbxmlSource<T: QbxmlTransport>` implements `QbdSource` over any
+  "send a qbXML document, get the response" transport: the Web Connector queue
+  (`qbwc::Queue`) and the SDK's COM session (`sdk`, Windows only). Lists of
+  transactions ask for `IncludeLineItems`/`IncludeLinkedTxns`, so one page
+  replaces hundreds of bridge GETs; `get` is served from that cache.
+- **Read-only at one choke point.** `QbxmlSource::exchange` refuses any
+  document whose `QBXMLMsgsRq` children aren't `…QueryRq` (`request::check_read_only`),
+  and a source-scan test keeps `Add`/`Mod`/`Del`/`Void` request names out of the
+  crate. The `.qwc` also sets `IsReadOnly`, so QuickBooks grants read-only access.
+- **`BridgeError` is now `QbdError`** with qbXML status errors (`Qbxml`),
+  transport session failures (`Session`) and `Unsupported` added; the trait is
+  unchanged otherwise.
+- **QBWC inverts the flow** (QuickBooks polls us). The sync runs as a server task
+  against a `QueuedSource`; each `list`/`get` enqueues one document and awaits a
+  oneshot. The SOAP handler (`/qbwc`, no cookie auth, outside `/api/v1` and
+  outside the Cloudflare Access check, since the Web Connector can't sign in)
+  pops requests in `sendRequestXML` and completes them in `receiveResponseXML`.
+  Idle rules: `sendRequestXML` waits up to `poll_wait` for the engine's next
+  request; if the engine is busy locally it sends a `HostQueryRq` heartbeat; if
+  the engine finished, it returns `""` (and `getLastError` says `NoOp`).
+  `receiveResponseXML` waits briefly for the next request or the finish, so the
+  normal ending is `100` → `closeConnection`. A queued request the Web Connector
+  doesn't collect within `wait_for_poll` (default 30 min) closes the queue and
+  the sync aborts cleanly (`SyncReport.aborted`). Only one job (sync or parity)
+  per company at a time; `authenticate` answers `none` when nothing is queued.
+- **Credentials.** The QBWC password is a secret `qbd.<company id>.qbwc-password`
+  (set or generated through `POST …/qbwc/password`, compared in constant time,
+  never returned after generation). The bridge key is `secret:qbd.<company id>.bridge-key`.
+  Per-company settings (`qbd.import` JSON in the company file) hold the
+  transport, bridge URL, QBWC user name, app URL, schedule and the company file
+  path for QBWC/SDK.
+- **Parity is a job too** (`POST …/parity`, read with `GET …/parity`), because
+  over QBWC it can only run when QuickBooks polls. `GET …/status|parity?wait=N`
+  long-polls up to N seconds so a bridge run can be read in one call.
+
+## Setting up each transport (for the user)
+
+**Bridge** (as before): `PUT /c/:id/import/qbd` with
+`{ transport: "bridge", bridge: { url: "http://10.255.0.18:8743" }, bridge_key: "…" }`
+(the key goes to the secret store), or from a shell
+`librebooks import qbd --company <id> --bridge-url … --key-file Receipts/.env --save`;
+after `--save`, `librebooks import qbd --company <id>` alone is enough.
+
+**Web Connector** (no software beside QuickBooks; the server can be anywhere):
+
+1. LibreBooks must be reachable over **HTTPS** from the QuickBooks machine (the
+   Web Connector refuses a plain-HTTP `AppURL` unless the host is `localhost`):
+   the Cloudflare tunnel hostname, or an HTTPS proxy on the LAN. If the hostname
+   is behind Cloudflare Access, add a *bypass* policy for the path `/qbwc` (the
+   Web Connector can't log in to Access; the endpoint has its own password).
+2. In LibreBooks (admin): `PUT /c/:id/import/qbd` with
+   `{ transport: "qbwc", qbwc: { user_name: "librebooks-…", run_every_minutes: 60 } }`
+   (`app_url` only if the public URL isn't in the server settings or the
+   tunnel), then `POST /c/:id/import/qbd/qbwc/password` with no body and copy
+   the generated password (shown once), then download
+   `GET /c/:id/import/qbd/qbwc.qwc`. Or from a shell on the server:
+   `librebooks import qbwc-password --company <id> --generate` and
+   `librebooks import qwc --company <id> --url https://books.example.com --out librebooks.qwc`.
+3. On **cad-3**, with the company open in QuickBooks: open the `.qwc`
+   (double-click, or *File › Update Web Services › Add an Application*).
+   QuickBooks asks whether to allow "LibreBooks (Company)" access: choose
+   **Yes, always; allow access even if QuickBooks is not running** only if
+   you want scheduled runs while QuickBooks is closed (it then needs the
+   company file path: `company_file` in the settings); the `.qwc` asks for
+   **read-only** access, so that's what QuickBooks grants. Leave "allow this
+   application to access personal data" unticked. Then type the password into
+   the Web Connector's *Password* box once (it offers to remember it) and tick
+   the connection's checkbox.
+4. Start a sync (`POST /c/:id/import/qbd/sync`, or the UI) and click
+   **Update Selected** in the Web Connector (or wait for its schedule). The
+   Web Connector shows the percentage LibreBooks reports; `GET …/status`
+   shows the same progress. The run ends at 100 %; the report is in
+   `last_sync`. Parity: `POST …/parity`, then *Update Selected* again.
+5. A sync that nobody collects within two hours (`QueueConfig.first_poll_wait`)
+   or a session that stalls for ten minutes ends with `aborted` in the report;
+   start it again when the Web Connector is running.
+
+**SDK** (LibreBooks on the QuickBooks machine, Windows; the desktop app's
+local mode, or `librebooks serve`/`import qbd` on cad-3):
+
+1. QuickBooks must be running with the company open (or `company_file` set so
+   the SDK can open it; `file_mode` picks single/multi-user).
+2. `PUT /c/:id/import/qbd` with `{ transport: "sdk" }`, then `POST …/sync`; or
+   `librebooks import qbd --company <id> --transport sdk`.
+3. The first time, QuickBooks shows *An application without a certificate is
+   requesting access* for "LibreBooks": choose **Yes, always** (and leave
+   personal data unticked). The choice is kept under *Edit › Preferences ›
+   Integrated Applications*. The dialog needs a desktop session: authorise once
+   from the desktop app or a terminal; a service running under the same user
+   inherits it. The SDK has no read-only grant at this level; the guarantee is
+   LibreBooks' own (queries only, by construction).
+4. `sdk_available` in `GET …/import/qbd` says whether the build has it
+   (Windows, feature `qbsdk`, on by default); elsewhere `POST …/sync` is
+   501 `unsupported`.
+
+## Web Connector (QBWC) transport: how it works
 
 The QuickBooks Web Connector ships free with QBD and polls a SOAP web service;
-LibreBooks can be that service, which removes the dependency on the QB Bridge.
-The converter (`qbxml::xml`) and normaliser are done; the endpoint is not.
+LibreBooks is that service (`/qbwc`, built 2026-10-20), which removes the
+dependency on the QB Bridge. The original sketch, kept because it still
+describes the protocol:
 
 - **`.qwc` file** (the user opens it in QBWC once): `AppName` "LibreBooks",
   `AppURL` `https://<host>/qbwc` (QBWC requires HTTPS except for `localhost`),
@@ -269,15 +391,53 @@ The converter (`qbxml::xml`) and normaliser are done; the endpoint is not.
     `iterator="Continue" iteratorID=…` while `iteratorRemainingCount > 0`.
   - `getLastError(ticket)` → message for QBWC's log; `connectionError(ticket,
     hresult, message)` → `"done"`; `closeConnection(ticket)` → summary text.
-- The sync engine needs one change to use it: QBWC drives the conversation, so
-  the engine becomes a state machine fed by `receiveResponseXML` rather than a
-  loop calling `QbdSource`. The `QbdSource` trait stays for the bridge.
+- The engine didn't need to become a state machine after all: the queue
+  (`qbwc::queue`) parks each `QbdSource` call until the Web Connector collects
+  and answers it, so the same `sync`/`parity` run on every transport.
 - What QBWC gains over the bridge: `IncludeLineItems` on queries (one request
   per page instead of one per transaction), every transaction type
   (CreditCardCharge, Transfer, VendorCredit…), `TxnDeletedQuery`, the item
   element names, sales tax items and codes.
-- **Never** send `…AddRq`/`…ModRq`/`…DelRq`: the request builder should only be
-  able to build `…QueryRq`, with a test like `read_only.rs`.
+- **Never** send `…AddRq`/`…ModRq`/`…DelRq`: `qbxml::request` can only build
+  `…QueryRq`, `QbxmlSource::send` refuses anything else before it reaches a
+  transport, and `read_only.rs` scans the sources for write request names.
+
+## Findings / gotchas (transports, 2026-10-20)
+
+- **qbXML element order is a schema sequence.** An element out of order (or one
+  a query doesn't accept) fails the whole request with status 0x80040400
+  "QuickBooks found an error when parsing the provided XML text stream". The
+  builder follows the 13.0 OSR; `capabilities()` is conservative
+  (`IncludeLinkedTxns` only on Invoice, CreditMemo, Estimate, PurchaseOrder,
+  Bill, Check; `OwnerID` only where custom fields exist; none of either on
+  TimeTracking). Unverified against a live QuickBooks until the parent session
+  runs it.
+- **No `MaxReturned` means everything** in qbXML (unlike the bridge's 100), so
+  lists that can't iterate are asked whole; iterator pages are 200 rows
+  (`source::DEFAULT_PAGE_SIZE`), smaller than the bridge's 500 because each row
+  carries its lines.
+- **qbXML's `ItemQueryRq` names item types** (`ItemOtherChargeRet`…): the
+  source keeps the element name under `__ret_element` and the engine uses it,
+  skipping the typed lists; the bridge path is unchanged.
+- **Reports**: `GeneralSummaryReportQueryRq` → `ReportRet` whose `ReportData`
+  rows are converted to the bridge's `{type,label,values}` rows in order
+  (`qbxml::xml` special-cases `ReportData` so the order survives the
+  one-or-many grouping). The parity check reads either shape identically.
+- **The Web Connector's loop** ends on `receiveResponseXML` = 100 or an empty
+  `sendRequestXML`; after the latter it calls `getLastError`, where `NoOp` means
+  "that was fine". LibreBooks waits briefly after each answer so the normal
+  ending is 100 → `closeConnection`. 0 % is never reported (the Web Connector
+  treats it oddly), nor 100 before the engine is done.
+- **Cloudflare Access would block the Web Connector** (no `Cf-Access-Jwt-Assertion`),
+  so `/qbwc` is mounted outside the Access middleware; a bypass policy for the
+  path is still needed on Cloudflare's side.
+- **Windows `VARIANT` in `windows` 0.62** is the raw union (the friendly
+  `windows_core::VARIANT` is gone); `sdk::com` builds `VT_BSTR`/`VT_I4` variants
+  by hand and clears them with `VariantClear`. `unsafe_code` is `deny` for the
+  workspace; the `com` module is the one `#![allow(unsafe_code)]`.
+- **A sync whose first question is never answered** (`CompanyQueryRq` when the
+  Web Connector never polls) fails outright with `SyncError::Bridge(Timeout)`
+  rather than producing a report; the server records it as `last_error`.
 
 ## Known gaps and limitations
 
@@ -300,7 +460,13 @@ The converter (`qbxml::xml`) and normaliser are done; the endpoint is not.
 - A deliberately skipped record (QBD's member-less reimbursable group) is listed
   and skipped again on each sync at the watermark boundary (no extra request).
 - `PayrollItemWage` isn't imported (no LibreBooks payroll item list).
-- The Web Connector SOAP endpoint isn't built (converter and sketch are).
+- Web Connector and SDK transports are untested against a real QuickBooks
+  (this machine has none): the fake QuickBooks mirrors the OSR, not QBD's
+  quirks. First live run: a light `txn_limit` sync, then compare the report
+  with a bridge run of the same options.
+- The SDK transport has no automated test of the COM calls (nothing to call
+  here); the request/response path is tested through the shared source.
+- No rate limit on `/qbwc` sign-in attempts beyond the random password.
 
 ## Progress log
 
@@ -320,9 +486,19 @@ The converter (`qbxml::xml`) and normaliser are done; the endpoint is not.
       `.PartOrFullTime`. Parity on the sample is meaningless (most transactions
       not imported) but ran end to end against the live account list and trial
       balance.
-- [ ] First full import with the user (parent session): expect ~8,100 detail
-      GETs, ~45 min. Then `parity`; the two credit card accounts should be off by
-      their unexposed charges/credits/payments.
+- [x] First full import with the user (parent session), through the bridge:
+      see `plans/librebooks.md` (0 failures, 145/159 accounts exact; the rest
+      are bridge gaps the Web Connector transport removes).
+- [x] Transports (2026-10-20): `QbxmlSource` + `qbxml::request`/`report`, the
+      Web Connector queue, session, SOAP and `.qwc`, the SDK over COM
+      (`548bef9`); server settings, jobs, routes and `/qbwc`, the CLI
+      (`1f8fa94`). lb-qbd 57 unit + 34 integration tests, lb-server 36 incl.
+      the fake Web Connector; clippy pedantic clean.
+- [ ] Live: add the `.qwc` on cad-3 and run a limited sync over the Web
+      Connector; confirm the capability table; then a full sync and parity,
+      which should close the bridge gaps (card charges, transfers…).
+- [ ] Live: the SDK transport from the desktop app on cad-3 (one-time
+      authorisation dialog; note what QuickBooks actually shows).
 
 ## Open questions for the user
 
@@ -341,3 +517,6 @@ The converter (`qbxml::xml`) and normaliser are done; the endpoint is not.
   synthetic.
 - Don't run a full sync of the live company from this crate's work; the parent
   session runs the first full import with the user.
+- Never point a test at a real Web Connector or SDK: the fake QuickBooks is
+  the only QuickBooks the tests may talk to (an SDK test on a machine with
+  QuickBooks installed would open the user's company).

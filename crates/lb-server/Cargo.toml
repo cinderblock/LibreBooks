@@ -47,6 +47,11 @@ age.workspace = true
 reqwest.workspace = true
 tempfile.workspace = true
 
+[features]
+default = ["qbsdk"]
+# The QuickBooks SDK transport (Windows only; lb-qbd leaves it out elsewhere).
+qbsdk = ["lb-qbd/qbsdk"]
+
 [dev-dependencies]
 tempfile.workspace = true
 pretty_assertions.workspace = true

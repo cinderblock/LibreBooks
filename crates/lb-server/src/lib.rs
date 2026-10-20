@@ -22,6 +22,7 @@ pub mod assets;
 pub mod auth;
 pub mod error;
 pub mod housekeeping;
+pub mod import;
 pub mod ops;
 mod routes;
 pub mod secrets;
@@ -70,6 +71,7 @@ pub fn state_with(config: &ServerConfig, ops: OpsOptions) -> std::io::Result<App
             auth: config.auth.clone(),
             sessions: config.sessions.clone(),
             ops,
+            imports: import::ImportSlots::default(),
         }),
     })
 }
@@ -89,6 +91,9 @@ pub fn router(state: AppState) -> Router {
             state.clone(),
             ops::access::guard,
         ))
+        // The Web Connector can't sign in to Cloudflare Access (it has its own
+        // user name and password), so `/qbwc` sits outside that check.
+        .merge(routes::qbwc())
         .with_state(state)
         .layer(RequestBodyLimitLayer::new(64 * 1024 * 1024))
         .layer(CompressionLayer::new())

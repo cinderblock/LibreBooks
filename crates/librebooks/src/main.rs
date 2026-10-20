@@ -178,7 +178,7 @@ fn main() -> Result<()> {
             public_url,
         } => enroll(&data_dir, &role, name, minutes, &public_url),
         Command::Company { command } => company(&data_dir, command),
-        Command::Import { command } => import::run(&data_dir, command),
+        Command::Import { command } => import::run(&data_dir, cli.secret_key_file, command),
         Command::Check { file } => check(&file),
         Command::Backup { command } => ops::backup(&data_dir, cli.secret_key_file, command),
         Command::Update { command } => ops::update(&data_dir, &command),

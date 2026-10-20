@@ -35,10 +35,11 @@ use lb_core::{ItemType, Money, TxnId};
 use lb_store::{Books, StoreError, accounts, company, entities, extref, items, lists, txns};
 use serde_json::Value;
 
-use crate::client::{BridgeError, ListQuery, QbdSource};
+use crate::client::{ListQuery, QbdError, QbdSource};
 use crate::entity::{NOT_EXPOSED_TXN_TYPES, QbdEntity};
 use crate::qbxml::record::{Meta, describe};
 use crate::qbxml::{self};
+use crate::source::RET_ELEMENT_KEY;
 use import::{ImportError, Outcome, PARTIAL_PREFIX, import_list, import_txn, write_record};
 pub use report::{
     EntityReport, Gap, Mismatch, MismatchKind, Severity, SyncIssue, SyncPhase, SyncProgress,
@@ -119,7 +120,7 @@ impl SyncOptions {
 #[derive(Debug, thiserror::Error)]
 pub enum SyncError {
     #[error(transparent)]
-    Bridge(#[from] BridgeError),
+    Bridge(#[from] QbdError),
     #[error(transparent)]
     Store(#[from] StoreError),
     #[error(
@@ -337,7 +338,7 @@ impl<S: QbdSource> Run<'_, S> {
     }
 
     /// Note a bridge failure; abort the run after too many in a row.
-    fn bridge_failed(&mut self, e: &BridgeError) -> bool {
+    fn bridge_failed(&mut self, e: &QbdError) -> bool {
         if e.is_transient() {
             self.consecutive_bridge_failures += 1;
             if self.consecutive_bridge_failures >= self.options.max_consecutive_bridge_failures {
@@ -526,11 +527,34 @@ impl<S: QbdSource> Run<'_, S> {
         mut rows: Vec<Value>,
         hold: &mut Vec<Meta>,
     ) -> Result<(), SyncError> {
-        let hints = if entity == QbdEntity::Item {
-            self.item_hints().await
-        } else {
-            HashMap::new()
-        };
+        // Item types: a transport that names each item's qbXML element (the
+        // Web Connector, the SDK) says exactly; the bridge's generic list
+        // doesn't, so its typed lists are asked.
+        let mut hints: HashMap<String, ItemType> = HashMap::new();
+        if entity == QbdEntity::Item {
+            let mut all_named = !rows.is_empty();
+            for row in &mut rows {
+                let element = row
+                    .as_object_mut()
+                    .and_then(|m| m.remove(RET_ELEMENT_KEY))
+                    .and_then(|v| v.as_str().map(str::to_owned));
+                let named = element
+                    .as_deref()
+                    .and_then(qbxml::lists::item_type_for_ret)
+                    .zip(Meta::of(row));
+                match named {
+                    Some((t, m)) => {
+                        hints.insert(m.id, t);
+                    }
+                    None => all_named = false,
+                }
+            }
+            if !all_named {
+                for (id, t) in self.item_hints().await {
+                    hints.entry(id).or_insert(t);
+                }
+            }
+        }
         if entity.is_hierarchical() {
             // Parents first; groups and assemblies after the items they contain.
             let level = |v: &Value| {

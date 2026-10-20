@@ -26,6 +26,13 @@ tracing-subscriber.workspace = true
 directories.workspace = true
 serde_json.workspace = true
 axum.workspace = true
+# To read a saved bridge key out of the secret store (SecretString).
+age.workspace = true
+
+[features]
+default = ["qbsdk"]
+# The QuickBooks SDK transport for `import qbd --transport sdk` (Windows only).
+qbsdk = ["lb-qbd/qbsdk", "lb-server/qbsdk"]
 
 [lints]
 workspace = true

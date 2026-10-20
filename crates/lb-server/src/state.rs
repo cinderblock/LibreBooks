@@ -190,6 +190,8 @@ pub struct Inner {
     pub sessions: Option<Sessions>,
     /// Settings, secrets and background work (backups, updates, tunnel, feeds).
     pub ops: crate::ops::Ops,
+    /// QuickBooks import jobs and Web Connector sessions, per company.
+    pub imports: crate::import::ImportSlots,
 }
 
 impl AppState {

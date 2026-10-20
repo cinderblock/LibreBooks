@@ -84,11 +84,10 @@ impl fmt::Debug for BridgeConfig {
 
 impl BridgeConfig {
     /// Defaults suited to a QuickBooks that someone is using at the same time.
-    pub fn new(base_url: &str, api_key: impl Into<String>) -> Result<BridgeConfig, BridgeError> {
-        let base_url =
-            Url::parse(base_url).map_err(|_| BridgeError::BadUrl(base_url.to_owned()))?;
+    pub fn new(base_url: &str, api_key: impl Into<String>) -> Result<BridgeConfig, QbdError> {
+        let base_url = Url::parse(base_url).map_err(|_| QbdError::BadUrl(base_url.to_owned()))?;
         if !matches!(base_url.scheme(), "http" | "https") {
-            return Err(BridgeError::BadUrl(base_url.to_string()));
+            return Err(QbdError::BadUrl(base_url.to_string()));
         }
         Ok(BridgeConfig {
             base_url,
@@ -244,9 +243,10 @@ impl ReportQuery {
     }
 }
 
-/// What went wrong talking to the bridge. Messages are for people.
+/// What went wrong talking to QuickBooks, through whichever transport (the
+/// bridge, the Web Connector queue, the SDK). Messages are for people.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-pub enum BridgeError {
+pub enum QbdError {
     #[error("{0:?} isn't a usable bridge address")]
     BadUrl(String),
     #[error("can't reach the QuickBooks bridge for {path}: {message}")]
@@ -274,40 +274,74 @@ pub enum BridgeError {
         expected: usize,
         got: usize,
     },
+    /// QuickBooks answered a qbXML request with an error status (the Web
+    /// Connector and SDK transports). `code` is QuickBooks' `statusCode`
+    /// (3120 is "not found"; 1 is "no match", which isn't an error).
+    #[error("QuickBooks refused {request} (status {code}, {severity}): {message}")]
+    Qbxml {
+        request: String,
+        code: i64,
+        severity: String,
+        message: String,
+    },
+    /// The transport's session with QuickBooks ended or never started (the Web
+    /// Connector reported a connection error, the SDK couldn't open the company,
+    /// the queue was closed). The whole sync should stop, not one record.
+    #[error("the QuickBooks session is gone: {message}")]
+    Session { message: String },
+    /// The transport can't do this (a report the qbXML builder doesn't know).
+    #[error("{0}")]
+    Unsupported(String),
 }
 
 fn code_suffix(code: Option<&str>) -> String {
     code.map(|c| format!(", {c}")).unwrap_or_default()
 }
 
-impl BridgeError {
+impl QbdError {
+    /// qbXML's "object not found" status.
+    pub const QBXML_NOT_FOUND: i64 = 3120;
+    /// qbXML's "QuickBooks is busy / another application is modal" statuses,
+    /// worth retrying.
+    const QBXML_BUSY: [i64; 2] = [0x8004_0408, 0x8004_041A];
+
     /// The bridge's error code (`NOT_FOUND`, `ITERATOR_NOT_SUPPORTED`…), if any.
     pub fn code(&self) -> Option<&str> {
         match self {
-            BridgeError::Refused { code, .. } => code.as_deref(),
+            QbdError::Refused { code, .. } => code.as_deref(),
             _ => None,
         }
     }
 
-    /// Worth trying again: the network, a timeout, or a server-side failure that
-    /// a busy QuickBooks produces (5xx, 429).
+    /// Worth trying again, or a reason to stop the whole run rather than mark
+    /// one record failed: the network, a timeout, a server-side failure that a
+    /// busy QuickBooks produces (5xx, 429), a QuickBooks "busy" status, or the
+    /// transport's session going away.
     pub fn is_transient(&self) -> bool {
         match self {
-            BridgeError::Unreachable { .. } | BridgeError::Timeout { .. } => true,
-            BridgeError::Refused { status, .. } => *status == 429 || *status >= 500,
+            QbdError::Unreachable { .. } | QbdError::Timeout { .. } | QbdError::Session { .. } => {
+                true
+            }
+            QbdError::Refused { status, .. } => *status == 429 || *status >= 500,
+            QbdError::Qbxml { code, .. } => Self::QBXML_BUSY.contains(code),
             _ => false,
         }
     }
 
     pub fn is_not_found(&self) -> bool {
-        matches!(self, BridgeError::Refused { status: 404, .. })
+        match self {
+            QbdError::Refused { status, .. } => *status == 404,
+            QbdError::Qbxml { code, .. } => *code == Self::QBXML_NOT_FOUND,
+            _ => false,
+        }
     }
 }
 
-/// Where QuickBooks records come from. [`BridgeClient`] is the real one; the
-/// sync engine and parity check take any implementation, so tests run them
-/// against fixtures ([`crate::testing::FixtureSource`]) and a future Web Connector
-/// transport can plug in.
+/// Where QuickBooks records come from. [`BridgeClient`] reads through the QB
+/// Bridge; [`crate::source::QbxmlSource`] speaks qbXML through the Web Connector
+/// queue ([`crate::qbwc`]) or the SDK ([`crate::sdk`], Windows); tests use
+/// fixtures ([`crate::testing::FixtureSource`]). The sync engine and parity check
+/// take any of them.
 pub trait QbdSource: Send + Sync {
     /// Every record of `entity` matching `query`, all pages. Transactions come
     /// without their lines (as the bridge's lists do); use [`QbdSource::get`].
@@ -315,27 +349,27 @@ pub trait QbdSource: Send + Sync {
         &self,
         entity: QbdEntity,
         query: &ListQuery,
-    ) -> impl Future<Output = Result<Vec<Value>, BridgeError>> + Send;
+    ) -> impl Future<Output = Result<Vec<Value>, QbdError>> + Send;
 
     /// One record, complete (lines, applied-to transactions and all).
     fn get(
         &self,
         entity: QbdEntity,
         id: &str,
-    ) -> impl Future<Output = Result<Value, BridgeError>> + Send;
+    ) -> impl Future<Output = Result<Value, QbdError>> + Send;
 
     /// `CompanyRet`.
-    fn company(&self) -> impl Future<Output = Result<Value, BridgeError>> + Send;
+    fn company(&self) -> impl Future<Output = Result<Value, QbdError>> + Send;
 
     /// `PreferencesRet`.
-    fn preferences(&self) -> impl Future<Output = Result<Value, BridgeError>> + Send;
+    fn preferences(&self) -> impl Future<Output = Result<Value, QbdError>> + Send;
 
     /// A QBD report (`trial-balance`, `general-ledger`, …).
     fn report(
         &self,
         slug: &str,
         query: &ReportQuery,
-    ) -> impl Future<Output = Result<Value, BridgeError>> + Send;
+    ) -> impl Future<Output = Result<Value, QbdError>> + Send;
 
     /// Requests made so far, where the source counts them.
     fn requests_made(&self) -> Option<u64> {
@@ -365,13 +399,13 @@ impl fmt::Debug for BridgeClient {
 }
 
 impl BridgeClient {
-    pub fn new(config: BridgeConfig) -> Result<BridgeClient, BridgeError> {
+    pub fn new(config: BridgeConfig) -> Result<BridgeClient, QbdError> {
         let http = reqwest::Client::builder()
             .timeout(config.timeout)
             .connect_timeout(config.connect_timeout)
             .user_agent(concat!("LibreBooks/", env!("CARGO_PKG_VERSION")))
             .build()
-            .map_err(|e| BridgeError::Unreachable {
+            .map_err(|e| QbdError::Unreachable {
                 path: String::new(),
                 message: e.to_string(),
             })?;
@@ -390,19 +424,19 @@ impl BridgeClient {
     }
 
     /// `GET /api/v1/health` (no QuickBooks round trip).
-    pub async fn health(&self) -> Result<Value, BridgeError> {
+    pub async fn health(&self) -> Result<Value, QbdError> {
         self.get_retrying("/api/v1/health", None, &[]).await
     }
 
     /// `GET /api/v1/status`: the bridge's view of its QuickBooks connection. Its
     /// `qb_desktop_running` has been seen `false` while queries worked, so don't
     /// gate anything on it.
-    pub async fn status(&self) -> Result<Value, BridgeError> {
+    pub async fn status(&self) -> Result<Value, QbdError> {
         Ok(data(self.get_retrying("/api/v1/status", None, &[]).await?))
     }
 
     /// `GET /api/v1/entities`.
-    pub async fn entities(&self) -> Result<Value, BridgeError> {
+    pub async fn entities(&self) -> Result<Value, QbdError> {
         Ok(data(
             self.get_retrying("/api/v1/entities", None, &[]).await?,
         ))
@@ -425,7 +459,7 @@ impl BridgeClient {
         &self,
         entity: QbdEntity,
         query: &ListQuery,
-    ) -> Result<Vec<Value>, BridgeError> {
+    ) -> Result<Vec<Value>, QbdError> {
         let mut attempt = 0;
         loop {
             match self.iterate_once(entity, query).await {
@@ -443,7 +477,7 @@ impl BridgeClient {
         &self,
         entity: QbdEntity,
         query: &ListQuery,
-    ) -> Result<Vec<Value>, BridgeError> {
+    ) -> Result<Vec<Value>, QbdError> {
         let base = query.params(entity);
         let mut out: Vec<Value> = Vec::new();
         let mut iterator = "Start".to_owned();
@@ -477,7 +511,7 @@ impl BridgeClient {
             && query.limit.is_none()
             && out.len() != expected
         {
-            return Err(BridgeError::IteratorInconsistent {
+            return Err(QbdError::IteratorInconsistent {
                 entity: entity.name(),
                 expected,
                 got: out.len(),
@@ -492,7 +526,7 @@ impl BridgeClient {
         &self,
         entity: QbdEntity,
         query: &ListQuery,
-    ) -> Result<Vec<Value>, BridgeError> {
+    ) -> Result<Vec<Value>, QbdError> {
         let cap = query
             .limit
             .map_or(MAX_RETURNED, |l| l.clamp(1, MAX_RETURNED));
@@ -501,7 +535,7 @@ impl BridgeClient {
             return Ok(first);
         }
         if !entity.is_transaction() {
-            return Err(BridgeError::Truncated {
+            return Err(QbdError::Truncated {
                 entity: entity.name(),
                 max: MAX_RETURNED,
             });
@@ -524,7 +558,7 @@ impl BridgeClient {
             }
             let days = from.until(to).map_or(0, |s| s.get_days());
             if days < 1 {
-                return Err(BridgeError::Truncated {
+                return Err(QbdError::Truncated {
                     entity: entity.name(),
                     max: MAX_RETURNED,
                 });
@@ -548,7 +582,7 @@ impl BridgeClient {
         entity: QbdEntity,
         query: &ListQuery,
         max: usize,
-    ) -> Result<Vec<Value>, BridgeError> {
+    ) -> Result<Vec<Value>, QbdError> {
         let mut params = query.params(entity);
         params.push(("max_returned", max.to_string()));
         let body = self.get_retrying(entity.path(), None, &params).await?;
@@ -569,7 +603,7 @@ impl BridgeClient {
         path: &str,
         id: Option<&str>,
         params: &[(&'static str, String)],
-    ) -> Result<Value, BridgeError> {
+    ) -> Result<Value, QbdError> {
         let mut attempt = 0;
         loop {
             match self.get_once(path, id, params).await {
@@ -590,7 +624,7 @@ impl BridgeClient {
         path: &str,
         id: Option<&str>,
         params: &[(&'static str, String)],
-    ) -> Result<Value, BridgeError> {
+    ) -> Result<Value, QbdError> {
         let url = self.url(path, id, params);
         let shown = match id {
             Some(id) => format!("{path}/{id}"),
@@ -654,9 +688,9 @@ impl BridgeClient {
     }
 }
 
-fn transport_error(path: &str, e: &reqwest::Error) -> BridgeError {
+fn transport_error(path: &str, e: &reqwest::Error) -> QbdError {
     if e.is_timeout() {
-        BridgeError::Timeout {
+        QbdError::Timeout {
             path: path.to_owned(),
         }
     } else {
@@ -668,7 +702,7 @@ fn transport_error(path: &str, e: &reqwest::Error) -> BridgeError {
             message.push_str(&s.to_string());
             source = s.source();
         }
-        BridgeError::Unreachable {
+        QbdError::Unreachable {
             path: path.to_owned(),
             message,
         }
@@ -678,7 +712,7 @@ fn transport_error(path: &str, e: &reqwest::Error) -> BridgeError {
 /// Turn a response into the envelope or an error. The bridge wraps errors two
 /// ways: FastAPI's `{"detail": {"ok": false, "error": {code, message}}}` (or a
 /// bare `{"detail": "Not Found"}`), and its own `{"ok": false, "error": …}`.
-fn interpret(path: &str, status: u16, body: &[u8]) -> Result<Value, BridgeError> {
+fn interpret(path: &str, status: u16, body: &[u8]) -> Result<Value, QbdError> {
     let parsed: Result<Value, _> = serde_json::from_slice(body);
     if !(200..300).contains(&status) {
         let (code, message) = match &parsed {
@@ -688,20 +722,20 @@ fn interpret(path: &str, status: u16, body: &[u8]) -> Result<Value, BridgeError>
                 String::from_utf8_lossy(&body[..body.len().min(300)]).into_owned(),
             ),
         };
-        return Err(BridgeError::Refused {
+        return Err(QbdError::Refused {
             path: path.to_owned(),
             status,
             code,
             message,
         });
     }
-    let v = parsed.map_err(|e| BridgeError::Garbled {
+    let v = parsed.map_err(|e| QbdError::Garbled {
         path: path.to_owned(),
         message: e.to_string(),
     })?;
     if v.get("ok") == Some(&Value::Bool(false)) {
         let (code, message) = error_detail(&v);
-        return Err(BridgeError::Refused {
+        return Err(QbdError::Refused {
             path: path.to_owned(),
             status,
             code,
@@ -734,12 +768,12 @@ fn data(v: Value) -> Value {
 }
 
 /// The envelope's `data` as rows (one-or-many, like everything qbXML).
-fn rows(v: Value, path: &str) -> Result<Vec<Value>, BridgeError> {
+fn rows(v: Value, path: &str) -> Result<Vec<Value>, QbdError> {
     match data(v) {
         Value::Array(a) => Ok(a),
         Value::Null => Ok(Vec::new()),
         obj @ Value::Object(_) => Ok(vec![obj]),
-        other => Err(BridgeError::Garbled {
+        other => Err(QbdError::Garbled {
             path: path.to_owned(),
             message: format!("expected a list, got {other}"),
         }),
@@ -747,7 +781,7 @@ fn rows(v: Value, path: &str) -> Result<Vec<Value>, BridgeError> {
 }
 
 impl QbdSource for BridgeClient {
-    async fn list(&self, entity: QbdEntity, query: &ListQuery) -> Result<Vec<Value>, BridgeError> {
+    async fn list(&self, entity: QbdEntity, query: &ListQuery) -> Result<Vec<Value>, QbdError> {
         if !self.knows_no_iterator(entity) {
             match self.list_iterating(entity, query).await {
                 Err(e) if e.code() == Some("ITERATOR_NOT_SUPPORTED") => {
@@ -762,22 +796,22 @@ impl QbdSource for BridgeClient {
         self.list_whole(entity, query).await
     }
 
-    async fn get(&self, entity: QbdEntity, id: &str) -> Result<Value, BridgeError> {
+    async fn get(&self, entity: QbdEntity, id: &str) -> Result<Value, QbdError> {
         Ok(data(self.get_retrying(entity.path(), Some(id), &[]).await?))
     }
 
-    async fn company(&self) -> Result<Value, BridgeError> {
+    async fn company(&self) -> Result<Value, QbdError> {
         Ok(data(self.get_retrying("/api/v1/company", None, &[]).await?))
     }
 
-    async fn preferences(&self) -> Result<Value, BridgeError> {
+    async fn preferences(&self) -> Result<Value, QbdError> {
         Ok(data(
             self.get_retrying("/api/v1/company/preferences", None, &[])
                 .await?,
         ))
     }
 
-    async fn report(&self, slug: &str, query: &ReportQuery) -> Result<Value, BridgeError> {
+    async fn report(&self, slug: &str, query: &ReportQuery) -> Result<Value, QbdError> {
         let path = format!("/api/v1/reports/{slug}");
         Ok(data(self.get_retrying(&path, None, &query.params()).await?))
     }

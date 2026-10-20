@@ -24,6 +24,20 @@ url.workspace = true
 quick-xml.workspace = true
 ts-rs.workspace = true
 
+# The QuickBooks SDK over COM (QBXMLRP2), for LibreBooks on the QuickBooks
+# machine. Windows only; `--no-default-features` leaves it out.
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.62", optional = true, features = [
+    "Win32_Foundation",
+    "Win32_System_Com",
+    "Win32_System_Ole",
+    "Win32_System_Variant",
+] }
+
+[features]
+default = ["qbsdk"]
+qbsdk = ["dep:windows"]
+
 [dev-dependencies]
 tempfile.workspace = true
 pretty_assertions.workspace = true

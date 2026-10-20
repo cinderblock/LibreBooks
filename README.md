@@ -33,10 +33,13 @@ keyboard-first data entry, with no subscription. MIT licensed.
   short-lived, single-use enrolment link. Desktop thin clients use a device key
   kept in the OS keychain.
 - **Bring your QuickBooks data.** A read-only importer pulls a company out of
-  QuickBooks Desktop (through the QuickBooks Web Connector, or the
-  [QB Bridge](https://github.com/cinderblock/quickbooks-desktop-sdk-bridge)),
-  incrementally, and compares LibreBooks' balances with QuickBooks' own so you
-  can run both side by side until you trust it. It never writes to QuickBooks.
+  QuickBooks Desktop three ways: through the QuickBooks Web Connector (ships
+  free with QuickBooks; nothing else to install), the QuickBooks SDK when
+  LibreBooks runs on the QuickBooks machine, or the
+  [QB Bridge](https://github.com/cinderblock/quickbooks-desktop-sdk-bridge).
+  Incremental, and it compares LibreBooks' balances with QuickBooks' own so you
+  can run both side by side until you trust it. It never writes to QuickBooks:
+  every transport can only send queries, by construction.
 - **Feeds.** Bank and card transactions from OFX/QFX/QBO/CSV downloads,
   SimpleFIN, OFX Direct Connect and others, with matching rules; Amazon orders.
 - **Built-in backups**: scheduled, verified, compressed, optionally encrypted,
@@ -78,7 +81,10 @@ cargo run -p librebooks -- serve # the server on http://127.0.0.1:8740
 
 The first `serve` prints a one-hour link to create the first admin with a
 passkey. `librebooks --help` lists the rest: companies, enrolment links, the
-QuickBooks Desktop import (`import qbd`, read-only) and its parity check.
+QuickBooks Desktop import (`import qbd --transport bridge|sdk`, read-only), its
+parity check, and the Web Connector set-up (`import qwc`, `import
+qbwc-password`; the sync itself is started from the server, which QuickBooks'
+Web Connector polls). Set-up steps per transport: `plans/qbd-import.md`.
 
 ## Running a server
 

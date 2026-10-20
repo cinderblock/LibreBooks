@@ -131,7 +131,7 @@ pub enum SecretCommand {
 }
 
 /// The server's state for a command (nothing starts).
-fn state(data_dir: &Path, secret_key: Option<PathBuf>) -> Result<AppState> {
+pub(crate) fn state(data_dir: &Path, secret_key: Option<PathBuf>) -> Result<AppState> {
     std::fs::create_dir_all(data_dir)?;
     let config = ServerConfig {
         data_dir: data_dir.to_owned(),

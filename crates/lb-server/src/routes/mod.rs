@@ -11,6 +11,7 @@ mod banking;
 mod company;
 mod events;
 mod feeds;
+mod import;
 mod lists;
 mod merge;
 mod ops;
@@ -18,6 +19,12 @@ mod reports;
 mod saved;
 mod system;
 mod txns;
+
+/// The QuickBooks Web Connector's SOAP endpoint (`/qbwc`), mounted at the root
+/// by `lib.rs`: it has its own sign-in, not the API's cookie.
+pub fn qbwc() -> Router<AppState> {
+    import::qbwc()
+}
 
 /// Run blocking store work off the async runtime.
 pub(crate) async fn blocking<T, F>(f: F) -> crate::error::ApiResult<T>
@@ -96,9 +103,11 @@ pub fn api() -> Router<AppState> {
                 .put(banking::attach)
                 .delete(banking::delete_attachment),
         )
-        // Bank feeds and backups (routes/feeds.rs, routes/backups.rs).
+        // Bank feeds, backups and the QuickBooks import (routes/feeds.rs,
+        // routes/backups.rs, routes/import.rs).
         .merge(feeds::routes())
-        .merge(backups::routes());
+        .merge(backups::routes())
+        .merge(import::routes());
     Router::new()
         // Server administration (routes/ops.rs).
         .merge(ops::routes())
