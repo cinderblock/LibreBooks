@@ -1,7 +1,10 @@
 //! The `librebooks` command: run the server, manage company files, check them.
 //!
-//! Later subcommands (backups, QuickBooks import, updates) arrive as their
-//! crates do; see `plans/librebooks.md`.
+//! Backups, self-update, the tunnel and secrets are in `ops.rs`
+//! (`plans/server-ops.md`); later subcommands (QuickBooks import) arrive as
+//! their crates do; see `plans/librebooks.md`.
+
+mod ops;
 
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
@@ -22,6 +25,12 @@ struct Cli {
     /// Where company files and server data live.
     #[arg(long, global = true, env = "LIBREBOOKS_DATA_DIR")]
     data_dir: Option<PathBuf>,
+
+    /// The secret store's key (default `<data dir>/secret.key`). Keep it apart
+    /// from the data (a systemd credential, a mounted secret) so a copy of the
+    /// data folder alone reveals no credentials.
+    #[arg(long, global = true, env = "LIBREBOOKS_SECRET_KEY_FILE")]
+    secret_key_file: Option<PathBuf>,
 
     #[command(subcommand)]
     command: Command,
@@ -86,6 +95,27 @@ enum Command {
         /// A `.lbdb` file.
         file: PathBuf,
     },
+    /// Backups: make one now, list, verify, restore.
+    Backup {
+        #[command(subcommand)]
+        command: ops::BackupCommand,
+    },
+    /// Self-update from signed releases.
+    Update {
+        #[command(subcommand)]
+        command: ops::UpdateCommand,
+    },
+    /// The Cloudflare tunnel.
+    Tunnel {
+        #[command(subcommand)]
+        command: ops::TunnelCommand,
+    },
+    /// The server's encrypted secret store (credentials for backups, feeds,
+    /// the tunnel).
+    Secret {
+        #[command(subcommand)]
+        command: ops::SecretCommand,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -126,7 +156,14 @@ fn main() -> Result<()> {
             public_urls,
             client_ip_header,
             no_auth,
-        } => serve(&data_dir, &binds, &public_urls, client_ip_header, no_auth),
+        } => serve(
+            &data_dir,
+            &binds,
+            &public_urls,
+            client_ip_header,
+            no_auth,
+            cli.secret_key_file,
+        ),
         Command::Enroll {
             role,
             name,
@@ -135,6 +172,10 @@ fn main() -> Result<()> {
         } => enroll(&data_dir, &role, name, minutes, &public_url),
         Command::Company { command } => company(&data_dir, command),
         Command::Check { file } => check(&file),
+        Command::Backup { command } => ops::backup(&data_dir, cli.secret_key_file, command),
+        Command::Update { command } => ops::update(&data_dir, &command),
+        Command::Tunnel { command } => ops::tunnel(&data_dir, cli.secret_key_file, command),
+        Command::Secret { command } => ops::secret(&data_dir, cli.secret_key_file, command),
     }
 }
 
@@ -181,8 +222,22 @@ fn serve(
     public_urls: &[String],
     client_ip_header: Option<String>,
     no_auth: bool,
+    secret_key: Option<PathBuf>,
 ) -> Result<()> {
     std::fs::create_dir_all(data_dir)?;
+    // Passkeys are bound to hostnames when sign-in starts, so the settings'
+    // public URLs and the tunnel's hostname join the command line's here.
+    let (_, settings) = lb_server::ops::settings::load_or_create(data_dir)?;
+    let mut public_urls: Vec<String> = public_urls
+        .iter()
+        .map(|u| u.trim_end_matches('/').to_owned())
+        .collect();
+    for u in settings.all_public_urls() {
+        if !public_urls.contains(&u) {
+            public_urls.push(u);
+        }
+    }
+    let public_urls = public_urls.as_slice();
     let sessions = if no_auth {
         None
     } else {
@@ -220,45 +275,7 @@ fn serve(
     for addr in binds {
         lb_server::check_bind(&config, *addr)?;
     }
-    let rt = tokio::runtime::Runtime::new()?;
-    rt.block_on(async move {
-        let state = lb_server::state(&config)?;
-        let app = lb_server::router(state);
-        let mut tasks = Vec::new();
-        for addr in binds {
-            let listener = tokio::net::TcpListener::bind(addr)
-                .await
-                .with_context(|| format!("couldn't listen on {addr}"))?;
-            tracing::info!(
-                "LibreBooks {} listening on http://{}",
-                env!("CARGO_PKG_VERSION"),
-                listener.local_addr()?
-            );
-            let app = app.clone();
-            tasks.push(tokio::spawn(async move {
-                // Connect info gives sign-in rate limiting the client's address.
-                axum::serve(
-                    listener,
-                    app.into_make_service_with_connect_info::<SocketAddr>(),
-                )
-                .with_graceful_shutdown(shutdown_signal())
-                .await
-            }));
-        }
-        if !lb_server::assets::has_ui() {
-            tracing::warn!("this build has no web UI embedded; build web/ first (bun run build)");
-        }
-        tracing::info!("company files in {}", config.companies_dir().display());
-        for t in tasks {
-            t.await??;
-        }
-        anyhow::Ok(())
-    })
-}
-
-async fn shutdown_signal() {
-    let _ = tokio::signal::ctrl_c().await;
-    tracing::info!("shutting down");
+    ops::run_server(&config, binds, secret_key)
 }
 
 fn enroll(

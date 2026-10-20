@@ -70,6 +70,24 @@ Needs Rust (stable, see `rust-toolchain.toml`) and [Bun](https://bun.sh).
 cargo test                 # the Rust workspace
 ```
 
+## Running a server
+
+```sh
+librebooks serve --bind 127.0.0.1:8740       # prints a first-admin link on first start
+librebooks backup now | list | verify <id> | restore <id | file.lbk>
+librebooks update check | install
+librebooks tunnel setup --hostname books.example.com   # token on stdin
+librebooks secret set <name>                 # value on stdin; refer to it as secret:<name>
+```
+
+Settings are in `server.json` in the data folder (also editable from the web UI);
+credentials live in the encrypted `secrets.age`, never in the settings. Backups
+are on by default (daily, into `<data folder>/backups`; add a second destination).
+Under systemd, `Restart=on-failure` plus `RestartForceExitStatus=75` lets a
+self-update restart the server; a full example unit, the Windows service setup,
+and the reasons behind all of it are in
+[`plans/server-ops.md`](plans/server-ops.md).
+
 ## Money
 
 Amounts are whole cents (`i64` in Rust, integer `number` in TypeScript), never
