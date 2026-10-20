@@ -301,6 +301,13 @@ Phases are ordered; each ends usable. **Current step is marked ▶.**
   invoice, creating a new mismatch. The import applies only to charges QBD
   shows more settled than ours, by the shortfall. The fixture test caught it.
 
+- **Shared build dir, parallel worktrees:** `cargo clippy` in the main checkout
+  reported `lb_store` had no `saved`/`merge`/`apply` modules while `cargo test`
+  on the same sources passed. An agent worktree was building an older
+  `lb-store` into the machine-wide `~/.cargo/build` at the same time and its
+  check artifact won. `cargo clean -p lb-store` and rerunning fixed it. When
+  clippy and test disagree, suspect this before the code.
+
 ## Progress log
 
 - [x] Survey environment, sibling projects, QB bridge shape.
