@@ -258,9 +258,10 @@ or `sc create` with a wrapper) that forwards stop as Ctrl+C.
   The library default stays `CompanySlug` for shared destinations.
 - **Settings races**: the store re-reads on change, but two processes writing
   `secrets.age` at the same instant can lose one write (last writer wins).
-- **Access check success path** is tested in lb-tunnel (signed JWTs against a
-  local key server); the server tests cover refusal (missing, malformed) and
-  pass-through, not a signed token through the middleware.
+- **Access check** is tested end to end: lb-tunnel's tests cover the verifier,
+  and the server's `a_signed_access_assertion_gets_through` sends a token
+  signed with lb-tunnel's test key through the middleware against a local key
+  server (and refuses an unpublished key, another audience, an expired token).
 - **Real cloudflared** is never started in these tests (a missing configured path
   exercises the failure path); lb-tunnel's own tests supervise its fake.
 - `Build` for the updater is `CARGO_PKG_VERSION`; a development build that isn't

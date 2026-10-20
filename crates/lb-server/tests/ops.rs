@@ -524,6 +524,113 @@ async fn the_tunnel_token_goes_into_the_secret_store() {
     background.shutdown().await;
 }
 
+/// A token signed by a key the (local) key server publishes gets through the
+/// Access check; one signed by another key, or for another application, does
+/// not. lb-tunnel's tests cover the verifier itself; this is the middleware.
+#[tokio::test]
+async fn a_signed_access_assertion_gets_through() {
+    use base64::Engine as _;
+    use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+    use rsa::pkcs1v15::Pkcs1v15Sign;
+    use rsa::pkcs8::DecodePrivateKey as _;
+    use rsa::sha2::{Digest as _, Sha256};
+    use rsa::traits::PublicKeyParts as _;
+
+    const AUD: &str = "4714c1358e65fe4b408ad6d432a5f878f08194bdb4752441fd56faefa9b2b6f2";
+    const ISSUER: &str = "https://testteam.cloudflareaccess.com";
+
+    fn key(name: &str) -> rsa::RsaPrivateKey {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../lb-tunnel/testdata")
+            .join(name);
+        rsa::RsaPrivateKey::from_pkcs8_pem(&std::fs::read_to_string(path).unwrap()).unwrap()
+    }
+    fn b64(v: &Value) -> String {
+        URL_SAFE_NO_PAD.encode(serde_json::to_vec(v).unwrap())
+    }
+    fn sign(key: &rsa::RsaPrivateKey, kid: &str, claims: &Value) -> String {
+        let header = json!({ "alg": "RS256", "kid": kid, "typ": "JWT" });
+        let input = format!("{}.{}", b64(&header), b64(claims));
+        let digest = Sha256::digest(input.as_bytes());
+        let sig = key.sign(Pkcs1v15Sign::new::<Sha256>(), &digest).unwrap();
+        format!("{input}.{}", URL_SAFE_NO_PAD.encode(sig))
+    }
+    let now = i64::try_from(
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs(),
+    )
+    .unwrap();
+    let claims = |aud: &str| {
+        json!({
+            "aud": [aud], "email": "cameron@example.com", "iss": ISSUER, "type": "app",
+            "iat": now - 5, "nbf": now - 5, "exp": now + 3600,
+            "sub": "7335d417-61da-459d-899c-0a01c76a2f94", "country": "US",
+        })
+    };
+
+    // A key server with the published key only.
+    let published = key("access-test-key.pem");
+    let public = published.to_public_key();
+    let certs = json!({
+        "keys": [{
+            "kid": "k1", "kty": "RSA", "alg": "RS256", "use": "sig",
+            "n": URL_SAFE_NO_PAD.encode(public.n().to_bytes_be()),
+            "e": URL_SAFE_NO_PAD.encode(public.e().to_bytes_be()),
+        }],
+        "public_cert": {}, "public_certs": []
+    });
+    let app = axum::Router::new().route(
+        "/cdn-cgi/access/certs",
+        axum::routing::get(move || {
+            let certs = certs.clone();
+            async move { axum::Json(certs) }
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let certs_url = format!(
+        "http://{}/cdn-cgi/access/certs",
+        listener.local_addr().unwrap()
+    );
+    tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+
+    let s = Server::open(OpsOptions {
+        access_certs_url: Some(certs_url),
+        ..OpsOptions::default()
+    });
+    let mut settings = s.state.ops.settings();
+    settings.access = Some(lb_tunnel::AccessConfig {
+        team_domain: "testteam".into(),
+        audience: vec![AUD.into()],
+    });
+    ops::put_settings(&s.state, settings).await.unwrap();
+
+    let through = |assertion: String| {
+        s.send(
+            axum::http::Request::builder()
+                .uri("/api/v1/companies")
+                .header("cf-ray", "8c0ffee-SJC")
+                .header("cf-access-jwt-assertion", assertion),
+            axum::body::Body::empty(),
+        )
+    };
+    let r = through(sign(&published, "k1", &claims(AUD))).await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text());
+    // Signed by a key the team never published.
+    let r = through(sign(&key("access-other-key.pem"), "k1", &claims(AUD))).await;
+    assert_eq!(r.status, StatusCode::FORBIDDEN, "{}", r.text());
+    assert_eq!(r.json()["error"]["detail"]["reason"], "cloudflare_access");
+    // For another application.
+    let r = through(sign(&published, "k1", &claims("another-app"))).await;
+    assert_eq!(r.status, StatusCode::FORBIDDEN, "{}", r.text());
+    // Expired (well past the verifier's clock-skew leeway).
+    let mut old = claims(AUD);
+    old["exp"] = json!(now - 86_400);
+    let r = through(sign(&published, "k1", &old)).await;
+    assert_eq!(r.status, StatusCode::FORBIDDEN, "{}", r.text());
+}
+
 #[tokio::test]
 async fn a_new_tunnel_hostname_needs_a_restart_for_passkeys() {
     let mut s = Server::with_sessions(OpsOptions::default());

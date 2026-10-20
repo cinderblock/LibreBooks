@@ -57,6 +57,9 @@ tempfile.workspace = true
 pretty_assertions.workspace = true
 http-body-util = "0.1"
 ed25519-dalek.workspace = true
+base64.workspace = true
+# Signing Cloudflare Access test tokens with lb-tunnel's test keys.
+rsa = { version = "0.9.10", features = ["sha2"] }
 
 [lints]
 workspace = true
