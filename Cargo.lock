@@ -2087,6 +2087,7 @@ dependencies = [
  "lb-store",
  "pretty_assertions",
  "rusqlite",
+ "rust_decimal",
  "serde",
  "serde_json",
  "tempfile",

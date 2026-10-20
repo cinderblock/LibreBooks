@@ -28,7 +28,7 @@ use crate::text::{self, DateOrder};
 /// A column, by header text (case and surrounding spaces ignored) or by
 /// zero-based position.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
-#[ts(export)]
+#[ts(export, rename = "CsvColumn")]
 pub enum Column {
     Name(String),
     Index(u32),

@@ -18,6 +18,8 @@ thiserror.workspace = true
 jiff.workspace = true
 uuid.workspace = true
 ts-rs.workspace = true
+# Quantities and exact percentages (never floats).
+rust_decimal.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
