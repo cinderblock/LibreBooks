@@ -92,7 +92,22 @@ null, feeds: { auto_sync, every } }` (durations ISO 8601, e.g. `"PT6H"`). Changi
 **Cloudflare Access**: with `access` set, a request that came through Cloudflare
 (it has `cf-ray`) without a valid `Cf-Access-Jwt-Assertion` gets 403 with
 `detail.reason = "cloudflare_access"`. Direct (LAN, localhost) requests are not
-affected.
+affected. `/qbwc` (below) is outside this check.
+
+### The QuickBooks Web Connector endpoint: `/qbwc` (outside `/api/v1`)
+
+`POST /qbwc` is the SOAP 1.1 service the QuickBooks Web Connector talks to
+(`text/xml`; methods `serverVersion`, `clientVersion`, `authenticate`,
+`sendRequestXML`, `receiveResponseXML`, `getLastError`, `connectionError`,
+`closeConnection`, namespace `http://developer.intuit.com/`). It has no
+session cookie and no CSRF header: the Web Connector signs in with the user
+name from the company's `.qwc` and the password set through
+`POST /c/:company/import/qbd/qbwc/password`, compared in constant time.
+`authenticate` answers `nvu` (bad credentials), `none` (nothing queued),
+`busy` (another Web Connector run is in this job's session) or the company
+file to open (empty = the one QuickBooks has open). `GET /qbwc` is a plain-text
+page for checking the URL in a browser. Put the path on a Cloudflare Access
+bypass policy if the hostname is behind Access.
 
 ## Company-scoped: `/api/v1/c/:company`
 
@@ -156,9 +171,30 @@ Each list has the same five routes. `:list` is one of `accounts`, `entities`,
 | --- | --- |
 | `GET /audit?record_kind=&record_id=&before_id=&limit=` | audit trail |
 | `POST /attachments` (multipart) / `GET /attachments/:id` | receipts, documents |
-| `POST /import/qbd/sync` / `GET /import/qbd/status` / `GET /import/qbd/parity` | QuickBooks import (admin) |
+| `/import/qbd/…` | QuickBooks Desktop import (admin; below) |
 | `/feeds/…` | bank feeds (below) |
 | `/backups/…` | list, run now, verify, restore, export (below) |
+
+### QuickBooks Desktop import (admin on the company)
+
+Three transports feed one importer (`plans/qbd-import.md`): the QB Bridge, the
+QuickBooks Web Connector (QuickBooks polls this server) and the QuickBooks SDK
+(LibreBooks on the QuickBooks machine). One job (sync or parity) runs per
+company at a time, in the background; status and reports are read back, with
+`?wait=N` (seconds, at most 120) to long-poll until the running job finishes.
+Types `ImportSettings`, `QbdTransport`, `SyncReport`, `ParityReport`,
+`SyncProgress` are lb-qbd's (`web/src/api/generated/`).
+
+| | |
+| --- | --- |
+| `GET /import/qbd` | → `ImportStatus { settings: ImportSettings, bridge_key_set, qbwc_password_set, sdk_available, running: RunningJob \| null, last_sync: SyncReport \| null, last_parity: ParityReport \| null, last_error }`. `RunningJob { kind: "sync" \| "parity", transport, started_at, progress: SyncProgress \| null, percent, waiting_for_web_connector, web_connector_connected }` |
+| `PUT /import/qbd` | `ImportSettings` plus write-only `bridge_key?` (saved as the secret `qbd.<company>.bridge-key`; `bridge.key_ref` then points at it) → `ImportStatus`. 400 `invalid` with `detail.problems` (empty bridge URL, no key, bad app URL…); 409 `duplicate` when another company uses the Web Connector user name. `qbwc.owner_id` / `file_id` are minted once and can't be changed. |
+| `POST /import/qbd/sync` | `{ full?, sweep?, reimport?, txn_limit?, txn_from?, txn_to?, apply_credits?, entities? }` (all optional) → 202 `ImportStatus`. 409 `running` while a job runs; 400 when the settings have problems; 501 `unsupported` for the SDK on a build without it; 502 `network` when the bridge can't be reached. Over the Web Connector the job waits for its next poll. |
+| `GET /import/qbd/status?wait=N` | → `ImportStatus` |
+| `POST /import/qbd/parity` | `{ as_of?, trial_balance? }` → 202 `ImportStatus` (same 409/400 rules) |
+| `GET /import/qbd/parity?wait=N` | → `{ running, job: RunningJob \| null, report: ParityReport \| null, error }` |
+| `GET /import/qbd/qbwc.qwc` | → `application/xml` download `librebooks-<slug>.qwc` for the QuickBooks Web Connector (`AppURL` = the company's `qbwc.app_url`, else the server's first public URL, else the tunnel hostname, else the request's origin, + `/qbwc`; `IsReadOnly` true). 400 unless the URL is `https://` or `http://localhost`. |
+| `POST /import/qbd/qbwc/password` | `{ value }` (≥ 8 characters) → 204, or no body → `{ password }`: a generated one, shown this once. Saved as the secret `qbd.<company>.qbwc-password`. |
 
 ### Backups (admin on the company)
 
