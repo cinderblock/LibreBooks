@@ -443,11 +443,9 @@ fn per_unit(amount: Money, qty: Decimal) -> Option<String> {
     if qty.is_zero() {
         return None;
     }
-    Some(
-        (amount.to_decimal() / qty)
-            .round_dp_with_strategy(2, RoundingStrategy::MidpointAwayFromZero)
-            .to_string(),
-    )
+    let v = (amount.to_decimal() / qty)
+        .round_dp_with_strategy(2, RoundingStrategy::MidpointAwayFromZero);
+    Some(format!("{v:.2}"))
 }
 
 pub(crate) fn by_item_summary(r: &Run<'_>) -> Result<Report> {
