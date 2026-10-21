@@ -138,7 +138,7 @@ Each list has the same five routes. `:list` is one of `accounts`, `entities`,
 
 | | |
 | --- | --- |
-| `GET /txns?…` | `TxnFilter` as query: `types=Check,Bill&from=&to=&entity_id=&include_jobs=true&account_id=&number=&text=&amount=&open_only=true&include_void=true&limit=&offset=&descending=true` → `TxnSummary[]` |
+| `GET /txns?…` | `TxnFilter` as query: `types=Check,Bill&from=&to=&entity_id=&include_jobs=true&account_id=&number=&text=&amount=&open_only=true&include_void=true&linked_to=<txn id>&limit=&offset=&descending=true` → `TxnSummary[]`. `linked_to` lists what was entered against a transaction (receipts and bills on a PO, invoices on a sales order or estimate, deposits of a payment) |
 | `GET /txns/:id` | → `{ txn: Txn, postings: Posting[] }` |
 | `POST /txns` | `Txn` (`edit_seq: 0`) → `SaveOutcome { txn, postings, total, sales_tax, warnings }` |
 | `PUT /txns/:id` | `Txn` → `SaveOutcome` |

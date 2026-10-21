@@ -791,6 +791,10 @@ pub struct TxnFilter {
     pub amount: Option<Money>,
     pub open_only: bool,
     pub include_void: bool,
+    /// Transactions with a line linked to this one (the receipts and bills
+    /// against a purchase order, the invoices against a sales order or
+    /// estimate, the deposits of a payment).
+    pub linked_to: Option<TxnId>,
     pub limit: Option<u32>,
     pub offset: Option<u32>,
     /// Newest first when true.
@@ -861,6 +865,12 @@ pub fn query(c: &Connection, f: &TxnFilter) -> Result<Vec<TxnSummary>> {
     if f.open_only {
         q.sql
             .push_str(" AND t.open_balance IS NOT NULL AND t.open_balance <> 0");
+    }
+    if let Some(target) = f.linked_to {
+        let n = q.bind(target.to_string());
+        q.sql.push_str(&format!(
+            " AND EXISTS (SELECT 1 FROM txn_link k WHERE k.txn_id = t.id AND k.target_txn_id = ?{n})"
+        ));
     }
     if !f.include_void {
         q.sql.push_str(" AND t.is_void = 0");

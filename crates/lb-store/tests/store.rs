@@ -1229,6 +1229,22 @@ fn a_purchase_order_is_received_in_parts_billed_from_the_receipt_and_closed() {
     assert_eq!(f.lines[0].remaining_quantity, Some(Decimal::from(6)));
     assert_eq!(f.lines[0].remaining_amount, Money(3_000));
     assert!(!f.lines[0].is_closed);
+    // What was entered against the order, by one filter.
+    let against_po: Vec<TxnId> = b
+        .read(|c| {
+            txns::query(
+                c,
+                &txns::TxnFilter {
+                    linked_to: Some(po.id),
+                    ..txns::TxnFilter::default()
+                },
+            )
+        })
+        .unwrap()
+        .into_iter()
+        .map(|t| t.id)
+        .collect();
+    assert_eq!(against_po, vec![rcpt.id]);
 
     // The bill for the received items links to the receipt, not the PO, and
     // doesn't count twice.
