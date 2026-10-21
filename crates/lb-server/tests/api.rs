@@ -4,9 +4,10 @@ use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use http_body_util::BodyExt;
 use jiff::civil::date;
-use lb_core::{Money, Txn, TxnLine, TxnType};
+use lb_core::{Entity, EntityKind, Item, ItemType, Money, Txn, TxnLine, TxnType};
 use lb_server::{AuthMode, Mode, ServerConfig, router, state};
 use pretty_assertions::assert_eq;
+use rust_decimal::Decimal;
 use serde_json::{Value, json};
 use tower::ServiceExt;
 
@@ -242,6 +243,175 @@ async fn write_a_check_and_read_the_register() {
         .await;
     assert_eq!(s, StatusCode::OK);
     assert_eq!(hist.as_array().unwrap().len(), 2);
+}
+
+#[tokio::test]
+async fn a_purchase_order_is_received_against_and_closed_over_the_api() {
+    let api = Api::new(AuthMode::Open);
+    let c = company(&api).await;
+    let base = format!("/api/v1/c/{c}");
+    let (s, expense) = api
+        .call(
+            "POST",
+            &format!("{base}/accounts"),
+            Some(account("Supplies", "Expense")),
+        )
+        .await;
+    assert_eq!(s, StatusCode::CREATED, "{expense}");
+    let (s, income) = api
+        .call(
+            "POST",
+            &format!("{base}/accounts"),
+            Some(account("Sales", "Income")),
+        )
+        .await;
+    assert_eq!(s, StatusCode::CREATED, "{income}");
+    let (s, vendor) = api
+        .call(
+            "POST",
+            &format!("{base}/entities"),
+            Some(serde_json::to_value(Entity::blank(EntityKind::Vendor, "Acme Supply")).unwrap()),
+        )
+        .await;
+    assert_eq!(s, StatusCode::CREATED, "{vendor}");
+    let vendor_id = vendor["id"].as_str().unwrap().to_owned();
+    let mut bolts = Item::blank(ItemType::NonInventory, "Bolts");
+    bolts.income_account_id = Some(income["id"].as_str().unwrap().parse().unwrap());
+    bolts.expense_account_id = Some(expense["id"].as_str().unwrap().parse().unwrap());
+    bolts.has_purchase_info = true;
+    let (s, bolts) = api
+        .call(
+            "POST",
+            &format!("{base}/items"),
+            Some(serde_json::to_value(&bolts).unwrap()),
+        )
+        .await;
+    assert_eq!(s, StatusCode::CREATED, "{bolts}");
+    let bolts_id = bolts["id"].as_str().unwrap().parse().unwrap();
+
+    // The order: 10 @ $5, with the closed marks round-tripping.
+    let mut po = Txn::new(TxnType::PurchaseOrder, date(2026, 10, 1));
+    po.entity_id = Some(vendor_id.parse().unwrap());
+    po.lines
+        .push(TxnLine::item(bolts_id, Decimal::from(10), Decimal::from(5)));
+    let (s, saved) = api
+        .call(
+            "POST",
+            &format!("{base}/txns"),
+            Some(serde_json::to_value(&po).unwrap()),
+        )
+        .await;
+    assert_eq!(s, StatusCode::CREATED, "{saved}");
+    assert_eq!(saved["txn"]["is_manually_closed"], false);
+    assert_eq!(saved["txn"]["lines"][0]["is_closed"], false);
+    let po_id = saved["txn"]["id"].as_str().unwrap().to_owned();
+    let line_id = saved["txn"]["lines"][0]["id"].as_str().unwrap().to_owned();
+
+    let (s, f) = api
+        .call("GET", &format!("{base}/txns/{po_id}/fulfilment"), None)
+        .await;
+    assert_eq!(s, StatusCode::OK, "{f}");
+    assert_eq!(f["order_id"], po_id);
+    assert_eq!(f["is_closed"], false);
+    assert_eq!(f["remaining_amount"], 5_000);
+    assert_eq!(f["lines"][0]["line_id"], line_id);
+    assert_eq!(f["lines"][0]["ordered_quantity"], "10");
+    assert_eq!(f["lines"][0]["fulfilled_quantity"], "0");
+    let (s, open) = api
+        .call(
+            "GET",
+            &format!("{base}/open?kind=purchase_orders&entity_id={vendor_id}"),
+            None,
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{open}");
+    assert_eq!(open.as_array().unwrap().len(), 1);
+    assert_eq!(open[0]["id"], po_id);
+    assert_eq!(open[0]["open_balance"], 5_000);
+
+    // Receive 4 against the line.
+    let mut rcpt = Txn::new(TxnType::ItemReceipt, date(2026, 10, 5));
+    rcpt.entity_id = po.entity_id;
+    let mut line = TxnLine::item(bolts_id, Decimal::from(4), Decimal::from(5));
+    line.linked_txn_id = Some(po_id.parse().unwrap());
+    line.linked_line_id = Some(line_id.parse().unwrap());
+    rcpt.lines.push(line);
+    let (s, rcpt) = api
+        .call(
+            "POST",
+            &format!("{base}/txns"),
+            Some(serde_json::to_value(&rcpt).unwrap()),
+        )
+        .await;
+    assert_eq!(s, StatusCode::CREATED, "{rcpt}");
+    let rcpt_id = rcpt["txn"]["id"].as_str().unwrap();
+    let (_, f) = api
+        .call("GET", &format!("{base}/txns/{po_id}/fulfilment"), None)
+        .await;
+    assert_eq!(f["remaining_amount"], 3_000);
+    assert_eq!(f["lines"][0]["fulfilled_quantity"], "4");
+    assert_eq!(f["lines"][0]["remaining_quantity"], "6");
+    assert_eq!(f["lines"][0]["is_closed"], false);
+    // A receipt isn't an order; a bad kind is a bad request.
+    let (s, err) = api
+        .call("GET", &format!("{base}/txns/{rcpt_id}/fulfilment"), None)
+        .await;
+    assert_eq!(s, StatusCode::NOT_FOUND, "{err}");
+    assert_eq!(err["error"]["code"], "not_found");
+    let (s, _) = api
+        .call(
+            "GET",
+            &format!("{base}/open?kind=orders&entity_id={vendor_id}"),
+            None,
+        )
+        .await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
+
+    // Close it by hand: off the open list, nothing remaining.
+    let mut closed = saved["txn"].clone();
+    closed["is_manually_closed"] = json!(true);
+    let (s, closed) = api
+        .call("PUT", &format!("{base}/txns/{po_id}"), Some(closed))
+        .await;
+    assert_eq!(s, StatusCode::OK, "{closed}");
+    assert_eq!(closed["txn"]["is_manually_closed"], true);
+    let (_, read) = api.call("GET", &format!("{base}/txns/{po_id}"), None).await;
+    assert_eq!(read["txn"]["is_manually_closed"], true);
+    let (_, f) = api
+        .call("GET", &format!("{base}/txns/{po_id}/fulfilment"), None)
+        .await;
+    assert_eq!(f["is_closed"], true);
+    assert_eq!(f["remaining_amount"], 0);
+    assert_eq!(f["lines"][0]["is_closed"], true);
+    let (_, open) = api
+        .call(
+            "GET",
+            &format!("{base}/open?kind=purchase_orders&entity_id={vendor_id}"),
+            None,
+        )
+        .await;
+    assert_eq!(open, json!([]));
+    // Receiving more against it is refused.
+    let (s, err) = api
+        .call(
+            "POST",
+            &format!("{base}/txns"),
+            Some(serde_json::to_value(rcpt_again(&rcpt["txn"])).unwrap()),
+        )
+        .await;
+    assert_eq!(s, StatusCode::BAD_REQUEST, "{err}");
+    assert_eq!(err["error"]["code"], "invalid");
+}
+
+/// The same receipt again, as a new transaction.
+fn rcpt_again(saved: &Value) -> Txn {
+    let mut t: Txn = serde_json::from_value(saved.clone()).unwrap();
+    t.id = lb_core::TxnId::new();
+    t.edit_seq = 0;
+    for l in &mut t.lines {
+        l.id = lb_core::LineId::new();
+    }
+    t
 }
 
 #[tokio::test]

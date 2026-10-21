@@ -8,7 +8,7 @@ use lb_core::{
     OpenTxnInfo, PostingContext, SalesTaxCodeId, Txn, TxnId, TxnType, post,
 };
 use lb_store::txns::{SaveOutcome, TxnFilter, TxnSummary};
-use lb_store::{StoreContext, StoreError, audit, balances, txns};
+use lb_store::{Fulfilment, StoreContext, StoreError, audit, balances, orders, txns};
 use rust_decimal::Decimal;
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -274,6 +274,20 @@ pub async fn history(
     ))
 }
 
+/// `GET /txns/:id/fulfilment`: how much of a purchase order, sales order or
+/// estimate has been received or invoiced, line by line. 404 for anything that
+/// isn't an order.
+pub async fn fulfilment(
+    State(s): State<AppState>,
+    p: Principal,
+    Path((company, id)): Path<(CompanyId, TxnId)>,
+) -> ApiResult<Json<Fulfilment>> {
+    let books = s.books_for(&p, company, Role::Viewer)?;
+    Ok(Json(
+        blocking(move || books.read(|c| orders::fulfilment(c, id))).await?,
+    ))
+}
+
 #[derive(Debug, Default, Deserialize)]
 #[serde(default)]
 pub struct RangeQuery {
@@ -353,8 +367,11 @@ pub struct OpenQuery {
     kind: String,
 }
 
-/// Open invoices and credits (receivable) or bills and credits (payable) for a
-/// name and its jobs: what Receive Payments and Pay Bills show.
+/// Open items of a name and its jobs: invoices and credits (`receivable`, for
+/// Receive Payments), bills and credits (`payable`, for Pay Bills), or the
+/// orders still to be received or invoiced (`purchase_orders`, `sales_orders`,
+/// `estimates`, for Receive Items and Create Invoice from an order). An order's
+/// `open_balance` is what remains on it.
 pub async fn open_items(
     State(s): State<AppState>,
     p: Principal,
@@ -374,7 +391,14 @@ pub async fn open_items(
             TxnType::BillPaymentCheck,
             TxnType::BillPaymentCreditCard,
         ],
-        _ => return Err(ApiError::invalid("kind is receivable or payable")),
+        "purchase_orders" => vec![TxnType::PurchaseOrder],
+        "sales_orders" => vec![TxnType::SalesOrder],
+        "estimates" => vec![TxnType::Estimate],
+        _ => {
+            return Err(ApiError::invalid(
+                "kind is receivable, payable, purchase_orders, sales_orders or estimates",
+            ));
+        }
     };
     let filter = TxnFilter {
         types,
