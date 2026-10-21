@@ -165,7 +165,7 @@ Each list has the same five routes. `:list` is one of `accounts`, `entities`,
 | --- | --- |
 | `GET /reports` | → catalog `[{ id, name, category, params }]` |
 | `POST /reports/run` | `ReportRequest` → `Report` |
-| `POST /reports/export?format=csv` | `ReportRequest` → file |
+| `POST /reports/export?format=csv\|xlsx\|pdf&paper=letter\|a4` | `ReportRequest` → the report as a file: `text/csv` (default), an Excel workbook (`application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`) or a PDF (`application/pdf`; `paper` defaults to letter, landscape when the columns need it). `Content-Disposition: attachment; filename="<slug>.<ext>"` (`Profit_and_Loss.xlsx`). 400 `invalid` for any other format or paper. |
 | `GET /saved/reports`, `POST /saved/reports`, … | memorized reports |
 
 ### Audit, attachments, import, feeds, backups

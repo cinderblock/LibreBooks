@@ -13,8 +13,9 @@ CSV export, and both accrual and cash basis.
 
 - Crate: `crates/lb-reports`. Public API in `src/lib.rs`: `run(&Books,
   &ReportRequest) -> Result<Report>`, `run_on(&Connection, ...)` (inside a
-  caller's read transaction), `catalog()`, `to_csv`, `export`, `file_name`,
-  `resolve_dates`.
+  caller's read transaction), `catalog()`, `to_csv`, `export`, `export_with`
+  (`ExportOptions { paper }`), `file_name`, `resolve_dates`, and the `render`
+  module (the shared layout the export writers draw from).
 - Reads `posting`, `txn`, `application`, `account`, `entity`, `item`,
   `list_entry`, `deposit_link`, `audit` (schema: `crates/lb-store/src/schema.rs`).
 - TypeScript types: `#[ts(export)]` on request/report/catalog types;
@@ -60,6 +61,69 @@ CSV export, and both accrual and cash basis.
   Vendor attribution: the transaction's payee when a vendor, else the line's.
 - Categories follow QBD's menu, including "Jobs, Time & Mileage" for job
   profitability (one more than the brief listed).
+- **Export** (`?format=csv|xlsx|pdf`): one shared layout, three writers. See
+  "Export: CSV, XLSX, PDF" below for the crates and the layout rules.
+
+## Export: CSV, XLSX, PDF
+
+What QBD's "Export to Excel" and "Print" give, from the same `Report`.
+
+**Shared layout (`src/render.rs`).** `render::layout(&Report) -> Layout`: the
+title block (title, company, date line, basis), the column headings with group
+headings turned into spans (a run of equal `Column.group`s is one span;
+ungrouped columns are single empty spans, never merged with each other), the
+rows flattened with their depth and a `RowStyle` (Header/Subtotal/Total bold;
+Subtotal and Total get a rule above their amounts; Total's is heavier), the
+notes, a footer ("Generated 2026-10-19 21:04 UTC by LibreBooks") and a width per
+column in characters (widest heading or accounting-style value plus
+indentation, clamped 6–60). `render::grid` prints the layout as text for tests.
+Value spelling is shared too: `Style::Plain` (`-1234.50`, for CSV) and
+`Style::Accounting` (`1,234.50`, `(62.50)`, for paper). Money stays integer
+cents everywhere; `render::money_major` is the one place a float is made from
+an amount, for a spreadsheet cell (exact for every cent value below 2^53).
+
+**CSV** (`export/mod.rs`): unchanged bytes, now written from the layout. Group
+headings repeat over every column of their span.
+
+**XLSX** (`export/xlsx.rs`, crate `rust_xlsxwriter` 0.101, MIT/Apache-2.0, pure
+Rust, no default features): one sheet named for the report (Excel's rules:
+31 characters, no `[]:*?/\`). Title block merged across the table; group
+headings merged over their spans; heading rows frozen and set as print titles;
+rows indented with Excel's cell indent by `depth`; bold totals with a thin
+(subtotal) or double (total) top border on the amount cells. Amounts are
+numbers with `#,##0.00_);(#,##0.00)`, percents are fractions with `0.0%`,
+quantities numbers, dates real Excel dates (`mm/dd/yyyy`; a date before 1900
+falls back to text). Column widths from the layout's character widths. Print
+setup: landscape past six columns, fit to one page wide, header with the
+title, footer "LibreBooks … Page n of m". Document properties carry the
+title, subtitle, company and author.
+
+**PDF** (`export/pdf.rs`, crate `printpdf` 0.12, MIT, `default-features =
+false` so none of its HTML/text-layout/image stack is built): Letter or A4
+(`?paper=`), portrait unless the measured column widths exceed the page, then
+landscape; if they still don't fit, text columns shrink first (to a 40 pt
+floor), then everything scales and cell text is cut with an ellipsis. Text is
+Helvetica / Helvetica-Bold, two of the fourteen standard PDF fonts every
+reader carries, referenced by name (nothing embedded, so no font ships with
+LibreBooks and no font licence applies; a one-page balance sheet is ~3 KB).
+Widths are measured from printpdf's own metrics for those faces (its bundled
+subset TTFs, used only for measuring). Those fonts are WinAnsi: a character
+outside Windows-1252 prints as `?`. Every page repeats the title block and the
+column headings; the footer has the generation line and "Page n of m"; rows
+paginate greedily with spacers never starting a page. Sizes: 14/11/10/9 pt
+title block, 8 pt headings and body, 7 pt footer, 36 pt margins.
+
+**Reading them back in tests** (dev-dependencies): `calamine` 0.37 (MIT) opens
+the XLSX and checks cell types and values, merged regions and the date serial;
+`lopdf` 0.44 (MIT; the same version printpdf depends on, so one copy) parses
+the PDF, counts pages, reads the MediaBox and extracts each page's text.
+
+**Known limits.** No text wrapping in the PDF (cells are cut, columns shrink);
+no per-report column width choices; XLSX cells are values, not formulas (totals
+don't recompute); the PDF has no bookmarks or links; one sheet per workbook;
+no page-break control (a section heading can end a page). The web UI still
+offers CSV only; XLSX and PDF are a format switch away (`ExportFormat` in the
+generated types now lists them).
 
 ## Cash basis: the exact algorithm
 
@@ -167,7 +231,9 @@ Key semantics:
   jump at the year start isn't shown as its own line (the Balance Sheet Detail
   folds it into the brought-forward balance and says so in a note).
 - Audit Trail ranges are UTC days of the change.
-- Export: CSV only; `ExportFormat` is where XLSX/PDF go.
+- Export: the limits under "Export: CSV, XLSX, PDF" (no wrapping in the PDF,
+  values not formulas in the XLSX); the web UI's export button still asks for
+  CSV only.
 - Memorized reports are saved requests in the store's `saved` table (kind
   `memorized_report`), via `/saved/...`; Ctrl+M in the web UI. Not yet: budgets,
   multi-currency, payroll, estimates/orders and time reports.
@@ -181,12 +247,20 @@ Key semantics:
 - [x] Tests: 28 unit + 30 integration, hand-computed; clippy and fmt clean.
 - [x] Server routes (`/reports`, `/reports/run`, `/reports/export`) (`c33ee6c`);
       Report Center UI in web phase B.
+- [x] XLSX and PDF export on a shared `render` layout; `?format=xlsx|pdf`,
+      `?paper=letter|a4`; layout grid snapshots, XLSX round trip (calamine),
+      PDF parse-back (lopdf), route tests.
+- [ ] Web UI: XLSX and PDF in the Report Center's export menu (and a paper
+      choice for PDF).
 
 ## Things not to do
 
 - Don't load every posting for summary reports; add a dimension to
   `Ledger::aggregate` instead.
 - Don't compute "as of" open balances from `txn.open_balance`.
-- Don't use floats for percents or averages.
+- Don't use floats for percents or averages. The only float made from money is
+  `render::money_major`, for a spreadsheet cell; don't add another.
+- Don't give one export writer a layout rule the others lack (indentation,
+  emphasis, headings); put it in `render` so CSV, XLSX and PDF keep agreeing.
 - Don't change `deferred_sql` without changing `cash::role_of` to match (and
   vice versa); the cash-basis balance sheet tests catch a mismatch.

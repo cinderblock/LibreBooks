@@ -94,6 +94,10 @@ quick-xml = { version = "0.42", features = ["serialize"] }
 directories = "6.0"
 qrcode = { version = "0.14", default-features = false, features = ["svg"] }
 self-replace = "1.5"
+# Report export: Excel files and PDFs, both pure Rust. printpdf without its
+# default HTML/text-layout stack; the reports use its 14 standard PDF fonts.
+rust_xlsxwriter = "0.101"
+printpdf = { version = "0.12", default-features = false }
 # The headless server as a long-running service (`librebooks service`).
 tracing-appender = "0.2"
 windows-service = "0.8"
@@ -103,6 +107,9 @@ tempfile = "3.27"
 pretty_assertions = "1.4"
 proptest = "1.12"
 insta = { version = "1.49", features = ["json", "yaml"] }
+# Reading back exported reports: XLSX cells and PDF text.
+calamine = "0.37"
+lopdf = { version = "0.44", default-features = false }
 
 [workspace.lints.rust]
 unsafe_code = "deny"
