@@ -226,7 +226,8 @@ const salesTaxCodeSpec: RecordFormSpec<'sales-tax-codes', SalesTaxCode> = {
   validate: (d) => {
     const e = noErrors();
     requireName(e, d.name, 'a code');
-    if (d.name.trim().length > 3) e.header.name = 'A sales tax code is up to three characters (Tax, Non, Out…).';
+    // The server's rule too (422 `invalid` on `name`, which lands here through `recordServerErrors`).
+    if (d.name.trim().length > 3) e.header.name = 'A sales tax code is one to three characters (Tax, Non, Out…).';
     return e;
   },
   isEmpty: (d) => !d.name.trim() && !d.description,
@@ -245,7 +246,7 @@ export function SalesTaxCodeEditor({ saved, params }: { saved: SalesTaxCode | nu
   return (
     <Shell form={form} title={saved ? 'Edit Sales Tax Code' : 'New Sales Tax Code'} testId="record-sales-tax-code" inactiveLabel="Code is inactive" inactive={!d.is_active} onInactive={(v) => update({ is_active: !v })}>
       <SimpleGrid cols={{ base: 1, sm: 3 }}>
-        <TextInput label="Sales tax code" description="Up to 3 characters" value={d.name} onChange={(e) => update({ name: e.currentTarget.value })} maxLength={3} required error={errors.header.name} ref={firstField} autoFocus={!mobile} aria-label="Sales tax code" />
+        <TextInput label="Sales tax code" description="1 to 3 characters" value={d.name} onChange={(e) => update({ name: e.currentTarget.value })} maxLength={3} required error={errors.header.name} ref={firstField} autoFocus={!mobile} aria-label="Sales tax code" />
         <TextInput label="Description" value={d.description ?? ''} onChange={(e) => update({ description: e.currentTarget.value })} style={{ gridColumn: mobile ? undefined : 'span 2' }} aria-label="Description" />
       </SimpleGrid>
       <SegmentedControl data={[{ value: 'taxable', label: 'Taxable' }, { value: 'non', label: 'Non-taxable' }]} value={d.is_taxable ? 'taxable' : 'non'} onChange={(v) => update({ is_taxable: v === 'taxable' })} />

@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { defaultRequest } from '~/reports/request';
-import { blankCompanyInfo, blankLine, blankTxn } from '../blank';
+import { blankCompanyInfo, blankLine, blankSalesTaxCode, blankTxn } from '../blank';
 import { ApiError } from '../errors';
 import type { Cell, Memorized, Row } from '../types';
 import { FIXTURE_COMPANY_ID, FixtureApiClient } from './client';
@@ -117,6 +117,17 @@ describe('fixture books', () => {
     expect(err.code).toBe('in_use');
     const dup = await rejects(api.createRecord(co, 'accounts', { ...checking, id: 'new-id', edit_seq: 0 }));
     expect(dup.isDuplicate).toBe(true);
+  });
+
+  test('a sales tax code is one to three characters (422 invalid on the name)', async () => {
+    const api = make();
+    for (const name of ['', 'Taxx']) {
+      const err = await rejects(api.createRecord(co, 'sales-tax-codes', blankSalesTaxCode(name)));
+      expect(err.status).toBe(422);
+      expect(err.code).toBe('invalid');
+      expect((err.detail as { field: string }).field).toBe('name');
+    }
+    expect((await api.createRecord(co, 'sales-tax-codes', blankSalesTaxCode('Out'))).name).toBe('Out');
   });
 
   test('change events follow writes', async () => {

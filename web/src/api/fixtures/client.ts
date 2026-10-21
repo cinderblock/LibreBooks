@@ -421,6 +421,11 @@ export class FixtureApiClient implements ApiClient {
       const dup = all.find((o) => o.id !== r.id && o.full_name.toLowerCase() === r.full_name!.toLowerCase());
       if (dup) throw new ApiError(409, 'duplicate', `"${r.full_name}" is already in use`, { kind: 'duplicate' });
     }
+    if (list === 'sales-tax-codes' && typeof r.name === 'string') {
+      // The server's rule: a code is one to three characters (Tax, Non, Out…).
+      const len = r.name.trim().length;
+      if (len < 1 || len > 3) throw new ApiError(422, 'invalid', 'A sales tax code is one to three characters', { field: 'name' });
+    }
     return r;
   }
 
