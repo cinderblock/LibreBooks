@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { defaultRequest } from '~/reports/request';
-import { blankLine, blankTxn } from '../blank';
+import { blankCompanyInfo, blankLine, blankTxn } from '../blank';
 import { ApiError } from '../errors';
 import type { Cell, Memorized, Row } from '../types';
 import { FIXTURE_COMPANY_ID, FixtureApiClient } from './client';
@@ -452,6 +452,12 @@ describe('administration', () => {
     expect(await api.attachments(co, { record_kind: 'txn', record_id: txn.id })).toHaveLength(2);
     await api.attachRecord(co, first.id, null);
     expect(await api.attachments(co)).toHaveLength(2);
+    // Any record kind the API takes: a name, an account, an item.
+    const vendor = api.find('entity', 'Office Depot')!;
+    await api.attachRecord(co, first.id, { record_kind: 'entity', record_id: vendor });
+    expect((await api.attachments(co, { record_kind: 'entity', record_id: vendor })).map((a) => a.id)).toEqual([first.id]);
+    expect((await api.attachments(co, { all: true })).find((a) => a.id === first.id)?.record_kind).toBe('entity');
+    await api.attachRecord(co, first.id, null);
     await api.deleteAttachment(co, meta.id);
     expect(await api.attachments(co, { record_kind: 'txn', record_id: txn.id })).toHaveLength(0);
     expect((await rejects(api.uploadAttachment(co, new File([], 'empty.txt')))).code).toBe('invalid');
@@ -617,6 +623,77 @@ describe('administration', () => {
     await api.putQbdSettings(co, { ...st.settings, transport: 'qbwc' });
     expect((await api.qbdSync(co)).running?.waiting_for_web_connector).toBe(true);
     api.dispose();
+  });
+
+  test('QuickBooks import: the sync and parity options shape the reports', async () => {
+    const api = make();
+    const st = await api.qbdStatus(co);
+    await api.putQbdSettings(co, { ...st.settings, bridge: { ...st.settings.bridge, url: 'http://192.168.1.40:8750' } }, 'bridge-key-1');
+    // A limited sync of two kinds: a partial run (watermarks untouched) reporting only those kinds.
+    // The status long-poll answers on every progress step; a watcher asks again until the job is gone.
+    const finished = async () => {
+      let st = await api.qbdStatus(co, 10);
+      while (st.running) st = await api.qbdStatus(co, 10);
+      return st;
+    };
+    await api.qbdSync(co, { txn_limit: 50, entities: ['Invoice', 'Check'] });
+    let done = await finished();
+    expect(done.last_sync?.partial_run).toBe(true);
+    expect(done.last_sync?.full).toBe(false);
+    expect(done.last_sync?.entities.map((e) => e.entity)).toEqual(['Invoice', 'Check']);
+    // Re-importing counts the unchanged as updated.
+    await api.qbdSync(co, { reimport: true, txn_from: '2026-01-01' });
+    done = await finished();
+    expect(done.last_sync?.partial_run).toBe(true);
+    expect(done.last_sync?.entities.every((e) => e.unchanged === 0)).toBe(true);
+    // Parity as of a date, with a trial balance asked for (the bridge can't; the report says so).
+    await api.qbdParityRun(co, { as_of: '2026-09-30', trial_balance: true });
+    const parity = await api.qbdParity(co, 10);
+    expect(parity.report?.summary.notes).toContain('Balances as of 2026-09-30.');
+    expect(parity.report?.summary.notes.some((n) => n.includes('trial balance'))).toBe(true);
+    api.dispose();
+  });
+});
+
+describe('companies', () => {
+  test('a new company joins the session and the picker, with its own information', async () => {
+    const api = make();
+    expect((await rejects(api.createCompany(blankCompanyInfo('   ')))).code).toBe('invalid');
+    const { id } = await api.createCompany({ ...blankCompanyInfo('Second Shop'), fiscal_year_start_month: 7 });
+    expect(id).not.toBe(co);
+    expect((await api.session()).companies.map((c) => c.name)).toEqual(['Juniper Hill Woodworks', 'Second Shop']);
+    expect((await api.companies()).find((c) => c.id === id)?.role).toBe('admin');
+    const info = await api.companyInfo(id);
+    expect(info.name).toBe('Second Shop');
+    expect(info.fiscal_year_start_month).toBe(7);
+    expect(info.preferences.sales_tax_enabled).toBe(false);
+    // Its information is its own; the demo company's is untouched.
+    await api.putCompanyInfo(id, { ...info, name: 'Second Shop LLC' });
+    expect((await api.companyInfo(id)).name).toBe('Second Shop LLC');
+    expect((await api.companyInfo(co)).name).toBe('Juniper Hill Woodworks');
+    // Company-scoped routes answer for it (the fixture's one set of books).
+    expect((await api.list(id, 'accounts')).length).toBeGreaterThan(10);
+  });
+
+  test('importing a .lbk makes a new company named by the request, else by the file', async () => {
+    const api = make();
+    expect((await rejects(api.importCompany(new File([], 'empty.lbk')))).code).toBe('invalid');
+    const named = await api.importCompany(new File(['books'], 'juniper-hill-woodworks.lbk'), 'Juniper Hill (copy)');
+    expect(named.name).toBe('Juniper Hill (copy)');
+    expect(named.from).toMatchObject({ kind: 'librebooks-company', company_name: 'Juniper Hill (copy)', database_size: 5 });
+    expect(named.from.database_sha256).toMatch(/^[0-9a-f]{64}$/);
+    const fromFile = await api.importCompany(new File(['books'], 'Riverside Cafe.lbk'));
+    expect(fromFile.name).toBe('Riverside Cafe');
+    expect((await api.companies()).map((c) => c.name)).toEqual(['Juniper Hill Woodworks', 'Juniper Hill (copy)', 'Riverside Cafe']);
+    expect((await api.companyInfo(fromFile.id)).name).toBe('Riverside Cafe');
+  });
+
+  test('a restored backup shows up in the company list', async () => {
+    const api = make();
+    const run = await api.runBackup(co);
+    const restored = await api.restoreBackup(co, run.manifest.id, 0, { passphrase: 'pw', name: 'Juniper Hill (restored)' });
+    expect((await api.companies()).some((c) => c.id === restored.id && c.name === 'Juniper Hill (restored)')).toBe(true);
+    expect((await api.companyInfo(restored.id)).name).toBe('Juniper Hill (restored)');
   });
 });
 

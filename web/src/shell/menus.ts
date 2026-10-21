@@ -203,6 +203,7 @@ export const MENUS: Menu[] = [
       { label: 'Class List', path: paths.list('classes') },
       { label: 'Terms List', path: paths.list('terms') },
       { label: 'Payment Method List', path: paths.list('payment-methods') },
+      { label: 'Sales Tax Code List', path: paths.list('sales-tax-codes'), keywords: ['taxable', 'non'] },
       { label: 'Other Names List', path: paths.list('other-names') },
       { divider: true },
       { label: FORM_LABELS.memorized!, command: 'nav.memorizedTxns', path: paths.memorized(), keywords: ['recurring', 'scheduled'] },

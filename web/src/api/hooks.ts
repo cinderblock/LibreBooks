@@ -191,6 +191,13 @@ export function useList<L extends ListName>(list: L, q: ListQuery = {}) {
   return useQuery({ queryKey: qk.list(co, list, q), queryFn: () => api.list(co, list, q), staleTime: LIST_STALE });
 }
 
+/** One list record by id (the editors); the list query usually has it warm. */
+export function useRecord<L extends ListName>(list: L, id: string | null | undefined) {
+  const api = useApi();
+  const co = useCompanyId();
+  return useQuery({ queryKey: qk.record(co, list, id ?? ''), queryFn: () => api.getRecord(co, list, id!), enabled: !!id, staleTime: 30_000 });
+}
+
 /** All accounts including inactive ones (pickers filter; lookups need them all). */
 export function useAccounts() {
   return useList('accounts', { include_inactive: true });
@@ -534,7 +541,8 @@ export function useSaveRecord<L extends ListName>(list: L) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (rec: ListRecords[L]) => (rec.edit_seq === 0 ? api.createRecord(co, list, rec) : api.updateRecord(co, list, rec)),
-    onSuccess: () => {
+    onSuccess: (saved) => {
+      qc.setQueryData(qk.record(co, list, saved.id), saved);
       void qc.invalidateQueries({ queryKey: qk.listAll(co, list) });
     },
   });
@@ -546,7 +554,8 @@ export function useDeleteRecord(list: ListName) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ id, editSeq }: { id: string; editSeq: number }) => api.deleteRecord(co, list, id, editSeq),
-    onSuccess: () => {
+    onSuccess: (_v, { id }) => {
+      qc.removeQueries({ queryKey: qk.record(co, list, id) });
       void qc.invalidateQueries({ queryKey: qk.listAll(co, list) });
     },
   });

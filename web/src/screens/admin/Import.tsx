@@ -13,9 +13,9 @@
 // `…/status?wait=` and the server answers on every progress step, so the bar
 // follows the job; the events only wake the window when nothing is in flight.
 
-import { Alert, Badge, Button, Card, Code, CopyButton, Group, List, Modal, NumberInput, PasswordInput, Progress, SegmentedControl, Select, SimpleGrid, Stack, Switch, Table, Tabs, Text, TextInput, Title, Tooltip } from '@mantine/core';
+import { Alert, Badge, Button, Card, Checkbox, Code, Collapse, CopyButton, Group, List, Modal, MultiSelect, NumberInput, PasswordInput, Progress, SegmentedControl, Select, SimpleGrid, Stack, Switch, Table, Tabs, Text, TextInput, Title, Tooltip } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
-import { IconCheck, IconCopy, IconDownload, IconRefresh, IconScale } from '@tabler/icons-react';
+import { IconCheck, IconChevronDown, IconChevronRight, IconCopy, IconDownload, IconRefresh, IconScale } from '@tabler/icons-react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
 import { saveDownload } from '~/api/client';
@@ -23,7 +23,8 @@ import { useApi, useCompanyId, useRecordChanges } from '~/api/context';
 import { describeError, isApiError } from '~/api/errors';
 import { useQbdParity, useQbdStatus } from '~/api/hooks';
 import { qk } from '~/api/keys';
-import type { ChangeEvent, FileMode, ImportSettings, ImportStatus, JobKind, QbdTransport, RunningJob, SyncReport } from '~/api/types';
+import type { ChangeEvent, FileMode, ImportSettings, ImportStatus, JobKind, ParityBody, QbdEntity, QbdTransport, RunningJob, SyncBody, SyncReport } from '~/api/types';
+import { DateField } from '~/inputs/DateField';
 import { formatDateTime } from '~/lib/dates';
 import { formatMoney } from '~/lib/money';
 import { useIsMobile } from '~/lib/useMobile';
@@ -171,16 +172,80 @@ function RunningLine({ job }: { job: RunningJob }) {
   );
 }
 
+/** Every kind of QBD record the bridge lists (`QbdEntity`), for the "only these" option. */
+const QBD_ENTITIES: readonly QbdEntity[] = ['Account', 'Class', 'Terms', 'PaymentMethod', 'Vendor', 'Employee', 'OtherName', 'SalesRep', 'Customer', 'Item', 'ItemService', 'ItemNonInventory', 'ItemInventory', 'PayrollItemWage', 'JournalEntry', 'Invoice', 'CreditMemo', 'SalesReceipt', 'Estimate', 'PurchaseOrder', 'Bill', 'Check', 'TimeTracking', 'ReceivePayment', 'BillPaymentCheck', 'Deposit'];
+
+/** The rest of `SyncBody`, as the Options disclosure holds it. */
+interface SyncOptions {
+  full: boolean;
+  sweep: boolean;
+  reimport: boolean;
+  txn_limit: number | null;
+  txn_from: string | null;
+  txn_to: string | null;
+  /** null: the server's default. */
+  apply_credits: boolean | null;
+  entities: QbdEntity[];
+}
+
+const NO_SYNC_OPTIONS: SyncOptions = { full: false, sweep: false, reimport: false, txn_limit: null, txn_from: null, txn_to: null, apply_credits: null, entities: [] };
+
+/** Only what was set goes over the wire; the server fills the rest (`#[serde(default)]`). */
+export function syncBody(o: SyncOptions): Partial<SyncBody> {
+  const body: Partial<SyncBody> = {};
+  if (o.full) body.full = true;
+  if (o.sweep) body.sweep = true;
+  if (o.reimport) body.reimport = true;
+  if (o.txn_limit !== null) body.txn_limit = o.txn_limit;
+  if (o.txn_from) body.txn_from = o.txn_from;
+  if (o.txn_to) body.txn_to = o.txn_to;
+  if (o.apply_credits !== null) body.apply_credits = o.apply_credits;
+  if (o.entities.length) body.entities = o.entities;
+  return body;
+}
+
+/** A tri-state option (`boolean | null`) as a select: the server's default, yes, no. */
+function TriState({ label, description, value, onChange, yes, no }: { label: string; description?: string; value: boolean | null; onChange(v: boolean | null): void; yes: string; no: string }) {
+  return (
+    <Select
+      label={label}
+      description={description}
+      data={[
+        { value: 'default', label: 'Server default' },
+        { value: 'yes', label: yes },
+        { value: 'no', label: no },
+      ]}
+      value={value === null ? 'default' : value ? 'yes' : 'no'}
+      onChange={(v) => onChange(v === 'yes' ? true : v === 'no' ? false : null)}
+      allowDeselect={false}
+      aria-label={label}
+    />
+  );
+}
+
+/** The "Options" toggle above a disclosure. */
+function OptionsToggle({ open, onToggle, controls }: { open: boolean; onToggle(): void; controls: string }) {
+  return (
+    <Button size="compact-xs" variant="subtle" color="gray" leftSection={open ? <IconChevronDown size={14} /> : <IconChevronRight size={14} />} onClick={onToggle} aria-expanded={open} aria-controls={controls} mt="xs">
+      Options
+    </Button>
+  );
+}
+
 function SyncPanel({ status: st, onConfigure }: { status: ImportStatus; onConfigure(): void }) {
   const api = useApi();
   const co = useCompanyId();
   const apply = useApplyStatus();
-  const sync = useMutation({ mutationFn: (opts: { full?: boolean; sweep?: boolean }) => api.qbdSync(co, opts), onSuccess: apply });
+  const sync = useMutation({ mutationFn: (opts: Partial<SyncBody>) => api.qbdSync(co, opts), onSuccess: apply });
+  const [showOptions, setShowOptions] = useState(false);
+  const [opts, setOpts] = useState<SyncOptions>(NO_SYNC_OPTIONS);
+  const set = (patch: Partial<SyncOptions>) => setOpts((o) => ({ ...o, ...patch }));
   const job = st.running;
   const running = !!job;
   const last = st.last_sync;
   const problems = setupProblems(st);
   const configured = problems.length === 0;
+  const customised = JSON.stringify(syncBody(opts)) !== '{}';
   return (
     <Stack gap="md">
       <Card withBorder>
@@ -227,6 +292,37 @@ function SyncPanel({ status: st, onConfigure }: { status: ImportStatus; onConfig
         )}
         {st.last_error && <Alert color="red" mt="sm">{st.last_error}</Alert>}
         {sync.error && <ProblemAlert error={sync.error} color={isApiError(sync.error) && sync.error.code === 'running' ? 'yellow' : 'red'} />}
+        {/* The rest of what `POST …/sync` takes. The buttons above send none of it; this runs a sync with exactly these. */}
+        <OptionsToggle open={showOptions} onToggle={() => setShowOptions((v) => !v)} controls="sync-options" />
+        <Collapse expanded={showOptions}>
+          <Stack gap="sm" mt="xs" id="sync-options" data-testid="sync-options">
+            <Text size="xs" c="dimmed">
+              A limited or dated sync is a partial run: the watermarks stay where they were and nothing is swept, so the next ordinary sync carries on as before.
+            </Text>
+            <SimpleGrid cols={{ base: 1, sm: 3 }}>
+              <NumberInput label="Transaction limit" description="Stop after this many transactions" value={opts.txn_limit ?? ''} onChange={(v) => set({ txn_limit: v === '' ? null : Math.max(1, Math.round(Number(v) || 1)) })} min={1} allowDecimal={false} aria-label="Transaction limit" />
+              <DateField label="Transactions from" value={opts.txn_from} onChange={(txn_from) => set({ txn_from })} aria-label="Transactions from" />
+              <DateField label="Transactions to" value={opts.txn_to} onChange={(txn_to) => set({ txn_to })} aria-label="Transactions to" />
+            </SimpleGrid>
+            <MultiSelect label="Only these kinds of record" description="Blank: everything the transport lists" data={QBD_ENTITIES.map((e) => ({ value: e, label: e }))} value={opts.entities} onChange={(v) => set({ entities: v as QbdEntity[] })} searchable clearable aria-label="Only these kinds of record" />
+            <SimpleGrid cols={{ base: 1, sm: 2 }}>
+              <TriState label="Apply credits" description="Match credit memos and unapplied payments to what they paid" value={opts.apply_credits} onChange={(apply_credits) => set({ apply_credits })} yes="Apply" no="Leave unapplied" />
+              <Stack gap={6} justify="flex-end">
+                <Checkbox label="Re-import records already imported" checked={opts.reimport} onChange={(e) => set({ reimport: e.currentTarget.checked })} />
+                <Checkbox label="Full (ignore the watermarks)" checked={opts.full} onChange={(e) => set({ full: e.currentTarget.checked })} />
+                <Checkbox label="Sweep deletions" checked={opts.sweep} onChange={(e) => set({ sweep: e.currentTarget.checked })} />
+              </Stack>
+            </SimpleGrid>
+            <Group justify="flex-end" gap="xs">
+              <Button variant="subtle" size="xs" onClick={() => setOpts(NO_SYNC_OPTIONS)} disabled={!customised}>
+                Reset
+              </Button>
+              <Button size="xs" variant="default" disabled={running || !configured} loading={sync.isPending} onClick={() => sync.mutate(syncBody(opts))}>
+                Sync with these options
+              </Button>
+            </Group>
+          </Stack>
+        </Collapse>
       </Card>
       {last && <ReportView report={last} />}
     </Stack>
@@ -557,7 +653,18 @@ function ParityPanel({ status }: { status: ImportStatus | undefined }) {
   const apply = useApplyStatus();
   const parity = useQbdParity();
   const [onlyOff, setOnlyOff] = useState(true);
-  const run = useMutation({ mutationFn: () => api.qbdParityRun(co), onSuccess: apply });
+  const [showOptions, setShowOptions] = useState(false);
+  // `ParityBody`: a date for the balances, and whether to compare a trial balance too; unset means the server's default.
+  const [opts, setOpts] = useState<{ as_of: string | null; trial_balance: boolean | null }>({ as_of: null, trial_balance: null });
+  const run = useMutation({
+    mutationFn: () => {
+      const body: Partial<ParityBody> = {};
+      if (opts.as_of) body.as_of = opts.as_of;
+      if (opts.trial_balance !== null) body.trial_balance = opts.trial_balance;
+      return api.qbdParityRun(co, body);
+    },
+    onSuccess: apply,
+  });
   const r = parity.data?.report ?? null;
   const running = !!parity.data?.running;
   const busy = running || !!status?.running;
@@ -595,6 +702,13 @@ function ParityPanel({ status }: { status: ImportStatus | undefined }) {
             {n}
           </Text>
         ))}
+        <OptionsToggle open={showOptions} onToggle={() => setShowOptions((v) => !v)} controls="parity-options" />
+        <Collapse expanded={showOptions}>
+          <SimpleGrid cols={{ base: 1, sm: 2 }} mt="xs" id="parity-options" data-testid="parity-options">
+            <DateField label="Balances as of" value={opts.as_of} onChange={(as_of) => setOpts((o) => ({ ...o, as_of }))} aria-label="Balances as of" />
+            <TriState label="Trial balance" description="Compare a trial balance as well as the account balances" value={opts.trial_balance} onChange={(trial_balance) => setOpts((o) => ({ ...o, trial_balance }))} yes="Compare it" no="Skip it" />
+          </SimpleGrid>
+        </Collapse>
       </Card>
       {r && (
         <Card withBorder p={0}>

@@ -59,7 +59,11 @@ export function parseWindowPath(relPath: string): WindowDesc | null {
     case 'find':
       return seg.length === 1 ? one('find', 'find') : null;
     case 'lists':
-      return seg.length === 2 && b ? one('list', `list:${b}`, { list: b }) : null;
+      if (seg.length === 2 && b) return one('list', `list:${b}`, { list: b });
+      // A record editor: one window per new form of a kind (a New Customer beside a New Vendor), one per saved record.
+      if (seg.length === 3 && b && c === 'new') return one('record', `record:${b}:new${q.kind ? `:${q.kind}` : ''}`, { list: b });
+      if (seg.length === 3 && b && c) return one('record', `record:${b}:${c}`, { list: b, recordId: c });
+      return null;
     case 'company':
       return seg.length === 1 ? one('company', 'company') : null;
     case 'forms':
@@ -120,6 +124,10 @@ export const paths = {
   },
   find: () => '/find',
   list: (list: string) => `/lists/${encodeURIComponent(list)}`,
+  /** A new list record's editor; `kind` (names), `type` (items) and `parent` preset the form. */
+  newRecord: (list: string, params: { kind?: string; type?: string; parent?: string } = {}) => withQuery(`/lists/${encodeURIComponent(list)}/new`, params),
+  /** A saved list record's editor. */
+  record: (list: string, id: string) => `/lists/${encodeURIComponent(list)}/${encodeURIComponent(id)}`,
   company: () => '/company',
   /** A new form of a kind; `draft` is a hand-off token for a prefilled one. */
   form: (form: string, draft?: string) => `/forms/${encodeURIComponent(form)}/new${draft ? `?draft=${encodeURIComponent(draft)}` : ''}`,

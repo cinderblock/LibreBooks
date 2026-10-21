@@ -4,14 +4,13 @@
 // transactions on the right. On a phone: the list, then the detail as its own
 // screen with a back arrow.
 
-import { ActionIcon, Alert, Badge, Button, Card, Checkbox, Group, Menu, Modal, SimpleGrid, Skeleton, Stack, Table, Text, TextInput, Title } from '@mantine/core';
-import { IconChevronDown, IconPencil, IconPlus, IconSearch } from '@tabler/icons-react';
+import { ActionIcon, Alert, Badge, Button, Card, Checkbox, Group, Menu, SimpleGrid, Skeleton, Stack, Table, Text, TextInput, Title } from '@mantine/core';
+import { IconChevronDown, IconPaperclip, IconPencil, IconPlus, IconSearch } from '@tabler/icons-react';
 import { useEffect, useMemo, useState } from 'react';
 import { describeError } from '~/api/errors';
-import { useEntities, useNameBalanceMap, useSaveRecord, useTxns } from '~/api/hooks';
+import { useEntities, useNameBalanceMap, useTxns } from '~/api/hooks';
 import type { Entity, EntityKind, NameBalance, TxnType } from '~/api/types';
 import { KeyList } from '~/components/KeyList';
-import { useQuickCreate } from '~/inputs/QuickCreate';
 import { useShortcut } from '~/keyboard/KeyboardProvider';
 import { formatDateShort } from '~/lib/dates';
 import { formatMoney } from '~/lib/money';
@@ -84,13 +83,11 @@ export function Center({ which }: { which: 'customers' | 'vendors' | 'employees'
   const win = useWindow();
   const open = useOpenWindow();
   const mobile = useIsMobile();
-  const qc = useQuickCreate();
   const { data: all = [], isLoading } = useEntities();
   const [query, setQuery] = useState('');
   const [showInactive, setShowInactive] = useState(false);
   const [selected, setSelected] = useState(0);
   const [mobileDetail, setMobileDetail] = useState(false);
-  const [editing, setEditing] = useState<Entity | null>(null);
 
   const names = useMemo(() => all.filter((e) => e.kind === cfg.kind), [all, cfg.kind]);
   const prepared = useMemo(() => prepare(names.map((e) => ({ fullName: e.full_name, keys: e.company_name ? [e.company_name] : [] }))), [names]);
@@ -122,8 +119,11 @@ export function Center({ which }: { which: 'customers' | 'vendors' | 'employees'
     win.setBackHandler(showingDetail ? () => setMobileDetail(false) : null);
     return () => win.setBackHandler(null);
   }, [showingDetail]); // eslint-disable-line react-hooks/exhaustive-deps
-  useShortcut('record.new', () => void qc.createEntity('', [cfg.kind]), { enabled });
-  useShortcut('record.edit', () => current && setEditing(current), { enabled });
+  // New and Edit open the name's editor window (QBD's New/Edit Customer dialog).
+  const create = (parent?: string) => open(paths.newRecord('entities', { kind: cfg.kind, parent }));
+  const edit = (e: Entity) => open(paths.record('entities', e.id));
+  useShortcut('record.new', () => create(), { enabled });
+  useShortcut('record.edit', () => (current ? edit(current) : false), { enabled });
   useShortcut('report.quick', () => current && open(paths.report('TransactionListByDate', { name: current.id, dates: 'All' })), { enabled });
 
   const list = (
@@ -140,7 +140,7 @@ export function Center({ which }: { which: 'customers' | 'vendors' | 'employees'
           style={{ flex: 1 }}
           aria-label={`Find a ${cfg.kind.toLowerCase()}`}
         />
-        <ActionIcon variant="light" size="lg" aria-label={`New ${cfg.kind}`} onClick={() => void qc.createEntity('', [cfg.kind])}>
+        <ActionIcon variant="light" size="lg" aria-label={`New ${cfg.kind}`} onClick={() => create()}>
           <IconPlus size={18} />
         </ActionIcon>
       </Group>
@@ -191,7 +191,7 @@ export function Center({ which }: { which: 'customers' | 'vendors' | 'employees'
   );
 
   const detail = current ? (
-    <NameDetail entity={current} balance={balances(current.id)} cfg={cfg} onEdit={() => setEditing(current)} phone={mobile} />
+    <NameDetail entity={current} balance={balances(current.id)} cfg={cfg} onEdit={() => edit(current)} onAddJob={cfg.kind === 'Customer' ? () => create(current.id) : undefined} phone={mobile} />
   ) : (
     <Text c="dimmed" p="md">
       Choose a name.
@@ -206,12 +206,11 @@ export function Center({ which }: { which: 'customers' | 'vendors' | 'employees'
           <div className={classes.centerDetail}>{detail}</div>
         </div>
       )}
-      {editing && <EditNameModal entity={editing} onClose={() => setEditing(null)} />}
     </div>
   );
 }
 
-function NameDetail({ entity, balance, cfg, onEdit, phone }: { entity: Entity; balance: Balances; cfg: CenterConfig; onEdit(): void; phone: boolean }) {
+function NameDetail({ entity, balance, cfg, onEdit, onAddJob, phone }: { entity: Entity; balance: Balances; cfg: CenterConfig; onEdit(): void; onAddJob?(): void; phone: boolean }) {
   const open = useOpenWindow();
   const txns = useTxns({ entity_id: entity.id, include_jobs: true, descending: true, limit: 200 });
   const addr = entity.bill_address;
@@ -231,6 +230,14 @@ function NameDetail({ entity, balance, cfg, onEdit, phone }: { entity: Entity; b
           <Button size="xs" variant="default" leftSection={<IconPencil size={14} />} onClick={onEdit}>
             Edit
           </Button>
+          {onAddJob && !entity.parent_id && (
+            <Button size="xs" variant="default" onClick={onAddJob}>
+              Add job
+            </Button>
+          )}
+          <ActionIcon variant="default" size="input-xs" aria-label="Attachments" title="Attachments (documents, photos)" onClick={() => open(paths.attachments({ kind: 'entity', id: entity.id }))}>
+            <IconPaperclip size={14} />
+          </ActionIcon>
           <Menu position="bottom-end">
             <Menu.Target>
               <Button size="xs" rightSection={<IconChevronDown size={14} />}>
@@ -335,53 +342,3 @@ function NameDetail({ entity, balance, cfg, onEdit, phone }: { entity: Entity; b
   );
 }
 
-function EditNameModal({ entity, onClose }: { entity: Entity; onClose(): void }) {
-  const [form, setForm] = useState({
-    name: entity.name,
-    company_name: entity.company_name ?? '',
-    phone: entity.phone ?? '',
-    email: entity.email ?? '',
-    is_active: entity.is_active,
-  });
-  const save = useSaveRecord('entities');
-  const field = (k: 'name' | 'company_name' | 'phone' | 'email', label: string) => (
-    <TextInput label={label} value={form[k]} onChange={(e) => setForm({ ...form, [k]: e.currentTarget.value })} required={k === 'name'} data-autofocus={k === 'name' || undefined} />
-  );
-  return (
-    <Modal opened onClose={onClose} title={`Edit ${entity.full_name}`} centered>
-      <form
-        onSubmit={(e) => {
-          e.preventDefault();
-          save.mutate(
-            {
-              ...entity,
-              name: form.name.trim(),
-              company_name: form.company_name.trim() || null,
-              phone: form.phone.trim() || null,
-              email: form.email.trim() || null,
-              is_active: form.is_active,
-            },
-            { onSuccess: onClose },
-          );
-        }}
-      >
-        <Stack gap="sm">
-          {field('name', 'Name')}
-          {field('company_name', 'Company')}
-          {field('phone', 'Phone')}
-          {field('email', 'Email')}
-          <Checkbox label="Active" checked={form.is_active} onChange={(e) => setForm({ ...form, is_active: e.currentTarget.checked })} />
-          {save.error && <Alert color="red">{describeError(save.error)}</Alert>}
-          <Group justify="flex-end">
-            <Button variant="default" onClick={onClose}>
-              Cancel
-            </Button>
-            <Button type="submit" loading={save.isPending}>
-              Save
-            </Button>
-          </Group>
-        </Stack>
-      </form>
-    </Modal>
-  );
-}

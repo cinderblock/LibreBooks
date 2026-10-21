@@ -157,7 +157,7 @@ export class FixtureAdmin {
       sdk: { file_mode: 'dont_care' },
       company_file: '',
     };
-    this.lastSync = this.sampleReport(daysAgo(2), false);
+    this.lastSync = this.sampleReport(daysAgo(2), {});
   }
 
   // ---- seed -------------------------------------------------------------------
@@ -739,7 +739,7 @@ export class FixtureAdmin {
     });
     this.qbdTimers.push(
       setTimeout(() => {
-        this.lastSync = this.sampleReport(job.started_at, !!opts.full);
+        this.lastSync = this.sampleReport(job.started_at, opts);
         this.qbdFinished();
         // `finished` (not `progress`): the books changed, so registers and reports are stale.
         this.host.emit('import', 'sync', 'finished');
@@ -809,15 +809,27 @@ export class FixtureAdmin {
     return new Blob([xml], { type: 'application/xml' });
   }
 
-  private sampleReport(startedAt: string, full: boolean): SyncReport {
-    const entity = (e: SyncReport['entities'][number]['entity'], listed: number, created: number, updated: number, extra: Partial<SyncReport['entities'][number]> = {}) => ({ entity: e, listed, created, updated, unchanged: Math.max(0, listed - created - updated), skipped: 0, failed: 0, partial: 0, deleted: 0, deactivated: 0, watermark_before: full ? null : daysAgo(9), watermark_after: startedAt, ...extra });
+  /**
+   * The report a sync lands, shaped by its options as the importer's would be:
+   * `full` lists everything again (every record created); a limit or a date
+   * range is a partial run (watermarks untouched); `entities` narrows the
+   * report to those kinds; `reimport` counts the unchanged as updated.
+   */
+  private sampleReport(startedAt: string, opts: Partial<SyncBody>): SyncReport {
+    const full = !!opts.full;
+    const partial = !!(opts.txn_limit || opts.txn_from || opts.txn_to);
+    const entity = (e: SyncReport['entities'][number]['entity'], listed: number, created: number, updated: number, extra: Partial<SyncReport['entities'][number]> = {}) => {
+      const unchanged = Math.max(0, listed - created - updated);
+      return { entity: e, listed, created, updated: opts.reimport ? updated + unchanged : updated, unchanged: opts.reimport ? 0 : unchanged, skipped: 0, failed: 0, partial: 0, deleted: 0, deactivated: 0, watermark_before: full ? null : daysAgo(9), watermark_after: partial ? daysAgo(9) : startedAt, ...extra };
+    };
+    const only = opts.entities?.length ? new Set(opts.entities) : null;
     return {
       source_id: 'qbd:ein-94-0000000',
       started_at: startedAt,
       finished_at: new Date(new Date(startedAt).getTime() + 48_000).toISOString(),
       requests: 214,
       full,
-      partial_run: false,
+      partial_run: partial,
       entities: [
         entity('Account', 56, full ? 56 : 0, full ? 0 : 1),
         entity('Customer', 18, full ? 18 : 1, 0),
@@ -828,7 +840,7 @@ export class FixtureAdmin {
         entity('Bill', 12, full ? 12 : 1, 0, { partial: 1 }),
         entity('Deposit', 6, full ? 6 : 1, 0),
         entity('JournalEntry', 3, full ? 3 : 0, 0),
-      ],
+      ].filter((e) => !only || only.has(e.entity)),
       issues: [
         { severity: 'Warning', entity: 'Check', qbd_id: '1A2B-1700000001', record: 'Check 1180 (2026-09-14)', message: 'Paycheck: payroll items are not imported; recorded as a check to the employee with the net amount' },
         { severity: 'Info', entity: 'Bill', qbd_id: '3C4D-1700000002', record: 'Bill 8821 (Rockler Woodworking)', message: 'Linked item receipt not listed yet; the link is retried next sync' },

@@ -5,7 +5,7 @@
 // events after every write, and a little latency so loading states are real.
 // State lives only in memory: a reload starts over.
 
-import { blankLine, blankTxn } from '../blank';
+import { blankCompanyInfo, blankLine, blankTxn } from '../blank';
 import { ApiError } from '../errors';
 import type { ApiClient, EventHandlers, EventSubscription, FileDownload, TxnQuery } from '../client';
 import { clone } from '../json';
@@ -35,6 +35,7 @@ import type {
   CompanyId,
   CompanyInfo,
   CompanySummary,
+  CreatedCompany,
   DateRange,
   Entity,
   FeedConnection,
@@ -42,6 +43,7 @@ import type {
   FeedQuery,
   FeedRule,
   Health,
+  ImportedCompany,
   ListName,
   ListQuery,
   ListRecords,
@@ -125,6 +127,12 @@ export class FixtureApiClient implements ApiClient {
   private admin: FixtureAdmin;
   /** Transactions dated on or before this are locked (`closed_period`). */
   private closing: string | null = null;
+  /**
+   * Companies made here (`POST /companies`, `POST /companies/import`, a
+   * restored backup). The fixture has one set of books; these share it and
+   * differ only in their information, so the picker can open them.
+   */
+  private extraCompanies = new Map<CompanyId, CompanyInfo>();
 
   constructor(opts: FixtureOptions = {}) {
     this.latency = opts.latencyMs ?? 90;
@@ -220,7 +228,7 @@ export class FixtureApiClient implements ApiClient {
   }
 
   private checkCompany(co: CompanyId) {
-    if (co !== FIXTURE_COMPANY_ID) throw new ApiError(404, 'not_found', 'No such company');
+    if (co !== FIXTURE_COMPANY_ID && !this.extraCompanies.has(co)) throw new ApiError(404, 'not_found', 'No such company');
   }
 
   private postingBooks(): PostingBooks {
@@ -307,19 +315,59 @@ export class FixtureApiClient implements ApiClient {
   session(): Promise<Session> {
     return this.delay(() => ({
       user: { id: 'fixture-user', display_name: 'Demo User', role: 'admin' as const, kind: 'local' as const },
-      companies: [this.summary()],
+      companies: this.summaries(),
       sign_in: false,
     }));
   }
-  private summary(): CompanySummary {
-    return { id: FIXTURE_COMPANY_ID, name: this.info.name, role: 'admin' as const };
+  private summaries(): CompanySummary[] {
+    return [{ id: FIXTURE_COMPANY_ID, name: this.info.name, role: 'admin' as const }, ...[...this.extraCompanies].map(([id, info]) => ({ id, name: info.name, role: 'admin' as const }))];
   }
   companies(): Promise<CompanySummary[]> {
-    return this.delay(() => [this.summary()]);
+    return this.delay(() => this.summaries());
+  }
+  private infoOf(co: CompanyId): CompanyInfo {
+    return co === FIXTURE_COMPANY_ID ? this.info : this.extraCompanies.get(co)!;
   }
   companyInfo(co: CompanyId): Promise<CompanyInfo> {
     this.checkCompany(co);
-    return this.delay(() => this.info);
+    return this.delay(() => this.infoOf(co));
+  }
+
+  /** The server's checks on a company's information (`POST /companies`, `PUT /info`). */
+  private checkInfo(info: CompanyInfo) {
+    if (!info.name.trim()) throw new ApiError(400, 'invalid', 'The company needs a name', { field: 'name' });
+    if (info.fiscal_year_start_month < 1 || info.fiscal_year_start_month > 12) throw new ApiError(400, 'invalid', 'Month is 1–12', { field: 'fiscal_year_start_month' });
+  }
+
+  /** A new company; its books are this fixture's (see `extraCompanies`). */
+  private addCompany(info: CompanyInfo): CompanyId {
+    const id = crypto.randomUUID();
+    this.extraCompanies.set(id, clone(info));
+    return id;
+  }
+
+  createCompany(info: CompanyInfo): Promise<CreatedCompany> {
+    try {
+      this.checkInfo(info);
+    } catch (e) {
+      return Promise.reject(e);
+    }
+    const id = this.addCompany({ ...clone(info), name: info.name.trim() });
+    return this.delay(() => ({ id }));
+  }
+
+  /**
+   * Any file passes for a `.lbk` here (the server checks the archive and
+   * answers 422 `damaged`); the company is named by `name`, else the file.
+   */
+  async importCompany(file: File, name?: string | null): Promise<ImportedCompany> {
+    if (file.size === 0) throw new ApiError(400, 'invalid', 'no file was sent');
+    const companyName = name?.trim() || file.name.replace(/\.lbk$/i, '').trim() || 'Imported company';
+    const digest = await crypto.subtle.digest('SHA-256', await file.arrayBuffer());
+    const sha = [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
+    const id = this.addCompany(blankCompanyInfo(companyName));
+    const from = { kind: 'librebooks-company', format: 1, app_version: 'fixtures', company_name: companyName, schema_version: 1, created_at: new Date().toISOString(), database_size: file.size, database_sha256: sha };
+    return this.delay(() => ({ id, name: companyName, from }));
   }
 
   // ---- lists ----------------------------------------------------------------
@@ -1306,11 +1354,15 @@ export class FixtureApiClient implements ApiClient {
 
   putCompanyInfo(co: CompanyId, info: CompanyInfo): Promise<CompanyInfo> {
     this.checkCompany(co);
-    if (!info.name.trim()) return Promise.reject(new ApiError(400, 'invalid', 'The company needs a name', { field: 'name' }));
-    if (info.fiscal_year_start_month < 1 || info.fiscal_year_start_month > 12) return Promise.reject(new ApiError(400, 'invalid', 'Month is 1–12', { field: 'fiscal_year_start_month' }));
-    this.info = clone(info);
-    this.emit('company', FIXTURE_COMPANY_ID, 'updated');
-    return this.delay(() => this.info);
+    try {
+      this.checkInfo(info);
+    } catch (e) {
+      return Promise.reject(e);
+    }
+    if (co === FIXTURE_COMPANY_ID) this.info = clone(info);
+    else this.extraCompanies.set(co, clone(info));
+    this.emit('company', co, 'updated');
+    return this.delay(() => this.infoOf(co));
   }
 
   closingDate(co: CompanyId): Promise<string | null> {
@@ -1514,7 +1566,12 @@ export class FixtureApiClient implements ApiClient {
     return this.adm(() => this.admin.verifyBackup(id, unlock), co);
   }
   restoreBackup(co: CompanyId, id: string, _destination: number, body: RestoreRequest) {
-    return this.adm(() => this.admin.restoreBackup(id, body), co);
+    // The restored company joins the picker's list (sharing these books, as every extra company here does).
+    return this.adm(() => {
+      const r = this.admin.restoreBackup(id, body);
+      this.extraCompanies.set(r.id, { ...clone(this.info), name: r.name });
+      return r;
+    }, co);
   }
   exportCompany(co: CompanyId): Promise<FileDownload> {
     this.checkCompany(co);

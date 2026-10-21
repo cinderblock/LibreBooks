@@ -28,6 +28,8 @@ const theme = createTheme({
 
 const router = createBrowserRouter([
   { path: '/', element: <CompanyPicker /> },
+  // The list even when one company would open by itself (the user menu's "Open another company").
+  { path: '/companies', element: <CompanyPicker force /> },
   { path: '/signin', element: <SignIn /> },
   { path: '/enroll', element: <Enrol /> },
   { path: '/c/:companyId/*', element: <CompanyShell /> },

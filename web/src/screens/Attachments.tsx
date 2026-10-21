@@ -1,21 +1,23 @@
 // Attachments (Company → Attachments, and the paperclip on a form): receipts
 // and documents. Upload a file or take a photo (`<input capture>` opens the
 // camera on a phone); what isn't attached to anything yet waits in the inbox
-// until it's attached to a transaction. The Attached tab lists every document
-// that has found its record (`GET /attachments?all=true`). Opened from a form,
-// the window shows that record's files first and offers to attach inbox items
-// to it.
+// until it's attached to a record: a transaction, a name, an account or an
+// item (every `record_kind` the API takes). The Attached tab lists every
+// document that has found its record (`GET /attachments?all=true`) with a way
+// into it. Opened from a form or an editor (the paperclip), the window shows
+// that record's files first and offers to attach inbox items to it.
 
-import { ActionIcon, Alert, Anchor, Badge, Button, Card, FileButton, Group, Image, Modal, SimpleGrid, Stack, Table, Tabs, Text, TextInput, Title, Tooltip } from '@mantine/core';
+import { ActionIcon, Alert, Anchor, Badge, Button, Card, FileButton, Group, Image, Modal, SegmentedControl, SimpleGrid, Stack, Table, Tabs, Text, TextInput, Title, Tooltip } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { IconCamera, IconExternalLink, IconPaperclip, IconTrash, IconUpload } from '@tabler/icons-react';
 import { useMutation } from '@tanstack/react-query';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useApi, useCompanyId } from '~/api/context';
 import { describeError } from '~/api/errors';
-import { useAttachments, useEntityIndex, useInvalidate, useTxns } from '~/api/hooks';
+import { useAccountIndex, useAttachments, useEntityIndex, useInvalidate, useItemIndex, useTxns } from '~/api/hooks';
 import { qk } from '~/api/keys';
 import type { AttachmentMeta, AttachmentRecord } from '~/api/types';
+import { AccountQuickFill, ItemQuickFill, NameQuickFill } from '~/inputs/pickers';
 import { formatDateShort } from '~/lib/dates';
 import { formatBytes } from '~/lib/format';
 import { formatMoney } from '~/lib/money';
@@ -35,6 +37,8 @@ export function Attachments() {
   const kind = win.desc.params.kind;
   const id = win.desc.params.id;
   const record: AttachmentRecord = kind && id ? { record_kind: kind, record_id: id } : null;
+  const recordName = useRecordName(record);
+  const noun = record ? (RECORD_NOUN[record.record_kind] ?? 'record') : 'record';
   const [tab, setTab] = useState<'inbox' | 'attached'>('inbox');
   const inbox = useAttachments({});
   const mine = useAttachments(record ? { record_kind: record.record_kind, record_id: record.record_id } : {}, !!record);
@@ -44,7 +48,7 @@ export function Attachments() {
   const [attaching, setAttaching] = useState<AttachmentMeta | null>(null);
   const [deleting, setDeleting] = useState<AttachmentMeta | null>(null);
   const camera = useRef<HTMLInputElement>(null);
-  useEffect(() => win.setTitle(record ? 'Attachments (this transaction)' : 'Attachments'), [record?.record_id]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => win.setTitle(record ? `Attachments: ${recordName ?? `this ${noun}`}` : 'Attachments'), [record?.record_id, recordName]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const refresh = () => invalidate(qk.attachmentsAll(co));
   const upload = useMutation({
@@ -55,7 +59,7 @@ export function Attachments() {
     },
     onSuccess: (metas) => {
       refresh();
-      notifications.show({ message: metas.length === 1 ? `Added ${metas[0]!.filename}${record ? ' to this transaction' : ' to the inbox'}.` : `Added ${metas.length} files.`, color: 'teal' });
+      notifications.show({ message: metas.length === 1 ? `Added ${metas[0]!.filename}${record ? ` to this ${noun}` : ' to the inbox'}.` : `Added ${metas.length} files.`, color: 'teal' });
     },
   });
   const attach = useMutation({
@@ -85,7 +89,7 @@ export function Attachments() {
         <div>
           <Title order={3}>Attachments</Title>
           <Text size="sm" c="dimmed">
-            {record ? 'Files on this transaction, and the inbox to attach from.' : 'Receipts and documents. Files land in the inbox until they are attached to a transaction.'}
+            {record ? `Files on ${recordName ? `${recordName} (${noun})` : `this ${noun}`}, and the inbox to attach from.` : 'Receipts and documents. Files land in the inbox until they are attached to a transaction, a name, an account or an item.'}
           </Text>
         </div>
         <Group gap="xs">
@@ -109,7 +113,7 @@ export function Attachments() {
       {record && (
         <Card withBorder>
           <Text fw={600} mb="xs">
-            On this transaction
+            On this {noun}
           </Text>
           <AttachmentTable rows={mine.data ?? []} loading={mine.isLoading} empty="Nothing attached yet. Add a file above, or attach one from the inbox below." onDetach={(a) => attach.mutate({ a, to: null })} onDelete={setDeleting} />
         </Card>
@@ -152,25 +156,49 @@ export function Attachments() {
   );
 }
 
-/** What a document is attached to, for the Attached tab: a button into a transaction, a label for other records. */
+/** What a document is attached to, for the Attached tab: a button into the transaction, or the name's / account's / item's editor. */
 function RecordLink({ a }: { a: AttachmentMeta }) {
   const open = useOpenWindow();
+  const name = useRecordName(a.record_kind && a.record_id ? { record_kind: a.record_kind, record_id: a.record_id } : null);
   if (!a.record_kind || !a.record_id) return null;
-  if (a.record_kind === 'txn') {
+  const id = a.record_id;
+  const path = a.record_kind === 'txn' ? paths.txn(id) : a.record_kind === 'entity' ? paths.record('entities', id) : a.record_kind === 'account' ? paths.record('accounts', id) : a.record_kind === 'item' ? paths.record('items', id) : null;
+  if (!path) {
     return (
-      <Button size="compact-xs" variant="subtle" rightSection={<IconExternalLink size={12} />} onClick={() => open(paths.txn(a.record_id!))}>
-        Open transaction
-      </Button>
+      <Text size="xs" c="dimmed">
+        Attached to a {RECORD_NOUN[a.record_kind] ?? a.record_kind}
+      </Text>
     );
   }
   return (
-    <Text size="xs" c="dimmed">
-      Attached to {RECORD_LABEL[a.record_kind] ?? a.record_kind}
-    </Text>
+    <Button size="compact-xs" variant="subtle" rightSection={<IconExternalLink size={12} />} onClick={() => open(path)} title={name ?? undefined}>
+      Open {RECORD_NOUN[a.record_kind] ?? a.record_kind}
+      {name ? `: ${name}` : ''}
+    </Button>
   );
 }
 
-const RECORD_LABEL: Record<string, string> = { txn: 'a transaction', entity: 'a name', account: 'an account', item: 'an item' };
+/** The API's `record_kind`s, as people call them. */
+const RECORD_NOUN: Record<string, string> = { txn: 'transaction', entity: 'name', account: 'account', item: 'item' };
+
+/** A record's name from the lists (transactions are named in the Attach dialog's rows instead). */
+function useRecordName(record: AttachmentRecord): string | null {
+  const entities = useEntityIndex();
+  const accounts = useAccountIndex();
+  const items = useItemIndex();
+  if (!record) return null;
+  const id = record.record_id;
+  switch (record.record_kind) {
+    case 'entity':
+      return entities.get(id)?.full_name ?? null;
+    case 'account':
+      return accounts.get(id)?.full_name ?? null;
+    case 'item':
+      return items.get(id)?.full_name ?? null;
+    default:
+      return null;
+  }
+}
 
 function AttachmentTable({ rows, loading, empty, onAttach, attachLabel, onDetach, onDelete, showRecord }: { rows: AttachmentMeta[]; loading: boolean; empty: string; onAttach?(a: AttachmentMeta): void; attachLabel?: string; onDetach?(a: AttachmentMeta): void; onDelete(a: AttachmentMeta): void; showRecord?: boolean }) {
   const api = useApi();
@@ -278,17 +306,48 @@ function Thumb({ a, url }: { a: AttachmentMeta; url: string }) {
   );
 }
 
-/** Pick the transaction an inbox file belongs to: search by payee, memo or number. */
+type TargetKind = 'txn' | 'entity' | 'account' | 'item';
+
+/**
+ * Pick what an inbox file belongs to: a transaction (search by payee, memo or
+ * number), or a name, account or item (QuickFill).
+ */
 function AttachToModal({ attachment, onClose, onPick, busy, error }: { attachment: AttachmentMeta | null; onClose(): void; onPick(to: AttachmentRecord): void; busy: boolean; error: unknown }) {
   const [text, setText] = useState('');
+  const [kind, setKind] = useState<TargetKind>('txn');
+  const [picked, setPicked] = useState<string | null>(null);
   const entities = useEntityIndex();
-  const txns = useTxns({ text: text.trim() || null, descending: true, limit: 25 }, !!attachment);
-  useEffect(() => setText(''), [attachment]);
+  const txns = useTxns({ text: text.trim() || null, descending: true, limit: 25 }, !!attachment && kind === 'txn');
+  useEffect(() => {
+    setText('');
+    setPicked(null);
+  }, [attachment, kind]);
+  const Picker = kind === 'entity' ? NameQuickFill : kind === 'account' ? AccountQuickFill : ItemQuickFill;
   return (
     <Modal opened={!!attachment} onClose={onClose} title={`Attach "${attachment?.filename}" to…`} centered size="lg">
       <Stack gap="sm">
-        <TextInput placeholder="Payee, memo or number" value={text} onChange={(e) => setText(e.currentTarget.value)} data-autofocus aria-label="Find a transaction" />
+        <SegmentedControl
+          size="xs"
+          data={[
+            { value: 'txn', label: 'Transaction' },
+            { value: 'entity', label: 'Name' },
+            { value: 'account', label: 'Account' },
+            { value: 'item', label: 'Item' },
+          ]}
+          value={kind}
+          onChange={(v) => setKind(v as TargetKind)}
+        />
+        {kind !== 'txn' && (
+          <Group align="flex-end" gap="xs" wrap="nowrap">
+            <Picker key={kind} label={kind === 'entity' ? 'Name' : kind === 'account' ? 'Account' : 'Item'} value={picked} onChange={setPicked} allowAddNew={false} showInactive autoFocus style={{ flex: 1 }} aria-label={`Attach to ${RECORD_NOUN[kind]}`} />
+            <Button onClick={() => picked && onPick({ record_kind: kind, record_id: picked })} disabled={!picked} loading={busy}>
+              Attach
+            </Button>
+          </Group>
+        )}
+        {kind === 'txn' && <TextInput placeholder="Payee, memo or number" value={text} onChange={(e) => setText(e.currentTarget.value)} data-autofocus aria-label="Find a transaction" />}
         {!!error && <Alert color="red">{describeError(error)}</Alert>}
+        {kind === 'txn' && (
         <Table fz="sm" highlightOnHover className={classes.clickable}>
           <Table.Tbody>
             {(txns.data ?? []).map((t) => (
@@ -316,6 +375,7 @@ function AttachToModal({ attachment, onClose, onPick, busy, error }: { attachmen
             )}
           </Table.Tbody>
         </Table>
+        )}
       </Stack>
     </Modal>
   );

@@ -6,10 +6,15 @@ import type {
   Account,
   AccountType,
   Address,
+  Class,
+  CompanyInfo,
   Entity,
   EntityKind,
   Item,
   ItemType,
+  PaymentMethod,
+  SalesTaxCode,
+  Terms,
   Txn,
   TxnLine,
   TxnType,
@@ -125,6 +130,76 @@ export function blankItem(name: string, item_type: ItemType, parent?: Item | nul
     print_components: false,
     deposit_account_id: null,
     edit_seq: 0,
+  };
+}
+
+export function blankClass(name: string, parent?: Class | null): Class {
+  return {
+    id: newId(),
+    name,
+    full_name: parent ? `${parent.full_name}:${name}` : name,
+    parent_id: parent?.id ?? null,
+    sublevel: parent ? parent.sublevel + 1 : 0,
+    is_active: true,
+    edit_seq: 0,
+  };
+}
+
+/** Net 30, the terms QBD offers first. */
+export function blankTerms(name: string): Terms {
+  return { id: newId(), name, is_active: true, kind: { type: 'Standard', due_days: 30, discount_days: null, discount_percent: null }, edit_seq: 0 };
+}
+
+export function blankPaymentMethod(name: string): PaymentMethod {
+  return { id: newId(), name, kind: 'Other', is_active: true, edit_seq: 0 };
+}
+
+export function blankSalesTaxCode(name: string): SalesTaxCode {
+  return { id: newId(), name, description: null, is_taxable: true, is_active: true, edit_seq: 0 };
+}
+
+/**
+ * A new company's information with QBD's defaults for a company that has not
+ * turned anything on yet: no account numbers or classes, sales tax and
+ * inventory off, estimates on, payments to Undeposited Funds, journal entries
+ * numbered, a January fiscal year.
+ */
+export function blankCompanyInfo(name: string): CompanyInfo {
+  return {
+    name,
+    legal_name: null,
+    address: blankAddress(),
+    legal_address: blankAddress(),
+    phone: null,
+    email: null,
+    website: null,
+    ein: null,
+    fiscal_year_start_month: 1,
+    tax_year_start_month: 1,
+    tax_form: null,
+    home_currency: 'USD',
+    preferences: {
+      use_account_numbers: false,
+      use_class_tracking: false,
+      prompt_for_class: false,
+      warn_days_past: 90,
+      warn_days_future: 30,
+      auto_number_journal_entries: true,
+      inventory_enabled: false,
+      estimates_enabled: true,
+      sales_orders_enabled: false,
+      progress_invoicing: false,
+      sales_tax_enabled: false,
+      sales_tax_on_cash_basis: false,
+      reports_cash_basis: false,
+      billable_by_default: true,
+      default_markup_percent: null,
+      use_undeposited_funds: true,
+      auto_apply_payments: true,
+      default_check_account: null,
+      default_deposit_account: null,
+      multi_currency: false,
+    },
   };
 }
 

@@ -44,6 +44,10 @@ import type { TypeEntry } from './generated/TypeEntry';
 
 export type { Account } from './generated/Account';
 export type { AccountBalance } from './generated/AccountBalance';
+export type { CashFlowClass } from './generated/CashFlowClass';
+export type { ItemComponent } from './generated/ItemComponent';
+export type { JobStatus } from './generated/JobStatus';
+export type { PaymentMethodKind } from './generated/PaymentMethodKind';
 export type { AccountId } from './generated/AccountId';
 export type { AccountRole } from './generated/AccountRole';
 export type { AccountType } from './generated/AccountType';
@@ -227,6 +231,30 @@ export interface Session {
   user: { id: string | null; display_name: string; role: Role; kind?: SessionKind | null };
   companies: CompanySummary[];
   sign_in?: boolean;
+}
+
+/** `POST /companies` → the new company's id. */
+export interface CreatedCompany {
+  id: CompanyId;
+}
+
+/** `manifest.json` inside a `.lbk` (lb-backup's `PortableManifest`; not generated). */
+export interface PortableManifest {
+  kind: string;
+  format: number;
+  app_version: string;
+  company_name: string;
+  schema_version: number;
+  created_at: string;
+  database_size: number;
+  database_sha256: string;
+}
+
+/** `POST /companies/import` → 201: a NEW company made from the file; nothing existing is replaced. */
+export interface ImportedCompany {
+  id: CompanyId;
+  name: string;
+  from: PortableManifest;
 }
 
 /** One `event: change` from `/events?company=` (`data: {kind, id, action}`). */

@@ -2,7 +2,7 @@
 // administrative windows (users, server, backups, import, merge…), and this
 // device's preferences: the keymap (desktop app vs browser) and what Enter does.
 
-import { Alert, Button, Card, Group, Modal, NumberInput, SegmentedControl, Select, SimpleGrid, Skeleton, Stack, Switch, Table, Text, Textarea, TextInput, Title, UnstyledButton } from '@mantine/core';
+import { Alert, Button, Card, Group, Modal, SegmentedControl, SimpleGrid, Skeleton, Stack, Table, Text, Title, UnstyledButton } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { IconArrowsJoin, IconCloudUpload, IconDatabaseExport, IconFileImport, IconLink, IconLock, IconPaperclip, IconPencil, IconServer, IconUsers } from '@tabler/icons-react';
 import { useMutation } from '@tanstack/react-query';
@@ -23,10 +23,8 @@ import { useEnterBehavior } from '~/lib/prefs';
 import { useIsMobile } from '~/lib/useMobile';
 import { useOpenWindow } from '~/windows/WindowsProvider';
 import { paths } from '~/windows/paths';
+import { CompanyInfoFields, MONTHS } from './CompanyInfoFields';
 import classes from './screens.module.css';
-
-const MONTHS = Array.from({ length: 12 }, (_, i) => ({ value: String(i + 1), label: new Date(2000, i, 1).toLocaleString(undefined, { month: 'long' }) }));
-const TAX_FORMS = ['Form1040', 'Form1065', 'Form1120', 'Form1120S', 'Form990', 'Form990PF', 'Form990T', 'Other'];
 
 export function Company() {
   const { data: info, isLoading } = useCompanyInfo();
@@ -269,10 +267,6 @@ function EditInfoModal({ opened, info, onClose }: { opened: boolean; info: Compa
     },
   });
   const field = (name: string) => (isApiError(save.error) && (save.error.detail as { field?: string } | undefined)?.field === name ? save.error.message : undefined);
-  const set = (patch: Partial<CompanyInfo>) => setDraft({ ...draft, ...patch });
-  const addr = draft.address;
-  const prefs = draft.preferences;
-  const pref = (patch: Partial<CompanyInfo['preferences']>) => set({ preferences: { ...prefs, ...patch } });
   return (
     <Modal opened={opened} onClose={onClose} title="Company information" size="lg" centered>
       <form
@@ -282,43 +276,7 @@ function EditInfoModal({ opened, info, onClose }: { opened: boolean; info: Compa
         }}
       >
         <Stack gap="sm">
-          <SimpleGrid cols={{ base: 1, sm: 2 }}>
-            <TextInput label="Company name" value={draft.name} onChange={(e) => set({ name: e.currentTarget.value })} required error={field('name')} data-autofocus />
-            <TextInput label="Legal name" value={draft.legal_name ?? ''} onChange={(e) => set({ legal_name: e.currentTarget.value || null })} />
-          </SimpleGrid>
-          <Textarea label="Address" value={(addr.lines ?? []).join('\n')} onChange={(e) => set({ address: { ...addr, lines: e.currentTarget.value.split('\n') } })} autosize minRows={2} />
-          <SimpleGrid cols={{ base: 1, sm: 3 }}>
-            <TextInput label="City" value={addr.city ?? ''} onChange={(e) => set({ address: { ...addr, city: e.currentTarget.value || null } })} />
-            <TextInput label="State" value={addr.state ?? ''} onChange={(e) => set({ address: { ...addr, state: e.currentTarget.value || null } })} />
-            <TextInput label="Postal code" value={addr.postal_code ?? ''} onChange={(e) => set({ address: { ...addr, postal_code: e.currentTarget.value || null } })} />
-          </SimpleGrid>
-          <SimpleGrid cols={{ base: 1, sm: 3 }}>
-            <TextInput label="Phone" value={draft.phone ?? ''} onChange={(e) => set({ phone: e.currentTarget.value || null })} />
-            <TextInput label="Email" type="email" value={draft.email ?? ''} onChange={(e) => set({ email: e.currentTarget.value || null })} />
-            <TextInput label="Website" value={draft.website ?? ''} onChange={(e) => set({ website: e.currentTarget.value || null })} />
-          </SimpleGrid>
-          <SimpleGrid cols={{ base: 1, sm: 3 }}>
-            <TextInput label="EIN / tax id" value={draft.ein ?? ''} onChange={(e) => set({ ein: e.currentTarget.value || null })} />
-            <Select label="Fiscal year starts" data={MONTHS} value={String(draft.fiscal_year_start_month)} onChange={(v) => v && set({ fiscal_year_start_month: Number(v) })} allowDeselect={false} error={field('fiscal_year_start_month')} />
-            <Select label="Income tax form" data={TAX_FORMS} value={draft.tax_form} onChange={(v) => set({ tax_form: v })} clearable />
-          </SimpleGrid>
-          <Text fw={500} mt="xs">
-            Preferences
-          </Text>
-          <SimpleGrid cols={{ base: 1, sm: 2 }}>
-            <Switch label="Use account numbers" checked={prefs.use_account_numbers} onChange={(e) => pref({ use_account_numbers: e.currentTarget.checked })} />
-            <Switch label="Class tracking" checked={prefs.use_class_tracking} onChange={(e) => pref({ use_class_tracking: e.currentTarget.checked })} />
-            <Switch label="Sales tax" checked={prefs.sales_tax_enabled} onChange={(e) => pref({ sales_tax_enabled: e.currentTarget.checked })} />
-            <Switch label="Inventory and purchase orders" checked={prefs.inventory_enabled} onChange={(e) => pref({ inventory_enabled: e.currentTarget.checked })} />
-            <Switch label="Estimates" checked={prefs.estimates_enabled} onChange={(e) => pref({ estimates_enabled: e.currentTarget.checked })} />
-            <Switch label="Deposit payments to Undeposited Funds by default" checked={prefs.use_undeposited_funds} onChange={(e) => pref({ use_undeposited_funds: e.currentTarget.checked })} />
-            <Switch label="Auto-number journal entries" checked={prefs.auto_number_journal_entries} onChange={(e) => pref({ auto_number_journal_entries: e.currentTarget.checked })} />
-            <Switch label="Reports default to cash basis" checked={prefs.reports_cash_basis} onChange={(e) => pref({ reports_cash_basis: e.currentTarget.checked })} />
-          </SimpleGrid>
-          <Group>
-            <NumberInput label="Warn if a date is more than (days) in the past" value={prefs.warn_days_past ?? ''} onChange={(v) => pref({ warn_days_past: v === '' ? null : Number(v) })} min={0} w={260} />
-            <NumberInput label="…or in the future" value={prefs.warn_days_future ?? ''} onChange={(v) => pref({ warn_days_future: v === '' ? null : Number(v) })} min={0} w={200} />
-          </Group>
+          <CompanyInfoFields draft={draft} onChange={setDraft} fieldError={field} />
           {save.error && !field('name') && !field('fiscal_year_start_month') && <Alert color="red">{describeError(save.error)}</Alert>}
           <Group justify="flex-end">
             <Button variant="default" onClick={onClose}>

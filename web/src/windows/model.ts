@@ -20,6 +20,7 @@ export type WindowKind =
   | 'report'
   | 'find'
   | 'list'
+  | 'record'
   | 'company'
   | 'form'
   | 'reconcile'

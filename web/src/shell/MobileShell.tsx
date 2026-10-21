@@ -8,6 +8,7 @@ import { spotlight } from '@mantine/spotlight';
 import {
   IconArrowLeft,
   IconBuildingBank,
+  IconBuildingStore,
   IconCash,
   IconChecks,
   IconCreditCard,
@@ -23,6 +24,7 @@ import {
   IconUsers,
 } from '@tabler/icons-react';
 import { useState, type ReactNode } from 'react';
+import { useNavigate } from 'react-router';
 import type { LiveStatus } from '~/api/context';
 import { useQuickCreate } from '~/inputs/QuickCreate';
 import { windowTitle } from '~/windows/catalog';
@@ -50,6 +52,7 @@ export function MobileShell({ live, onShortcuts }: { live: LiveStatus; onShortcu
   const [plus, setPlus] = useState(false);
   const [more, setMore] = useState(false);
   const signOut = useSignOut();
+  const navigate = useNavigate();
   const active = state.windows.find((w) => w.key === state.active);
   const title = active ? windowTitle(active, state.titles) : 'LibreBooks';
   const go = (p: string) => {
@@ -144,6 +147,14 @@ export function MobileShell({ live, onShortcuts }: { live: LiveStatus; onShortcu
             ))}
             <SheetItem icon={<IconSearch size={26} />} label="Find" onClick={() => go(paths.find())} />
             <SheetItem icon={<IconUserCircle size={26} />} label="My Account" onClick={() => go(paths.account())} />
+            <SheetItem
+              icon={<IconBuildingStore size={26} />}
+              label="Companies"
+              onClick={() => {
+                setMore(false);
+                void navigate('/companies');
+              }}
+            />
           </div>
           {state.windows.length > 1 && (
             <div>
