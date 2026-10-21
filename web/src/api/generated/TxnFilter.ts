@@ -2,6 +2,7 @@
 import type { AccountId } from "./AccountId";
 import type { EntityId } from "./EntityId";
 import type { Money } from "./Money";
+import type { TxnId } from "./TxnId";
 import type { TxnType } from "./TxnType";
 
 /**
@@ -19,7 +20,13 @@ account_id: AccountId | null, number: string | null,
 /**
  * Matches memo, number or the payee's name.
  */
-text: string | null, amount: Money | null, open_only: boolean, include_void: boolean, limit: number | null, offset: number | null, 
+text: string | null, amount: Money | null, open_only: boolean, include_void: boolean, 
+/**
+ * Transactions with a line linked to this one (the receipts and bills
+ * against a purchase order, the invoices against a sales order or
+ * estimate, the deposits of a payment).
+ */
+linked_to: TxnId | null, limit: number | null, offset: number | null, 
 /**
  * Newest first when true.
  */
