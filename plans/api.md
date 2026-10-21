@@ -54,7 +54,7 @@ and the UI; change both together.
 | `GET /auth/passkeys` | → my passkeys `[{id, name, created_at, last_used_at}]` |
 | `DELETE /auth/passkeys/:id` | → 204 |
 | `GET /auth/sessions` / `DELETE /auth/sessions/:id` | my signed-in devices |
-| `POST /auth/enrollments` | admin: `{ purpose: "new_user" \| "add_device", role?, user_id?, ttl_minutes? }` → `{ token, url, expires_at }` |
+| `POST /auth/enrollments` | admin: `{ purpose: "new_user" \| "add_device", role?, user_id?, ttl_minutes? }` → `MintedEnrolmentLink` (`MintedEnrolment` + `url`) |
 | `GET /users`, `PATCH /users/:id`, `DELETE /users/:id` | admin user management |
 | `GET /companies` | → `[{ id, name, role }]` |
 | `POST /companies` | admin: `{ info: CompanyInfo }` → `{ id }` |

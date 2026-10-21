@@ -252,13 +252,23 @@ pub async fn revoke_session(
 
 // --- Enrolment links --------------------------------------------------------
 
+/// A minted enrolment and the link to share (or show as a QR code).
+#[derive(Clone, serde::Serialize, ts_rs::TS)]
+#[ts(export)]
+pub struct MintedEnrolmentLink {
+    #[serde(flatten)]
+    #[ts(flatten)]
+    pub minted: lb_auth::MintedEnrolment,
+    pub url: String,
+}
+
 /// Mint a link: the response's `url` is what to share (or show as a QR code).
 pub async fn create_enrollment(
     State(s): State<AppState>,
     p: Principal,
     RequestOrigin(origin): RequestOrigin,
     Json(b): Json<NewEnrolment>,
-) -> ApiResult<Json<Value>> {
+) -> ApiResult<Json<MintedEnrolmentLink>> {
     let by = p.person()?.clone();
     let st = store(&s)?;
     let base = s
@@ -268,10 +278,7 @@ pub async fn create_enrollment(
         .unwrap_or(origin);
     let minted = run(move || st.create_enrolment(&by, &b)).await?;
     let url = enrolment_url(&base, &minted.token);
-    Ok(Json(json!({
-        "id": minted.id, "token": minted.token, "purpose": minted.purpose,
-        "expires_at": minted.expires_at, "url": url,
-    })))
+    Ok(Json(MintedEnrolmentLink { minted, url }))
 }
 
 /// Where an enrolment link points: the web UI's `/enroll` page.
