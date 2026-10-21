@@ -22,6 +22,9 @@ export interface SaleRow {
   amount: Cents | null;
   sales_tax_code_id: string | null;
   class_id: string | null;
+  /** The sales order or estimate line this line draws on (an invoice made from one). */
+  linked_txn_id: string | null;
+  linked_line_id: string | null;
 }
 
 export const blankSaleRow = (): SaleRow => ({
@@ -35,6 +38,8 @@ export const blankSaleRow = (): SaleRow => ({
   amount: null,
   sales_tax_code_id: null,
   class_id: null,
+  linked_txn_id: null,
+  linked_line_id: null,
 });
 
 export const isBlankSale = (r: SaleRow) => !r.item_id && !r.amount && !r.description.trim() && !r.quantity.trim() && !r.rate.trim();
@@ -175,6 +180,8 @@ export function toSaleLines(rows: readonly SaleRow[]): TxnLine[] {
       amount: r.amount ?? 0,
       sales_tax_code_id: r.sales_tax_code_id,
       class_id: r.class_id,
+      linked_txn_id: r.linked_txn_id,
+      linked_line_id: r.linked_line_id,
     }));
 }
 
@@ -192,6 +199,8 @@ export function fromSaleLines(lines: readonly TxnLine[]): SaleRow[] {
       amount: l.amount,
       sales_tax_code_id: l.sales_tax_code_id,
       class_id: l.class_id,
+      linked_txn_id: l.linked_txn_id,
+      linked_line_id: l.linked_line_id,
     }));
 }
 

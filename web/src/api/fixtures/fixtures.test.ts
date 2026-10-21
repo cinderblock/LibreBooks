@@ -260,6 +260,40 @@ describe('fixture books', () => {
     expect(await api.memorizedDue(co)).toEqual([]);
   });
 
+  test('an order is open for what is not yet drawn from it: a partial receipt leaves the rest, the last one or a manual close takes it off the open list', async () => {
+    const api = make();
+    const vendor = api.find('entity', 'Hardwood Supply Co')!;
+    const [po] = await api.txns(co, { types: ['PurchaseOrder'], entity_id: vendor });
+    const full = (await api.txn(co, po!.id)).txn;
+    // 80 walnut at 12.75 and 150 white oak at 7.90 ordered; 50 walnut received: 30 × 12.75 + 150 × 7.90 remain.
+    expect(po!.amount).toBe(220_500);
+    expect(po!.open_balance).toBe(38_250 + 118_500);
+    expect((await api.txns(co, { types: ['PurchaseOrder'], open_only: true })).map((t) => t.id)).toContain(po!.id);
+    // A statement charge is an A/R item like an invoice: open for its amount, in the customer's open items.
+    const [charge] = await api.txns(co, { types: ['StatementCharge'] });
+    expect(charge!.open_balance).toBe(charge!.amount);
+    expect((await api.open(co, charge!.entity_id!, 'receivable')).some((t) => t.id === charge!.id)).toBe(true);
+    // Receiving the rest on a bill closes the order; the fixture refuses to delete an order something draws on.
+    const bill = blankTxn('Bill', today);
+    bill.entity_id = vendor;
+    bill.lines = full.lines.map((l, i) => ({ ...blankLine('Item'), item_id: l.item_id, quantity: i === 0 ? '30' : '150', rate: l.rate, amount: i === 0 ? 38_250 : 118_500, linked_txn_id: full.id, linked_line_id: l.id }));
+    await api.createTxn(co, bill);
+    const after = (await api.txns(co, { types: ['PurchaseOrder'], entity_id: vendor }))[0]!;
+    expect(after.open_balance).toBe(0);
+    expect((await api.txns(co, { types: ['PurchaseOrder'], open_only: true })).some((t) => t.id === po!.id)).toBe(false);
+    expect((await rejects(api.deleteTxn(co, full.id, full.edit_seq))).code).toBe('in_use');
+    // A sales order closed by hand (QBD's IsManuallyClosed, kept in `extra`) is off the list too; reopened, it is back.
+    const [so] = await api.txns(co, { types: ['SalesOrder'] });
+    expect(so!.open_balance).toBe(so!.amount);
+    const soFull = (await api.txn(co, so!.id)).txn;
+    const closed = await api.updateTxn(co, { ...soFull, extra: { IsManuallyClosed: true } });
+    expect((await api.txns(co, { types: ['SalesOrder'], open_only: true })).some((t) => t.id === so!.id)).toBe(false);
+    await api.updateTxn(co, { ...closed.txn, extra: null });
+    expect((await api.txns(co, { types: ['SalesOrder'], open_only: true })).some((t) => t.id === so!.id)).toBe(true);
+    // Orders post nothing, whatever is drawn from them.
+    expect((await api.txn(co, full.id)).postings).toEqual([]);
+  });
+
   test('open items include unused credits; undeposited lists payments not yet deposited', async () => {
     const api = make();
     const openInvoice = (await api.txns(co, { types: ['Invoice'], open_only: true }))[0]!;

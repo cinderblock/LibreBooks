@@ -32,6 +32,9 @@ export interface ItemRow {
   entity_id: string | null;
   billable: boolean;
   class_id: string | null;
+  /** The purchase-order line this line receives or bills (a receipt or bill made from a PO). */
+  linked_txn_id: string | null;
+  linked_line_id: string | null;
 }
 
 export const blankExpense = (): ExpenseRow => ({
@@ -56,6 +59,8 @@ export const blankItemRow = (): ItemRow => ({
   entity_id: null,
   billable: false,
   class_id: null,
+  linked_txn_id: null,
+  linked_line_id: null,
 });
 
 export const isBlankExpense = (r: ExpenseRow) =>
@@ -142,6 +147,8 @@ export function toTxnLines(expenses: readonly ExpenseRow[], items: readonly Item
       entity_id: r.entity_id,
       billable: r.entity_id ? (r.billable ? 'Billable' : 'NotBillable') : 'NotBillable',
       class_id: r.class_id,
+      linked_txn_id: r.linked_txn_id,
+      linked_line_id: r.linked_line_id,
     });
   }
   return out;
@@ -164,6 +171,8 @@ export function fromTxnLines(lines: readonly TxnLine[]): { expenses: ExpenseRow[
         entity_id: l.entity_id,
         billable: l.billable !== 'NotBillable',
         class_id: l.class_id,
+        linked_txn_id: l.linked_txn_id,
+        linked_line_id: l.linked_line_id,
       });
     } else if (l.kind === 'Account') {
       expenses.push({
