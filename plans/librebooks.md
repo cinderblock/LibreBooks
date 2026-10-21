@@ -216,7 +216,7 @@ Phases are ordered; each ends usable. **Current step is marked ▶.**
   (heartbeat cadence) made robust (`10fe555`). ▶ Running: web phase D agent
   (list record editors, attachments on list records, company creation and
   `.lbk` import from the picker, the remaining import options) and a research
-  agent on native QBW access (phase 9, `plans/qbw-research.md`). Next with the user: point
+  agent on native QBW access, now merged (`plans/qbw-research.md`). Next with the user: point
   QuickBooks' Web Connector on cad-3 at this server over HTTPS (steps in
   `plans/qbd-import.md`), run a sync, and see whether the 14 bridge gaps close.
 - Phase 1 — Ledger core
@@ -268,10 +268,13 @@ Phases are ordered; each ends usable. **Current step is marked ▶.**
     (not calculation, initially), 1099s, budgets, multi-currency, statements,
     printing checks/forms, email, memorised transactions, recurring, IIF
     import/export, multi-user record locking UX.
-- Phase 9 — Native QBW (research)
-  - `.QBW` is a Sybase/SAP SQL Anywhere database with Intuit's encryption. Study
-    the format (Ghidra is available via the `ghidra` MCP) to read a QBW directly
-    for a one-shot migration without QBD installed.
+- Phase 9 — Native QBW (research done 2026-10-20: `plans/qbw-research.md`)
+  - `.QBW` is an SAP SQL Anywhere 17 page store with a keyless per-sector
+    obfuscation; the barrier is Intuit's undocumented schema, not crypto.
+    Verdict: keep qbXML/SDK as the import path and close its gaps (attachments
+    from the `Attach` folder, audit trail by CSV); treat native parsing as a
+    watch-and-contribute track with OpenQBW (Apache-2.0), gated on a legal
+    read; never decompile Intuit's binaries or ship SAP's engine.
 
 ## Findings / gotchas
 
@@ -372,7 +375,9 @@ Phases are ordered; each ends usable. **Current step is marked ▶.**
       until the first tag.
 - [x] Phase 7: feeds library, routes and UI (merged).
 - [ ] Phase 8: parity tail.
-- [ ] Phase 9: native QBW research.
+- [x] Phase 9: native QBW research (`plans/qbw-research.md`); five questions for
+      the user there (legal review, upstream vs independent, a `.QBM` experiment,
+      gap-closer priority).
 
 ## Open questions for the user
 
