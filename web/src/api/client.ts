@@ -60,7 +60,6 @@ import type {
   CompanyId,
   CompanyInfo,
   CompanySummary,
-  CreatedCompany,
   DateRange,
   EnrolFinish,
   EnrolStart,
@@ -119,8 +118,8 @@ export interface ApiClient {
   health(): Promise<Health>;
   session(): Promise<Session>;
   companies(): Promise<CompanySummary[]>;
-  /** Admin: a new, empty company from its information (`POST /companies`). */
-  createCompany(info: CompanyInfo): Promise<CreatedCompany>;
+  /** Admin: a new, empty company from its information (`POST /companies`); answers what `GET /companies` lists for it. */
+  createCompany(info: CompanyInfo): Promise<CompanySummary>;
   /**
    * Admin: a NEW company from a `.lbk` file (`POST /companies/import`,
    * multipart `file` plus an optional `name`); nothing existing is replaced.

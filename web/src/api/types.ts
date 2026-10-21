@@ -13,10 +13,10 @@ import type { CompanyAccess } from './generated/CompanyAccess';
 import type { CsvDetection } from './generated/CsvDetection';
 import type { CsvMapping } from './generated/CsvMapping';
 import type { DeviceKeyInfo } from './generated/DeviceKeyInfo';
-import type { EnrolmentPurpose } from './generated/EnrolmentPurpose';
 import type { FeedFilter } from './generated/FeedFilter';
 import type { FileKind } from './generated/FileKind';
 import type { PasskeyInfo } from './generated/PasskeyInfo';
+import type { PortableManifest } from './generated/PortableManifest';
 import type { Statement } from './generated/Statement';
 import type { StatementAccount } from './generated/StatementAccount';
 import type { StatementCharge } from './generated/StatementCharge';
@@ -69,6 +69,10 @@ export type { DeviceKeyInfo } from './generated/DeviceKeyInfo';
 export type { EnrolmentInfo } from './generated/EnrolmentInfo';
 export type { EnrolmentPurpose } from './generated/EnrolmentPurpose';
 export type { NewEnrolment } from './generated/NewEnrolment';
+/** `POST /auth/enrollments`: the minted token plus the link to share (shown once, never stored). */
+export type { MintedEnrolmentLink } from './generated/MintedEnrolmentLink';
+/** `manifest.json` inside a `.lbk`, and `from` on `POST /companies/import`. */
+export type { PortableManifest } from './generated/PortableManifest';
 export type { Application } from './generated/Application';
 export type { AttachmentMeta } from './generated/AttachmentMeta';
 export type { Class } from './generated/Class';
@@ -233,23 +237,6 @@ export interface Session {
   sign_in?: boolean;
 }
 
-/** `POST /companies` → the new company's id. */
-export interface CreatedCompany {
-  id: CompanyId;
-}
-
-/** `manifest.json` inside a `.lbk` (lb-backup's `PortableManifest`; not generated). */
-export interface PortableManifest {
-  kind: string;
-  format: number;
-  app_version: string;
-  company_name: string;
-  schema_version: number;
-  created_at: string;
-  database_size: number;
-  database_sha256: string;
-}
-
 /** `POST /companies/import` → 201: a NEW company made from the file; nothing existing is replaced. */
 export interface ImportedCompany {
   id: CompanyId;
@@ -264,15 +251,6 @@ export interface ChangeEvent {
   id: string;
   /** `created`, `updated`, `deleted`, `voided`, … */
   action: string;
-}
-
-/** `POST /auth/enrollments`: the minted token plus the link to share. */
-export interface MintedEnrolmentLink {
-  id: string;
-  token: string;
-  purpose: EnrolmentPurpose;
-  expires_at: string;
-  url: string;
 }
 
 /** `GET /users/:id`: the user with their company access, passkeys and devices. */

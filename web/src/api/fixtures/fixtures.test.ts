@@ -659,7 +659,10 @@ describe('companies', () => {
   test('a new company joins the session and the picker, with its own information', async () => {
     const api = make();
     expect((await rejects(api.createCompany(blankCompanyInfo('   ')))).code).toBe('invalid');
-    const { id } = await api.createCompany({ ...blankCompanyInfo('Second Shop'), fiscal_year_start_month: 7 });
+    const created = await api.createCompany({ ...blankCompanyInfo('  Second Shop '), fiscal_year_start_month: 7 });
+    // The answer is what `GET /companies` lists for it, so the picker can show it at once.
+    expect(created).toMatchObject({ name: 'Second Shop', role: 'admin' });
+    const { id } = created;
     expect(id).not.toBe(co);
     expect((await api.session()).companies.map((c) => c.name)).toEqual(['Juniper Hill Woodworks', 'Second Shop']);
     expect((await api.companies()).find((c) => c.id === id)?.role).toBe('admin');

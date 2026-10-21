@@ -35,7 +35,6 @@ import type {
   CompanyId,
   CompanyInfo,
   CompanySummary,
-  CreatedCompany,
   DateRange,
   Entity,
   FeedConnection,
@@ -346,14 +345,16 @@ export class FixtureApiClient implements ApiClient {
     return id;
   }
 
-  createCompany(info: CompanyInfo): Promise<CreatedCompany> {
+  createCompany(info: CompanyInfo): Promise<CompanySummary> {
     try {
       this.checkInfo(info);
     } catch (e) {
       return Promise.reject(e);
     }
-    const id = this.addCompany({ ...clone(info), name: info.name.trim() });
-    return this.delay(() => ({ id }));
+    const name = info.name.trim();
+    const id = this.addCompany({ ...clone(info), name });
+    // What `GET /companies` lists for it: the creator is its admin.
+    return this.delay(() => ({ id, name, role: 'admin' as const }));
   }
 
   /**

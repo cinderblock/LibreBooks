@@ -95,11 +95,12 @@ describe('HttpApiClient', () => {
     const fake = (async (url: string, init: RequestInit) => {
       calls.push({ url, init });
       if (url.endsWith('/companies/import')) return new Response('{"id":"co2","name":"Riverside","from":{"kind":"librebooks-company","format":1,"app_version":"0.4.1","company_name":"Riverside Cafe","schema_version":3,"created_at":"2026-10-20T00:00:00Z","database_size":5,"database_sha256":"00"}}', { status: 201 });
-      return new Response('{"id":"co1"}', { status: 200 });
+      return new Response('{"id":"co1","name":"Second Shop","role":"admin"}', { status: 200 });
     }) as unknown as FetchFn;
     const api = new HttpApiClient({ fetch: fake });
     const created = await api.createCompany(blankCompanyInfo('Second Shop'));
-    expect(created.id).toBe('co1');
+    // What `GET /companies` would list for it; the picker needn't refetch the session to show it.
+    expect(created).toEqual({ id: 'co1', name: 'Second Shop', role: 'admin' });
     const [post] = calls;
     expect(post!.url).toBe('/api/v1/companies');
     expect(post!.init.method).toBe('POST');

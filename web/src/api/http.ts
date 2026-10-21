@@ -69,7 +69,6 @@ import type {
   CompanyId,
   CompanyInfo,
   CompanySummary,
-  CreatedCompany,
   DateRange,
   EnrolFinish,
   EnrolStart,
@@ -207,7 +206,7 @@ export class HttpApiClient implements ApiClient {
     return this.request<CompanySummary[]>('GET', '/companies');
   }
   createCompany(info: CompanyInfo) {
-    return this.request<CreatedCompany>('POST', '/companies', { body: { info } });
+    return this.request<CompanySummary>('POST', '/companies', { body: { info } });
   }
   importCompany(file: File, name?: string | null) {
     // Multipart: the browser sets the content type (it carries the boundary).
