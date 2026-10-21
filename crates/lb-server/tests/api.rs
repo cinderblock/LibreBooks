@@ -423,3 +423,75 @@ async fn run_a_profit_and_loss() {
     assert_eq!(s, StatusCode::OK, "{report}");
     assert_eq!(report["company_name"], "Test Co");
 }
+
+#[tokio::test]
+async fn export_a_report_as_xlsx_and_pdf() {
+    let api = Api::new(AuthMode::Open);
+    let c = company(&api).await;
+    let base = format!("/api/v1/c/{c}");
+    let export = |query: &str| {
+        let uri = format!("{base}/reports/export?{query}");
+        let app = api.app.clone();
+        async move {
+            let req = Request::builder()
+                .method("POST")
+                .uri(uri)
+                .header("x-librebooks", "1")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({ "report": "BalanceSheet", "to": "2026-10-19" }).to_string(),
+                ))
+                .unwrap();
+            let res = app.oneshot(req).await.unwrap();
+            let status = res.status();
+            let headers = res.headers().clone();
+            let bytes = res.into_body().collect().await.unwrap().to_bytes();
+            (status, headers, bytes)
+        }
+    };
+
+    let (status, headers, bytes) = export("format=xlsx").await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "{}",
+        String::from_utf8_lossy(&bytes)
+    );
+    assert_eq!(
+        headers["content-type"],
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    );
+    assert_eq!(
+        headers["content-disposition"],
+        "attachment; filename=\"Balance_Sheet.xlsx\""
+    );
+    assert!(bytes.len() > 2_000, "{} bytes", bytes.len());
+    assert_eq!(&bytes[..2], b"PK");
+
+    let (status, headers, bytes) = export("format=pdf&paper=a4").await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "{}",
+        String::from_utf8_lossy(&bytes)
+    );
+    assert_eq!(headers["content-type"], "application/pdf");
+    assert_eq!(
+        headers["content-disposition"],
+        "attachment; filename=\"Balance_Sheet.pdf\""
+    );
+    assert!(bytes.len() > 1_000, "{} bytes", bytes.len());
+    assert!(bytes.starts_with(b"%PDF-"));
+
+    let (status, headers, bytes) = export("").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(headers["content-type"], "text/csv; charset=utf-8");
+    assert!(String::from_utf8_lossy(&bytes).starts_with("Balance Sheet\r\nTest Co\r\n"));
+
+    let (status, _, bytes) = export("format=docx").await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    let err: Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(err["error"]["code"], "invalid");
+    let (status, _, _) = export("format=pdf&paper=legal").await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+}

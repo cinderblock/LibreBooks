@@ -1,4 +1,4 @@
-//! Reports: the catalog, running one, and exporting it.
+//! Reports: the catalog, running one, and exporting it as CSV, XLSX or PDF.
 
 use axum::Json;
 use axum::body::Body;
@@ -6,7 +6,10 @@ use axum::extract::{Path, Query, State};
 use axum::http::header;
 use axum::response::Response;
 use lb_core::CompanyId;
-use lb_reports::{CatalogEntry, ExportFormat, Report, ReportError, ReportRequest};
+use lb_reports::{
+    CatalogEntry, ExportError, ExportFormat, ExportOptions, Paper, Report, ReportError,
+    ReportRequest,
+};
 use serde::Deserialize;
 
 use crate::auth::{Principal, Role};
@@ -19,6 +22,12 @@ impl From<ReportError> for ApiError {
             ReportError::Store(s) => s.into(),
             ReportError::Invalid(m) => ApiError::invalid(m),
         }
+    }
+}
+
+impl From<ExportError> for ApiError {
+    fn from(e: ExportError) -> Self {
+        ApiError::internal(e.to_string())
     }
 }
 
@@ -52,8 +61,12 @@ pub async fn run_report(
 
 #[derive(Deserialize)]
 pub struct ExportQuery {
+    /// `csv` (default), `xlsx` or `pdf`.
     #[serde(default)]
     format: Option<String>,
+    /// PDF only: `letter` (default) or `a4`.
+    #[serde(default)]
+    paper: Option<String>,
 }
 
 pub async fn export(
@@ -63,19 +76,26 @@ pub async fn export(
     Query(q): Query<ExportQuery>,
     Json(req): Json<ReportRequest>,
 ) -> ApiResult<Response> {
-    let format = match q.format.as_deref().unwrap_or("csv") {
-        "csv" => ExportFormat::Csv,
-        other => {
-            return Err(ApiError::invalid(format!(
-                "reports export as csv, not {other}"
-            )));
-        }
+    let format = match q.format.as_deref() {
+        None => ExportFormat::Csv,
+        Some(f) => ExportFormat::parse(f).ok_or_else(|| {
+            ApiError::invalid(format!("reports export as csv, xlsx or pdf, not {f}"))
+        })?,
+    };
+    let paper = match q.paper.as_deref() {
+        None => Paper::default(),
+        Some(p) => p.parse::<Paper>().map_err(ApiError::invalid)?,
     };
     let report = run(&s, &p, company, req).await?;
-    let bytes = lb_reports::export(&report, format);
-    let name = lb_reports::file_name(&report, format).replace(['"', '\\'], "_");
+    let opts = ExportOptions { paper };
+    let (bytes, name) = tokio::task::spawn_blocking(move || {
+        let bytes = lb_reports::export_with(&report, format, &opts)?;
+        Ok::<_, ExportError>((bytes, lb_reports::file_name(&report, format)))
+    })
+    .await??;
+    let name = name.replace(['"', '\\'], "_");
     Response::builder()
-        .header(header::CONTENT_TYPE, "text/csv; charset=utf-8")
+        .header(header::CONTENT_TYPE, format.mime())
         .header(
             header::CONTENT_DISPOSITION,
             format!("attachment; filename=\"{name}\""),
