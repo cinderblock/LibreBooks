@@ -383,7 +383,12 @@ Phases are ordered; each ends usable. **Current step is marked ▶.**
       Signing keys in GitHub secrets (`42946a7`); release workflow untested
       until the first tag.
 - [x] Phase 7: feeds library, routes and UI (merged).
-- [ ] Phase 8: parity tail.
+- [ ] Phase 8: parity tail. Order fulfilment done server-side
+      (`plans/orders.md`): `TxnLine.is_closed`, `Txn.is_manually_closed`,
+      validated line links to POs / sales orders / estimates, `txn_link`
+      (migration 4), `orders::fulfilment`, orders' `open_balance` = remaining,
+      `GET /txns/:id/fulfilment`, `/open?kind=purchase_orders|sales_orders|
+      estimates`. UI and import mapping still to do.
 - [x] Phase 9: native QBW research (`plans/qbw-research.md`); five questions for
       the user there (legal review, upstream vs independent, a `.QBM` experiment,
       gap-closer priority).
