@@ -624,6 +624,35 @@ describe('administration', () => {
     expect((await api.qbdSync(co)).running?.waiting_for_web_connector).toBe(true);
     api.dispose();
   });
+
+  test('QuickBooks import: the sync and parity options shape the reports', async () => {
+    const api = make();
+    const st = await api.qbdStatus(co);
+    await api.putQbdSettings(co, { ...st.settings, bridge: { ...st.settings.bridge, url: 'http://192.168.1.40:8750' } }, 'bridge-key-1');
+    // A limited sync of two kinds: a partial run (watermarks untouched) reporting only those kinds.
+    // The status long-poll answers on every progress step; a watcher asks again until the job is gone.
+    const finished = async () => {
+      let st = await api.qbdStatus(co, 10);
+      while (st.running) st = await api.qbdStatus(co, 10);
+      return st;
+    };
+    await api.qbdSync(co, { txn_limit: 50, entities: ['Invoice', 'Check'] });
+    let done = await finished();
+    expect(done.last_sync?.partial_run).toBe(true);
+    expect(done.last_sync?.full).toBe(false);
+    expect(done.last_sync?.entities.map((e) => e.entity)).toEqual(['Invoice', 'Check']);
+    // Re-importing counts the unchanged as updated.
+    await api.qbdSync(co, { reimport: true, txn_from: '2026-01-01' });
+    done = await finished();
+    expect(done.last_sync?.partial_run).toBe(true);
+    expect(done.last_sync?.entities.every((e) => e.unchanged === 0)).toBe(true);
+    // Parity as of a date, with a trial balance asked for (the bridge can't; the report says so).
+    await api.qbdParityRun(co, { as_of: '2026-09-30', trial_balance: true });
+    const parity = await api.qbdParity(co, 10);
+    expect(parity.report?.summary.notes).toContain('Balances as of 2026-09-30.');
+    expect(parity.report?.summary.notes.some((n) => n.includes('trial balance'))).toBe(true);
+    api.dispose();
+  });
 });
 
 describe('companies', () => {

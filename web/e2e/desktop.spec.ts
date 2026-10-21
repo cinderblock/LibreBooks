@@ -688,6 +688,33 @@ test('QuickBooks import: a sync runs with progress and lands a report; parity co
   await expect(win.getByRole('textbox', { name: 'Bridge URL' })).toHaveValue(/8750/);
 });
 
+test('QuickBooks import: the Options disclosures run a limited sync and a dated parity check', async ({ page }) => {
+  await start(page, `${CO}/import/qbd`);
+  const win = page.getByTestId('qbd-import');
+  await expect(win.getByTestId('sync-options')).toBeHidden();
+  await win.getByRole('button', { name: 'Options' }).click();
+  const options = win.getByTestId('sync-options');
+  await expect(options).toBeVisible();
+  await options.getByRole('textbox', { name: 'Transaction limit' }).fill('50');
+  await options.getByRole('combobox', { name: 'Only these kinds of record' }).click();
+  await page.getByRole('option', { name: 'Invoice', exact: true }).click();
+  // Escape closes the open dropdown, not the window.
+  await page.keyboard.press('Escape');
+  await expect(options).toBeVisible();
+  await options.getByRole('button', { name: 'Sync with these options' }).click();
+  await expect(win.getByTestId('sync-progress')).toBeVisible();
+  await expect(win.getByTestId('sync-progress')).toBeHidden({ timeout: 15_000 });
+  const report = win.getByTestId('sync-report');
+  await expect(report).toContainText('Last sync (partial)');
+  await expect(report.getByRole('table').first().getByRole('row')).toHaveCount(2); // the header and Invoice
+  await win.getByRole('tab', { name: 'Parity' }).click();
+  await win.getByRole('button', { name: 'Options' }).click();
+  await win.getByTestId('parity-options').getByRole('textbox', { name: 'Balances as of' }).fill('09/30/2026');
+  await page.keyboard.press('Tab');
+  await win.getByRole('button', { name: 'Compare now' }).click();
+  await expect(win.getByText('Balances as of 2026-09-30.')).toBeVisible();
+});
+
 test('merge folds one vendor into another', async ({ page }) => {
   await start(page, `${CO}/merge`);
   const win = page.getByTestId('merge');
