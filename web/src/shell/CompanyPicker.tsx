@@ -16,7 +16,7 @@ import { useApi } from '~/api/context';
 import { describeError, isApiError } from '~/api/errors';
 import { useSession } from '~/api/hooks';
 import { sk } from '~/api/keys';
-import type { CompanyId, CompanyInfo } from '~/api/types';
+import type { CompanyInfo, CompanySummary, Session } from '~/api/types';
 import { formatBytes } from '~/lib/format';
 import { CompanyInfoFields } from '~/screens/CompanyInfoFields';
 
@@ -53,10 +53,14 @@ export function CompanyPicker({ force = false }: { /** Always show the list (the
   const companies = session.data?.companies ?? [];
   const admin = session.data?.user.role === 'admin';
   if (!force && companies.length === 1) return <Navigate to={`/c/${encodeURIComponent(companies[0]!.id)}/home`} replace />;
-  /** A company made just now: the session lists it, then it opens. */
-  const openNew = (id: CompanyId) => {
+  /**
+   * A company made just now: the server's answer is what `GET /companies`
+   * lists for it, so the session knows it before the refetch confirms.
+   */
+  const openNew = (company: CompanySummary) => {
+    qc.setQueryData<Session>(sk.session, (s) => (s && !s.companies.some((c) => c.id === company.id) ? { ...s, companies: [...s.companies, company] } : s));
     void qc.invalidateQueries({ queryKey: sk.session });
-    navigate(`/c/${encodeURIComponent(id)}/home`);
+    navigate(`/c/${encodeURIComponent(company.id)}/home`);
   };
   return (
     <Center h="100dvh" p="md">
@@ -93,7 +97,7 @@ export function CompanyPicker({ force = false }: { /** Always show the list (the
 }
 
 /** QBD's New Company: the information, then the books are empty and ready. */
-function NewCompanyModal({ opened, onClose, onCreated }: { opened: boolean; onClose(): void; onCreated(id: CompanyId): void }) {
+function NewCompanyModal({ opened, onClose, onCreated }: { opened: boolean; onClose(): void; onCreated(company: CompanySummary): void }) {
   const api = useApi();
   const [draft, setDraft] = useState<CompanyInfo>(() => blankCompanyInfo(''));
   useEffect(() => {
@@ -101,10 +105,10 @@ function NewCompanyModal({ opened, onClose, onCreated }: { opened: boolean; onCl
   }, [opened]);
   const create = useMutation({
     mutationFn: () => api.createCompany({ ...draft, name: draft.name.trim() }),
-    onSuccess: ({ id }) => {
-      notifications.show({ message: `"${draft.name.trim()}" is ready. Its chart of accounts is empty; add accounts as you go, or import from QuickBooks.`, color: 'teal', autoClose: 8_000 });
+    onSuccess: (company) => {
+      notifications.show({ message: `"${company.name}" is ready. Its chart of accounts is empty; add accounts as you go, or import from QuickBooks.`, color: 'teal', autoClose: 8_000 });
       onClose();
-      onCreated(id);
+      onCreated(company);
     },
   });
   const field = (name: string) => (isApiError(create.error) && (create.error.detail as { field?: string } | undefined)?.field === name ? create.error.message : undefined);
@@ -138,7 +142,7 @@ function NewCompanyModal({ opened, onClose, onCreated }: { opened: boolean; onCl
 }
 
 /** A `.lbk` (from Backups → Export, or the desktop app) becomes a new company. */
-function ImportCompanyModal({ opened, onClose, onCreated }: { opened: boolean; onClose(): void; onCreated(id: CompanyId): void }) {
+function ImportCompanyModal({ opened, onClose, onCreated }: { opened: boolean; onClose(): void; onCreated(company: CompanySummary): void }) {
   const api = useApi();
   const [file, setFile] = useState<File | null>(null);
   const [name, setName] = useState('');
@@ -153,7 +157,8 @@ function ImportCompanyModal({ opened, onClose, onCreated }: { opened: boolean; o
     onSuccess: (r) => {
       notifications.show({ message: `"${r.name}" is a new company, from a file made with LibreBooks ${r.from.app_version} on ${r.from.created_at.slice(0, 10)}.`, color: 'teal', autoClose: 8_000 });
       onClose();
-      onCreated(r.id);
+      // The import answers `{ id, name, from }` without a role; only a server admin can import, and the importer is the new company's admin.
+      onCreated({ id: r.id, name: r.name, role: 'admin' });
     },
   });
   const suggested = file ? file.name.replace(/\.lbk$/i, '') : '';

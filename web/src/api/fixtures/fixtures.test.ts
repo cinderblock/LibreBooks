@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { defaultRequest } from '~/reports/request';
-import { blankCompanyInfo, blankLine, blankTxn } from '../blank';
+import { blankAccount, blankCompanyInfo, blankItem, blankLine, blankSalesTaxCode, blankTxn } from '../blank';
 import { ApiError } from '../errors';
 import type { Cell, Memorized, Row } from '../types';
 import { FIXTURE_COMPANY_ID, FixtureApiClient } from './client';
@@ -117,6 +117,70 @@ describe('fixture books', () => {
     expect(err.code).toBe('in_use');
     const dup = await rejects(api.createRecord(co, 'accounts', { ...checking, id: 'new-id', edit_seq: 0 }));
     expect(dup.isDuplicate).toBe(true);
+  });
+
+  test('a new account opens with its balance in the same write: a journal entry against Opening Balance Equity', async () => {
+    const api = make();
+    const before = (await api.txns(co, { types: ['JournalEntry'] })).length;
+    const savings = await api.createRecord(co, 'accounts', blankAccount('Money Market', 'Bank'), { opening_balance: 150_000, as_of: '2026-10-01' });
+    const loan = await api.createRecord(co, 'accounts', blankAccount('Truck Loan', 'LongTermLiability'), { opening_balance: 2_500_000 });
+    const entries = await api.txns(co, { types: ['JournalEntry'] });
+    expect(entries).toHaveLength(before + 2);
+    // Natural sign in, debit-positive out: the bank balance debits, the loan credits; equity takes the other side.
+    const balances = await api.balances(co);
+    const of = (id: string) => balances.find((b) => b.account_id === id)?.debit_positive ?? 0;
+    expect(of(savings.id)).toBe(150_000);
+    expect(of(loan.id)).toBe(-2_500_000);
+    const equity = (await api.list(co, 'accounts')).find((a) => a.role === 'OpeningBalanceEquity')!;
+    const je = await api.txn(co, entries.find((t) => t.date === '2026-10-01' && t.memo === 'Opening Balance')!.id);
+    expect(je.postings.map((p) => [p.account_id, p.amount])).toEqual(expect.arrayContaining([[savings.id, 150_000], [equity.id, -150_000]]));
+    // Today when no date is given; nothing posted for a zero balance.
+    expect(entries.some((t) => t.date === today && t.memo === 'Opening Balance')).toBe(true);
+    await api.createRecord(co, 'accounts', blankAccount('Cash Drawer', 'Bank'), { opening_balance: 0 });
+    expect(await api.txns(co, { types: ['JournalEntry'] })).toHaveLength(before + 2);
+  });
+
+  test('an opening entry the books refuse leaves no account behind', async () => {
+    const api = make();
+    await api.putClosingDate(co, '2026-09-30');
+    const err = await rejects(api.createRecord(co, 'accounts', blankAccount('Old Savings', 'Bank'), { opening_balance: 100, as_of: '2026-09-01' }));
+    expect(err.code).toBe('closed_period');
+    expect((await api.list(co, 'accounts')).some((a) => a.name === 'Old Savings')).toBe(false);
+  });
+
+  test('a new inventory part opens with its quantity and value: an inventory adjustment, on hand and average cost from the store', async () => {
+    const api = make();
+    const accounts = await api.list(co, 'accounts');
+    const asset = accounts.find((a) => a.role === 'InventoryAsset')!;
+    const equity = accounts.find((a) => a.role === 'OpeningBalanceEquity')!;
+    const assetBefore = (await api.balances(co)).find((b) => b.account_id === asset.id)?.debit_positive ?? 0;
+    const slab = { ...blankItem('Walnut Slab', 'Inventory'), asset_account_id: asset.id, expense_account_id: accounts.find((a) => a.role === 'CostOfGoodsSold')!.id };
+    const saved = await api.createRecord(co, 'items', slab, { opening_quantity: '12', opening_value: 30_000, as_of: '2026-10-01' });
+    expect(saved.quantity_on_hand).toBe('12');
+    expect(saved.average_cost).toBe('25');
+    expect((await api.getRecord(co, 'items', saved.id)).quantity_on_hand).toBe('12');
+    const adj = (await api.txns(co, { types: ['InventoryAdjustment'] })).find((t) => t.date === '2026-10-01')!;
+    expect(adj.memo).toBe('Opening Balance');
+    const full = await api.txn(co, adj.id);
+    expect(full.postings.find((p) => p.account_id === asset.id)).toMatchObject({ amount: 30_000, quantity: '12', item_id: saved.id });
+    expect(full.postings.find((p) => p.account_id === equity.id)?.amount).toBe(-30_000);
+    expect((await api.balances(co)).find((b) => b.account_id === asset.id)?.debit_positive).toBe(assetBefore + 30_000);
+    // Not an inventory part: refused on the field, and the item isn't kept.
+    const bad = await rejects(api.createRecord(co, 'items', blankItem('Design Hour', 'Service'), { opening_quantity: '1', opening_value: 100 }));
+    expect(bad.code).toBe('invalid');
+    expect((bad.detail as { field: string }).field).toBe('opening_quantity');
+    expect((await api.list(co, 'items')).some((i) => i.name === 'Design Hour')).toBe(false);
+  });
+
+  test('a sales tax code is one to three characters (422 invalid on the name)', async () => {
+    const api = make();
+    for (const name of ['', 'Taxx']) {
+      const err = await rejects(api.createRecord(co, 'sales-tax-codes', blankSalesTaxCode(name)));
+      expect(err.status).toBe(422);
+      expect(err.code).toBe('invalid');
+      expect((err.detail as { field: string }).field).toBe('name');
+    }
+    expect((await api.createRecord(co, 'sales-tax-codes', blankSalesTaxCode('Out'))).name).toBe('Out');
   });
 
   test('change events follow writes', async () => {
@@ -659,7 +723,10 @@ describe('companies', () => {
   test('a new company joins the session and the picker, with its own information', async () => {
     const api = make();
     expect((await rejects(api.createCompany(blankCompanyInfo('   ')))).code).toBe('invalid');
-    const { id } = await api.createCompany({ ...blankCompanyInfo('Second Shop'), fiscal_year_start_month: 7 });
+    const created = await api.createCompany({ ...blankCompanyInfo('  Second Shop '), fiscal_year_start_month: 7 });
+    // The answer is what `GET /companies` lists for it, so the picker can show it at once.
+    expect(created).toMatchObject({ name: 'Second Shop', role: 'admin' });
+    const { id } = created;
     expect(id).not.toBe(co);
     expect((await api.session()).companies.map((c) => c.name)).toEqual(['Juniper Hill Woodworks', 'Second Shop']);
     expect((await api.companies()).find((c) => c.id === id)?.role).toBe('admin');

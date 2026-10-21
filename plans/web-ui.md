@@ -382,13 +382,17 @@ register. Console handle: `__librebooks.simulateRemoteEdit(txnId)`,
   export: `Session`, `SaveOutcome`/`PreviewOutcome`/`RegisterResponse`,
   `AuditEntry`, the reconcile envelopes (`ReconcileOverview`, `StartReconcile`,
   `ReconciliationView`), the server-ops shapes (`ServerSettings`, `ServerView`,
-  `UpdateView`, `TunnelView`, backups), `MintedEnrolmentLink` (the generated
-  `MintedEnrolment` lacks `url`) and `UserDetail`. Everything lb-qbd exports
+  `UpdateView`, `TunnelView`, backups), `CompanySummary` (what `GET
+  /companies` and `POST /companies` answer and `Session` lists),
+  `ImportedCompany` and `UserDetail`. Everything lb-qbd exports
   (`ImportSettings`, `QbdTransport`, `BridgeSettings`, `QbwcSettings`,
   `SdkSettings`, `FileMode`), `NameBalance`, `StatementCharge` and
-  `RegisterLine.downloaded` are the generated ones since phase C, and the
+  `RegisterLine.downloaded` are the generated ones since phase C, the
   server's import envelopes (`ImportStatus`, `RunningJob`, `JobKind`,
-  `SyncBody`, `ParityBody`, `ParityStatus`) since its follow-up. The two
+  `SyncBody`, `ParityBody`, `ParityStatus`) since its follow-up, and
+  `MintedEnrolmentLink` and `PortableManifest` since the phase D follow-up
+  (the opening extras `AccountOpening`/`ItemOpening` are request shapes the
+  server reads as extra fields, so they stay local). The two
   request bodies are `#[serde(default)]` on the server, so the client's
   `qbdSync`/`qbdParityRun` take a `Partial<SyncBody>`/`Partial<ParityBody>`
   (`txn_limit` is `number | null`; dates and `started_at` are ISO strings).
@@ -449,13 +453,26 @@ register. Console handle: `__librebooks.simulateRemoteEdit(txnId)`,
   Select opens on Enter with `preventDefault`, so it keeps it too. Checkboxes,
   buttons and textareas are skipped.
 - The generated `Account` has no opening balance and `Item.quantity_on_hand`
-  is "maintained by the store": the account editor posts a journal entry for
-  the balance after the save (`afterSave`; a failure there leaves the account
-  saved and reopens its editor with the error), and the item editor sends the
-  on-hand quantity on create only, read-only afterwards.
-- `PortableManifest` (the `.lbk` manifest `POST /companies/import` returns in
-  `from`) is not generated; `api/types.ts` has a local stand-in, with
-  `CreatedCompany` and `ImportedCompany` around it.
+  is "maintained by the store". Since the server's phase D pass, `POST
+  /accounts` takes `opening_balance` + `as_of` and `POST /items` takes
+  `opening_quantity` + `opening_value` + `as_of`, posting the entry in the
+  same write: `ApiClient.createRecord` has an optional `opening`
+  (`OpeningFor<L>`: `AccountOpening` | `ItemOpening` in `api/types.ts`), the
+  HTTP client spreads it beside the record's fields, `useSaveRecord` takes
+  `{ record, opening }` and refreshes the balances when one rode along, and a
+  `RecordFormSpec` has an optional `opening(d)`. The record engine's two-step
+  `afterSave` is gone with its "saved without its balance" failure mode. The
+  item editor shows On hand, Total value and as of for a new inventory part
+  and the store's on-hand quantity (and average cost) read-only afterwards;
+  its saved toast says what the store now holds ("…saved; 12 on hand"). The
+  fixture posts the journal entry / an `InventoryAdjustment` (new case in
+  `fixtures/post.ts`: Item lines into the item's asset account, the header
+  account the other side, `quantity` on the posting) inside `createRecord`,
+  rolling the record back if the entry is refused (closed period…).
+- `POST /companies` answers `CompanySummary`: the picker seeds the session
+  query's company list from it before invalidating, so the shell knows the
+  name without waiting on the refetch. `POST /companies/import` answers no
+  role; the picker fills in `admin` (only a server admin can import).
 
 ## Progress log
 
@@ -548,11 +565,39 @@ left" items 2, 5, 6 and 8):
       a vendor editor at 375px).
 - [x] This document.
 
+Phase D follow-up (the server's phase D pass taken up; commits on
+`worktree-agent-a7de8ce120ad8b5d4`, 2026-10-20):
+
+- [x] `createRecord(co, list, record, opening?)` in the client, HTTP (the
+      extras spread beside the record) and fixture (the journal entry or an
+      `InventoryAdjustment` posted inside the create, rolled back if refused;
+      the item's on hand and average cost from it); `useSaveRecord` takes
+      `{ record, opening }`; `RecordFormSpec.opening(d)`; `afterSave` removed.
+- [x] Account editor sends `opening_balance` + `as_of` with the create (one
+      request); item editor sends `opening_quantity` + `opening_value` +
+      `as_of` for a new inventory part (On hand, Total value, as of) and the
+      saved toast shows the store's on-hand quantity.
+- [x] `POST /companies` → `CompanySummary`; the picker seeds the session's
+      company list from it, then invalidates. `PortableManifest` and
+      `MintedEnrolmentLink` are the generated types (stand-ins and
+      `CreatedCompany` deleted).
+- [x] Sales tax code: the fixture refuses a name outside 1–3 characters with
+      422 `invalid` on `name` (the editor's `recordServerErrors` puts it on
+      the field); the editor's own rule and hint say "one to three".
+- [x] Tests: fixture (opening balance posts and shows in balances with the
+      natural sign, today when undated, nothing for zero; a refused entry
+      leaves no account; inventory opening → adjustment, on hand, average
+      cost, asset balance, a non-inventory item refused; the tax code rule;
+      the company summary), HTTP (the body carries the extras; the summary).
+      Playwright: a bank account with an opening balance shows it in the
+      chart from one request; an inventory part saves with its quantity.
+- [x] This document.
+
 ## What's left (next phases)
 
 1. **Stand-ins without a generated twin** (see Findings) stay until the server
-   exports them; `MintedEnrolment` would need `url` to replace
-   `MintedEnrolmentLink`.
+   exports them (`Session`, `SaveOutcome`, the reconcile and server-ops
+   envelopes, `UserDetail`).
 2. **Lists, the rest**: sales reps and customer/vendor/job types have routes
    but no editor or list window (`RecordWindow` says so); inventory assemblies
    and fixed assets open in the item editor with their common fields only;
@@ -602,6 +647,11 @@ Still open:
   treats credits/unapplied payments as negative open items.
 - `POST /auth/enrollments` returns `{id, token, purpose, expires_at, url}`; the
   generated `MintedEnrolment` lacks `url`. The UI's `MintedEnrolmentLink` adds it.
+  Closed since (`c036536`): the server exports `MintedEnrolmentLink`; the UI
+  uses it (phase D follow-up).
+- `POST /companies/import` answers `{ id, name, from }` with no `role`; the
+  picker assumes `admin` for the importer. A `CompanySummary` plus `from`
+  would let it stop assuming.
 - `PATCH /auth/passkeys/:id` and the revoke routes are assumed to answer 204
   (the UI refetches rather than reading a body).
 - `PUT /import/qbd` and `POST …/qbwc/password` emit no change event (only
@@ -620,8 +670,10 @@ Found in phase D:
   on-hand quantity), `POST /companies` answers `{ id, name, role }`,
   `PortableManifest` is generated, a sales tax code is one to three characters
   server-side, and the parent rules (no cycles, subaccount type, jobs only
-  under customers) were already enforced. The UI can drop its own JE, its
-  manifest stand-in and the extra `/session` fetch. The notes as written:
+  under customers) were already enforced. Taken up in the phase D follow-up
+  (same day): the editors send the opening extras with the create, the
+  manifest and enrolment-link stand-ins are gone, the picker uses the
+  summary, and the fixture mirrors the tax code rule. The notes as written:
 - **An account's opening balance.** `Account` carries no balance; QBD's "Enter
   Opening Balance" is a journal entry against Opening Balance Equity, which
   the account editor posts itself after the save (`POST /txns`, a
@@ -677,8 +729,11 @@ Found in phase D:
 - Don't build a list editor as a modal inside its list window; it's a `record`
   window on `useRecordForm` (see Decisions), so unsaved edits survive window
   switches and the keys are the transaction forms'.
-- Don't give the opening-balance entry a number or compute the balance's sign
-  client-side beyond `isDebitNormal`: a bank balance debits the account, a
-  loan balance credits it, and Opening Balance Equity takes the other side.
+- Don't post an opening balance or opening quantity as a separate transaction
+  after the record saves; send `opening_balance`/`opening_quantity` +
+  `opening_value` with the create in the natural sign the user typed. The
+  server picks the debit side (a bank balance debits the account, a loan
+  balance credits it, Opening Balance Equity takes the other side); the
+  fixture mirrors that, nobody else computes it.
 - Don't press Escape in a Playwright test expecting the window to stay open
   unless a dropdown is open (then Esc is the dropdown's).

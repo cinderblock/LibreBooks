@@ -69,7 +69,6 @@ import type {
   CompanyId,
   CompanyInfo,
   CompanySummary,
-  CreatedCompany,
   DateRange,
   EnrolFinish,
   EnrolStart,
@@ -79,6 +78,7 @@ import type {
   ListName,
   ListQuery,
   ListRecords,
+  OpeningFor,
   LoginFinish,
   LoginStart,
   MemorizedDue,
@@ -207,7 +207,7 @@ export class HttpApiClient implements ApiClient {
     return this.request<CompanySummary[]>('GET', '/companies');
   }
   createCompany(info: CompanyInfo) {
-    return this.request<CreatedCompany>('POST', '/companies', { body: { info } });
+    return this.request<CompanySummary>('POST', '/companies', { body: { info } });
   }
   importCompany(file: File, name?: string | null) {
     // Multipart: the browser sets the content type (it carries the boundary).
@@ -245,8 +245,9 @@ export class HttpApiClient implements ApiClient {
   getRecord<L extends ListName>(co: CompanyId, list: L, id: string) {
     return this.request<ListRecords[L]>('GET', this.co(co, `/${list}/${encodeURIComponent(id)}`));
   }
-  createRecord<L extends ListName>(co: CompanyId, list: L, record: ListRecords[L]) {
-    return this.request<ListRecords[L]>('POST', this.co(co, `/${list}`), { body: record });
+  createRecord<L extends ListName>(co: CompanyId, list: L, record: ListRecords[L], opening?: OpeningFor<L> | null) {
+    // The opening extras are top-level fields beside the record's own (plans/api.md "Lists").
+    return this.request<ListRecords[L]>('POST', this.co(co, `/${list}`), { body: opening ? { ...record, ...opening } : record });
   }
   updateRecord<L extends ListName>(co: CompanyId, list: L, record: ListRecords[L]) {
     return this.request<ListRecords[L]>('PUT', this.co(co, `/${list}/${encodeURIComponent(record.id)}`), { body: record });

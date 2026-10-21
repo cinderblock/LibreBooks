@@ -12,6 +12,7 @@ import { clone } from '../json';
 import type {
   Account,
   AccountBalance,
+  AccountOpening,
   AddRequest,
   AmazonPreview,
   AttachmentQuery,
@@ -19,6 +20,7 @@ import type {
   AuditEntry,
   ImportSettings,
   Item,
+  ItemOpening,
   MergeRequest,
   NameBalance,
   NewEnrolment,
@@ -35,7 +37,6 @@ import type {
   CompanyId,
   CompanyInfo,
   CompanySummary,
-  CreatedCompany,
   DateRange,
   Entity,
   FeedConnection,
@@ -49,6 +50,7 @@ import type {
   ListRecords,
   Memorized,
   MemorizedDue,
+  OpeningFor,
   Posting,
   PreviewOutcome,
   ReconcileLine,
@@ -71,8 +73,10 @@ import type {
   TxnType,
   TxnWithPostings,
 } from '../types';
-import { accountTypeOrder, naturalBalance } from '~/lib/accountTypes';
+import { accountTypeOrder, isDebitNormal, naturalBalance } from '~/lib/accountTypes';
 import { addDays, addMonths, todayIso } from '~/lib/dates';
+import { div, isZero, parseDecimal, toApiString } from '~/lib/decimal';
+import { centsToDec } from '~/lib/money';
 import { hierarchicalCompare } from '~/lib/tree';
 import { reportToCsv } from '~/reports/rows';
 import { FixtureAdmin } from './admin';
@@ -346,14 +350,16 @@ export class FixtureApiClient implements ApiClient {
     return id;
   }
 
-  createCompany(info: CompanyInfo): Promise<CreatedCompany> {
+  createCompany(info: CompanyInfo): Promise<CompanySummary> {
     try {
       this.checkInfo(info);
     } catch (e) {
       return Promise.reject(e);
     }
-    const id = this.addCompany({ ...clone(info), name: info.name.trim() });
-    return this.delay(() => ({ id }));
+    const name = info.name.trim();
+    const id = this.addCompany({ ...clone(info), name });
+    // What `GET /companies` lists for it: the creator is its admin.
+    return this.delay(() => ({ id, name, role: 'admin' as const }));
   }
 
   /**
@@ -420,20 +426,83 @@ export class FixtureApiClient implements ApiClient {
       const dup = all.find((o) => o.id !== r.id && o.full_name.toLowerCase() === r.full_name!.toLowerCase());
       if (dup) throw new ApiError(409, 'duplicate', `"${r.full_name}" is already in use`, { kind: 'duplicate' });
     }
+    if (list === 'sales-tax-codes' && typeof r.name === 'string') {
+      // The server's rule: a code is one to three characters (Tax, Non, Out…).
+      const len = r.name.trim().length;
+      if (len < 1 || len > 3) throw new ApiError(422, 'invalid', 'A sales tax code is one to three characters', { field: 'name' });
+    }
     return r;
   }
 
-  createRecord<L extends ListName>(co: CompanyId, list: L, record: ListRecords[L]): Promise<ListRecords[L]> {
+  createRecord<L extends ListName>(co: CompanyId, list: L, record: ListRecords[L], opening?: OpeningFor<L> | null): Promise<ListRecords[L]> {
     this.checkCompany(co);
     try {
       const r = this.normalize(list, record);
       r.edit_seq = 1;
-      (this.lists[list] as ListRecords[L][]).push(r);
+      const rows = this.lists[list] as ListRecords[L][];
+      rows.push(r);
+      if (opening) {
+        // One write: the record lands with its opening entry or not at all.
+        try {
+          if (list === 'accounts') this.openAccount(r as Account, opening as AccountOpening);
+          else if (list === 'items') this.openItem(r as Item, opening as ItemOpening);
+        } catch (e) {
+          rows.splice(rows.indexOf(r), 1);
+          throw e;
+        }
+      }
       this.emit(kindOfList(list), r.id, 'created');
       return this.delay(() => r);
     } catch (e) {
       return Promise.reject(e);
     }
+  }
+
+  private openingBalanceEquity(field: string): Account {
+    const equity = this.lists.accounts.find((a) => a.role === 'OpeningBalanceEquity');
+    if (!equity) throw new ApiError(422, 'invalid', 'The company has no Opening Balance Equity account', { field });
+    return equity;
+  }
+
+  /**
+   * `POST /accounts` with `opening_balance`: QBD's "Enter Opening Balance", a
+   * journal entry against Opening Balance Equity dated `as_of` (default today).
+   */
+  private openAccount(account: Account, opening: AccountOpening) {
+    if (!opening.opening_balance) return;
+    if (!Number.isSafeInteger(opening.opening_balance)) throw new ApiError(400, 'invalid', 'Amounts must be whole cents', { field: 'opening_balance' });
+    const equity = this.openingBalanceEquity('opening_balance');
+    // Natural sign in, debit-positive out: a bank balance debits the account, a loan balance credits it.
+    const debit = isDebitNormal(account.account_type) ? opening.opening_balance : -opening.opening_balance;
+    const je = blankTxn('JournalEntry', opening.as_of ?? this.today);
+    je.memo = 'Opening Balance';
+    je.lines = [
+      { ...blankLine('Journal'), account_id: account.id, amount: debit, description: 'Opening Balance' },
+      { ...blankLine('Journal'), account_id: equity.id, amount: -debit, description: 'Opening Balance' },
+    ];
+    this.write(je);
+  }
+
+  /**
+   * `POST /items` with `opening_quantity` + `opening_value`: an inventory
+   * adjustment against Opening Balance Equity dated `as_of`; the item's on-hand
+   * quantity and average cost follow from it (the store maintains both).
+   */
+  private openItem(item: Item, opening: ItemOpening) {
+    if (item.item_type !== 'Inventory') throw new ApiError(422, 'invalid', 'Only an inventory part has a quantity on hand', { field: 'opening_quantity' });
+    const quantity = parseDecimal(opening.opening_quantity);
+    if (!quantity) throw new ApiError(422, 'invalid', 'The opening quantity is not a number', { field: 'opening_quantity' });
+    if (!Number.isSafeInteger(opening.opening_value)) throw new ApiError(400, 'invalid', 'Amounts must be whole cents', { field: 'opening_value' });
+    if (isZero(quantity) && !opening.opening_value) return;
+    const equity = this.openingBalanceEquity('opening_value');
+    const adj = blankTxn('InventoryAdjustment', opening.as_of ?? this.today);
+    adj.account_id = equity.id;
+    adj.memo = 'Opening Balance';
+    adj.lines = [{ ...blankLine('Item'), item_id: item.id, quantity_change: toApiString(quantity), amount: opening.opening_value, description: 'Opening Balance' }];
+    this.write(adj);
+    item.quantity_on_hand = toApiString(quantity);
+    const average = isZero(quantity) ? null : div(centsToDec(opening.opening_value), quantity, 5);
+    item.average_cost = average ? toApiString(average) : '0';
   }
 
   updateRecord<L extends ListName>(co: CompanyId, list: L, record: ListRecords[L]): Promise<ListRecords[L]> {
@@ -629,19 +698,24 @@ export class FixtureApiClient implements ApiClient {
   createTxn(co: CompanyId, txn: Txn): Promise<SaveOutcome> {
     this.checkCompany(co);
     try {
-      this.validate(txn);
-      this.checkClosed(txn.date);
-      if (this.txnStore.has(txn.id)) throw new ApiError(409, 'conflict', 'That transaction already exists', { expected: 0, actual: 1 });
-      const posted = this.post(txn);
-      const now = new Date().toISOString();
-      const saved: Txn = { ...clone(txn), amount: posted.total, edit_seq: 1, created_at: now, modified_at: now, created_by: 'fixture-user', modified_by: 'fixture-user' };
-      this.txnStore.set(saved.id, { txn: saved, postings: posted.postings, total: posted.total, seq: this.seq++ });
-      this.record('created', null, saved);
-      this.emit('txn', saved.id, 'created');
-      return this.delay(() => ({ txn: saved, postings: posted.postings, total: posted.total, sales_tax: posted.sales_tax, warnings: [] }));
+      return this.delay(this.write(txn));
     } catch (e) {
       return Promise.reject(e);
     }
+  }
+
+  /** The one way a new transaction enters the books: checked, posted, stored, audited, announced. */
+  private write(txn: Txn): () => SaveOutcome {
+    this.validate(txn);
+    this.checkClosed(txn.date);
+    if (this.txnStore.has(txn.id)) throw new ApiError(409, 'conflict', 'That transaction already exists', { expected: 0, actual: 1 });
+    const posted = this.post(txn);
+    const now = new Date().toISOString();
+    const saved: Txn = { ...clone(txn), amount: posted.total, edit_seq: 1, created_at: now, modified_at: now, created_by: 'fixture-user', modified_by: 'fixture-user' };
+    this.txnStore.set(saved.id, { txn: saved, postings: posted.postings, total: posted.total, seq: this.seq++ });
+    this.record('created', null, saved);
+    this.emit('txn', saved.id, 'created');
+    return () => ({ txn: saved, postings: posted.postings, total: posted.total, sales_tax: posted.sales_tax, warnings: [] });
   }
 
   updateTxn(co: CompanyId, txn: Txn): Promise<SaveOutcome> {

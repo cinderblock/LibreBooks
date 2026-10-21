@@ -200,6 +200,30 @@ function postInner(txn: Txn, books: PostingBooks): Posted {
       if (sum !== 0) fail({ code: 'Unbalanced', detail: sum });
       break;
     }
+    case 'InventoryAdjustment': {
+      // QBD's Adjust Quantity/Value on Hand: each Item line moves `quantity_change`
+      // of an inventory item and `amount` of value into its asset account; the
+      // header account (Opening Balance Equity for a new item's opening quantity,
+      // an expense for shrinkage) takes the other side. The value is given, not
+      // costed: the fixture keeps no cost layers.
+      const offset = accountOf(txn.account_id);
+      if (txn.lines.every((l) => l.kind === 'Text')) fail({ code: 'NoLines' });
+      let sum = 0;
+      for (const line of txn.lines) {
+        if (line.kind === 'Text') continue;
+        if (line.kind !== 'Item') fail({ code: 'LineKindNotAllowed', detail: line.kind });
+        if (!line.item_id) fail({ code: 'UnknownItem', detail: '00000000-0000-0000-0000-000000000000' });
+        const item = books.item(line.item_id) ?? fail({ code: 'UnknownItem', detail: line.item_id });
+        if (item.item_type !== 'Inventory' && item.item_type !== 'InventoryAssembly') fail({ code: 'UnsupportedItem', detail: `${item.full_name} is not an inventory item` });
+        const asset = accountOf(item.asset_account_id ?? role('InventoryAsset').id);
+        linePosting(line, asset, line.amount);
+        out[out.length - 1]!.quantity = line.quantity_change;
+        sum += line.amount;
+        total += Math.abs(line.amount);
+      }
+      header(offset, -sum);
+      break;
+    }
     case 'Invoice':
     case 'StatementCharge':
     case 'CreditMemo':

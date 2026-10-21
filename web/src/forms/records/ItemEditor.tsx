@@ -2,19 +2,27 @@
 // with the type: a service or part has a sale side (description, price, income
 // account, tax code) and, when it's two-sided, a purchase side (description,
 // cost, expense or COGS account, preferred vendor); an inventory part adds the
-// asset account and quantities; a discount or other charge can be a percent; a
-// group or sales tax group lists its members; a payment item says where the
-// money lands; a sales tax item names its rate and agency.
+// asset account and quantities (a new one opens with a quantity and value on
+// hand as of a date, which the server posts as an inventory adjustment in the
+// same write: `opening_quantity` + `opening_value` + `as_of` on `POST /items`);
+// a discount or other charge can be a percent; a group or sales tax group lists
+// its members; a payment item says where the money lands; a sales tax item
+// names its rate and agency.
 
 import { Checkbox, Group, SegmentedControl, Select, SimpleGrid, Stack, Text, Textarea, TextInput, Title } from '@mantine/core';
 import { useMemo, useRef } from 'react';
 import { blankItem } from '~/api/blank';
 import { useCompanyInfo, useItemIndex, useItems, useSalesTaxCodes } from '~/api/hooks';
-import type { Item, ItemComponent, ItemType } from '~/api/types';
+import type { Item, ItemComponent, ItemOpening, ItemType } from '~/api/types';
+import { DateField } from '~/inputs/DateField';
 import { LineGrid, withTrailingBlank, type GridColumn } from '~/inputs/LineGrid';
+import { MoneyField } from '~/inputs/MoneyField';
 import { AccountQuickFill, itemOptions, NameQuickFill } from '~/inputs/pickers';
 import { QuickFill } from '~/inputs/QuickFill';
 import { ACCOUNT_TYPES } from '~/lib/accountTypes';
+import { todayIso, type IsoDate } from '~/lib/dates';
+import { formatDecimal, isZero, parseDecimal } from '~/lib/decimal';
+import type { Cents } from '~/lib/money';
 import { ITEM_TYPE_LABEL } from '~/lib/txnTypes';
 import { paths } from '~/windows/paths';
 import { gridErrors, noErrors, putGridError, type FormErrors } from '../model';
@@ -34,6 +42,12 @@ export interface ItemDraft {
   rows: ComponentRow[];
   /** Payment items: deposit to an account (true) or group with other undeposited funds (false). */
   depositTo: boolean;
+  /**
+   * A new inventory part's value on hand (with `item.quantity_on_hand` as the
+   * quantity) as of a date: sent with the create as the opening adjustment.
+   */
+  openingValue: Cents | null;
+  openingDate: IsoDate;
 }
 
 /** The types the editor offers for a new item (assemblies and fixed assets wait for their features). */
@@ -87,6 +101,10 @@ export function validateItem(d: ItemDraft): FormErrors {
   if (sides.sale && !it.income_account_id) e.header.income_account_id = twoSided ? 'Choose the income account.' : 'Choose an account.';
   if (twoSided && !it.expense_account_id) e.header.expense_account_id = t === 'Inventory' ? 'Choose the COGS account.' : 'Choose the expense account.';
   if (t === 'Inventory' && !it.asset_account_id) e.header.asset_account_id = 'Choose the inventory asset account.';
+  if (t === 'Inventory' && itemOpening(d)) {
+    if (!d.openingDate) e.header.openingDate = 'Enter the date the quantity is as of.';
+    if (d.openingValue && !openingQuantity(d)) e.header.quantity_on_hand = 'Enter the quantity the value is for.';
+  }
   if (t === 'Discount' && !it.income_account_id) e.header.income_account_id = 'Choose the account the discount posts to.';
   if (t === 'Payment' && d.depositTo && !it.deposit_account_id) e.header.deposit_account_id = 'Choose the account to deposit to.';
   if (t === 'SalesTax') {
@@ -128,9 +146,35 @@ export function itemToRecord(d: ItemDraft): Item {
   };
 }
 
+/** The on-hand quantity typed for a new inventory part, when it is a non-zero number. */
+function openingQuantity(d: ItemDraft): string | null {
+  const q = parseDecimal(d.item.quantity_on_hand);
+  return q && !isZero(q) ? (decimalOrNull(d.item.quantity_on_hand) ?? null) : null;
+}
+
+/**
+ * What rides with `POST /items` for a new inventory part: QBD's New Item takes
+ * an on-hand quantity and total value as of a date and posts an inventory
+ * adjustment against Opening Balance Equity; the server does the same in the
+ * item's own write. Nothing when both are blank or zero.
+ */
+export function itemOpening(d: ItemDraft): ItemOpening | null {
+  if (d.item.item_type !== 'Inventory') return null;
+  const quantity = openingQuantity(d);
+  if (!quantity && !d.openingValue) return null;
+  return { opening_quantity: quantity ?? '0', opening_value: d.openingValue ?? 0, as_of: d.openingDate };
+}
+
 function draftFromItem(item: Item): ItemDraft {
   const rows = item.components.map<ComponentRow>((c) => ({ key: crypto.randomUUID(), item_id: c.item_id, quantity: c.quantity }));
-  return { item, rows: withTrailingBlank(rows, isBlankComponent, blankComponentRow), depositTo: item.deposit_account_id !== null };
+  return { item, rows: withTrailingBlank(rows, isBlankComponent, blankComponentRow), depositTo: item.deposit_account_id !== null, openingValue: null, openingDate: todayIso() };
+}
+
+/** The toast after a save; an inventory part says what the books now hold (the store's answer, not what was typed). */
+function itemSavedMessage(r: Item): string {
+  if (r.item_type !== 'Inventory') return `Item "${r.full_name}" saved.`;
+  const q = parseDecimal(r.quantity_on_hand);
+  return `Item "${r.full_name}" saved; ${q ? formatDecimal(q) : r.quantity_on_hand} on hand.`;
 }
 
 const spec: RecordFormSpec<'items', ItemDraft> = {
@@ -139,15 +183,16 @@ const spec: RecordFormSpec<'items', ItemDraft> = {
   newDraft: (params) => draftFromItem(blankItem('', isItemType(params.type) ? params.type : 'Service')),
   fromRecord: draftFromItem,
   toRecord: itemToRecord,
+  opening: itemOpening,
   validate: validateItem,
-  isEmpty: (d) => !d.item.name.trim() && !d.item.sales_description && !d.item.purchase_description && !d.item.income_account_id && !d.item.expense_account_id && d.rows.every(isBlankComponent),
-  fingerprint: (d) => JSON.stringify(itemToRecord(d)),
+  isEmpty: (d) => !d.item.name.trim() && !d.item.sales_description && !d.item.purchase_description && !d.item.income_account_id && !d.item.expense_account_id && d.openingValue === null && d.rows.every(isBlankComponent),
+  fingerprint: (d) => JSON.stringify([itemToRecord(d), d.openingValue, d.openingDate]),
   serverErrors: (_d, err) => recordServerErrors(err, { parent_id: 'parent', item_type: 'type' }),
   // Save & New keeps the type (QBD's dialog does).
   nextDraft: (d) => draftFromItem(blankItem('', d.item.item_type)),
   newPath: (d) => paths.newRecord('items', { type: d.item.item_type }),
   title: (_d, saved) => (saved ? `Edit Item: ${saved.full_name}` : 'New Item'),
-  savedMessage: (r) => `Item "${r.full_name}" saved.`,
+  savedMessage: itemSavedMessage,
   attachmentKind: 'item',
 };
 
@@ -282,12 +327,25 @@ export function ItemEditor({ saved, params }: { saved: Item | null; params: Reco
               <Text fw={600} size="sm">
                 Inventory information
               </Text>
-              <SimpleGrid cols={{ base: 1, sm: 4 }}>
+              <SimpleGrid cols={{ base: 1, sm: 2 }}>
                 <AccountQuickFill label="Asset account" types={ASSET_TYPES} value={it.asset_account_id} onChange={(asset_account_id) => setItem({ asset_account_id })} error={errors.header.asset_account_id} aria-label="Asset account" />
                 {rate('reorder_point', 'Reorder point')}
-                {rate('quantity_on_hand', saved ? 'On hand (from transactions)' : 'On hand', !!saved)}
-                <TextInput label="Average cost" value={it.average_cost} disabled aria-label="Average cost" />
               </SimpleGrid>
+              {saved ? (
+                <SimpleGrid cols={{ base: 1, sm: 2 }}>
+                  {rate('quantity_on_hand', 'On hand (from transactions)', true)}
+                  <TextInput label="Average cost" value={it.average_cost} disabled aria-label="Average cost" />
+                </SimpleGrid>
+              ) : (
+                <div className={mobile ? undefined : classes.headerGrid} style={mobile ? undefined : { gridTemplateColumns: '140px 180px 180px 1fr' }}>
+                  {rate('quantity_on_hand', 'On hand')}
+                  <MoneyField label="Total value" value={draft.openingValue} onChange={(openingValue) => update({ openingValue })} blankZero aria-label="Total value" />
+                  <DateField label="as of" value={draft.openingDate} onChange={(d) => d && update({ openingDate: d })} error={errors.header.openingDate} aria-label="On hand as of" />
+                  <Text size="xs" c="dimmed" style={{ alignSelf: 'end' }}>
+                    Saved with the item as an inventory adjustment against Opening Balance Equity. Leave blank to receive stock as transactions.
+                  </Text>
+                </div>
+              )}
             </Stack>
           )}
         </Stack>

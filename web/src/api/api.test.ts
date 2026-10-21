@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { QueryClient } from '@tanstack/react-query';
-import { blankCompanyInfo, blankLine, blankTxn } from './blank';
+import { blankAccount, blankCompanyInfo, blankLine, blankTxn } from './blank';
 import { txnQueryParams } from './client';
 import { ApiError, apiErrorFromBody, errorTargets } from './errors';
 import { type FetchFn, HttpApiClient } from './http';
@@ -95,11 +95,12 @@ describe('HttpApiClient', () => {
     const fake = (async (url: string, init: RequestInit) => {
       calls.push({ url, init });
       if (url.endsWith('/companies/import')) return new Response('{"id":"co2","name":"Riverside","from":{"kind":"librebooks-company","format":1,"app_version":"0.4.1","company_name":"Riverside Cafe","schema_version":3,"created_at":"2026-10-20T00:00:00Z","database_size":5,"database_sha256":"00"}}', { status: 201 });
-      return new Response('{"id":"co1"}', { status: 200 });
+      return new Response('{"id":"co1","name":"Second Shop","role":"admin"}', { status: 200 });
     }) as unknown as FetchFn;
     const api = new HttpApiClient({ fetch: fake });
     const created = await api.createCompany(blankCompanyInfo('Second Shop'));
-    expect(created.id).toBe('co1');
+    // What `GET /companies` would list for it; the picker needn't refetch the session to show it.
+    expect(created).toEqual({ id: 'co1', name: 'Second Shop', role: 'admin' });
     const [post] = calls;
     expect(post!.url).toBe('/api/v1/companies');
     expect(post!.init.method).toBe('POST');
@@ -115,6 +116,22 @@ describe('HttpApiClient', () => {
     // Multipart: the browser sets the content type with its boundary.
     expect((upload.init.headers as Record<string, string>)['Content-Type']).toBeUndefined();
     expect((upload.init.headers as Record<string, string>)['X-LibreBooks']).toBe('1');
+  });
+
+  test('a new account posts its opening balance in the same request, beside the record', async () => {
+    const calls: Array<{ url: string; init: RequestInit }> = [];
+    const fake = (async (url: string, init: RequestInit) => {
+      calls.push({ url, init });
+      return new Response(JSON.stringify({ ...JSON.parse(init.body as string), edit_seq: 1 }), { status: 201 });
+    }) as unknown as FetchFn;
+    const api = new HttpApiClient({ fetch: fake });
+    const savings = blankAccount('Savings', 'Bank');
+    await api.createRecord('co1', 'accounts', savings, { opening_balance: 150_000, as_of: '2026-10-01' });
+    expect(calls[0]!.url).toBe('/api/v1/c/co1/accounts');
+    expect(JSON.parse(calls[0]!.init.body as string)).toMatchObject({ id: savings.id, name: 'Savings', opening_balance: 150_000, as_of: '2026-10-01' });
+    // Without an opening: the record alone.
+    await api.createRecord('co1', 'accounts', savings);
+    expect(JSON.parse(calls[1]!.init.body as string)).not.toHaveProperty('opening_balance');
   });
 
   test('turns error envelopes into ApiError', async () => {

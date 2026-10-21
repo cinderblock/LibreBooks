@@ -19,6 +19,7 @@ import type {
   ListName,
   ListQuery,
   ListRecords,
+  OpeningFor,
   NameBalance,
   ParityStatus,
   ReconciliationView,
@@ -535,15 +536,23 @@ export function useVoidTxn() {
   });
 }
 
+/** What `useSaveRecord` saves: a new record (`edit_seq` 0) may carry its opening entry (an account's balance, an inventory item's on hand). */
+export interface SaveRecordVars<L extends ListName> {
+  record: ListRecords[L];
+  opening?: OpeningFor<L> | null;
+}
+
 export function useSaveRecord<L extends ListName>(list: L) {
   const api = useApi();
   const co = useCompanyId();
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (rec: ListRecords[L]) => (rec.edit_seq === 0 ? api.createRecord(co, list, rec) : api.updateRecord(co, list, rec)),
-    onSuccess: (saved) => {
+    mutationFn: ({ record, opening }: SaveRecordVars<L>) => (record.edit_seq === 0 ? api.createRecord(co, list, record, opening) : api.updateRecord(co, list, record)),
+    onSuccess: (saved, { opening }) => {
       qc.setQueryData(qk.record(co, list, saved.id), saved);
       void qc.invalidateQueries({ queryKey: qk.listAll(co, list) });
+      // The opening entry is a transaction: balances, registers and reports moved with it.
+      if (opening) invalidateTxnDerived(qc, co);
     },
   });
 }

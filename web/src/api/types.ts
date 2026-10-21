@@ -13,10 +13,10 @@ import type { CompanyAccess } from './generated/CompanyAccess';
 import type { CsvDetection } from './generated/CsvDetection';
 import type { CsvMapping } from './generated/CsvMapping';
 import type { DeviceKeyInfo } from './generated/DeviceKeyInfo';
-import type { EnrolmentPurpose } from './generated/EnrolmentPurpose';
 import type { FeedFilter } from './generated/FeedFilter';
 import type { FileKind } from './generated/FileKind';
 import type { PasskeyInfo } from './generated/PasskeyInfo';
+import type { PortableManifest } from './generated/PortableManifest';
 import type { Statement } from './generated/Statement';
 import type { StatementAccount } from './generated/StatementAccount';
 import type { StatementCharge } from './generated/StatementCharge';
@@ -69,6 +69,10 @@ export type { DeviceKeyInfo } from './generated/DeviceKeyInfo';
 export type { EnrolmentInfo } from './generated/EnrolmentInfo';
 export type { EnrolmentPurpose } from './generated/EnrolmentPurpose';
 export type { NewEnrolment } from './generated/NewEnrolment';
+/** `POST /auth/enrollments`: the minted token plus the link to share (shown once, never stored). */
+export type { MintedEnrolmentLink } from './generated/MintedEnrolmentLink';
+/** `manifest.json` inside a `.lbk`, and `from` on `POST /companies/import`. */
+export type { PortableManifest } from './generated/PortableManifest';
 export type { Application } from './generated/Application';
 export type { AttachmentMeta } from './generated/AttachmentMeta';
 export type { Class } from './generated/Class';
@@ -233,23 +237,6 @@ export interface Session {
   sign_in?: boolean;
 }
 
-/** `POST /companies` → the new company's id. */
-export interface CreatedCompany {
-  id: CompanyId;
-}
-
-/** `manifest.json` inside a `.lbk` (lb-backup's `PortableManifest`; not generated). */
-export interface PortableManifest {
-  kind: string;
-  format: number;
-  app_version: string;
-  company_name: string;
-  schema_version: number;
-  created_at: string;
-  database_size: number;
-  database_sha256: string;
-}
-
 /** `POST /companies/import` → 201: a NEW company made from the file; nothing existing is replaced. */
 export interface ImportedCompany {
   id: CompanyId;
@@ -264,15 +251,6 @@ export interface ChangeEvent {
   id: string;
   /** `created`, `updated`, `deleted`, `voided`, … */
   action: string;
-}
-
-/** `POST /auth/enrollments`: the minted token plus the link to share. */
-export interface MintedEnrolmentLink {
-  id: string;
-  token: string;
-  purpose: EnrolmentPurpose;
-  expires_at: string;
-  url: string;
 }
 
 /** `GET /users/:id`: the user with their company access, passkeys and devices. */
@@ -542,6 +520,32 @@ export interface ListRecords {
 
 export type ListName = keyof ListRecords;
 export type ListRecord = ListRecords[ListName];
+
+/**
+ * What `POST /accounts` takes beside the record: the opening balance (natural
+ * sign: a bank balance is positive, so is a loan's) the server posts as a
+ * journal entry against Opening Balance Equity in the same write. `as_of`
+ * defaults to today.
+ */
+export interface AccountOpening {
+  opening_balance: Money;
+  as_of?: string;
+}
+
+/**
+ * What `POST /items` takes beside an inventory item: the quantity on hand and
+ * its total value as of a date, an inventory adjustment against Opening
+ * Balance Equity in the same write. The returned item carries the resulting
+ * on-hand quantity and average cost.
+ */
+export interface ItemOpening {
+  opening_quantity: string;
+  opening_value: Money;
+  as_of?: string;
+}
+
+/** The opening extras a list's `POST` accepts (none for the other lists). */
+export type OpeningFor<L extends ListName> = L extends 'accounts' ? AccountOpening : L extends 'items' ? ItemOpening : never;
 
 export interface ListQuery {
   include_inactive?: boolean;

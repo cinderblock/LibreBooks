@@ -613,6 +613,54 @@ test('an item is created and edited from the Item List; a bad field is refused i
   await expect(list.getByText('Cherry lumber, per board foot')).toBeVisible();
 });
 
+test('a new bank account opens with its balance in one request; a new inventory part opens with its quantity', async ({ page }) => {
+  await start(page, `${CO}/accounts`);
+  const chart = page.getByTestId('chart-of-accounts');
+  await expect(chart).toBeVisible();
+  const openingEntries = () =>
+    page.evaluate(async () => {
+      const lb = (window as unknown as { __librebooks: { txns(co: string, q: object): Promise<Array<{ memo: string | null }>> } }).__librebooks;
+      return (await lb.txns('00000000-0000-4000-8000-00000000c0de', { types: ['JournalEntry'] })).filter((t) => t.memo === 'Opening Balance').length;
+    });
+  const before = await openingEntries();
+  await page.keyboard.press('Alt+Shift+N'); // browser keymap: New
+  const editor = page.getByTestId('record-account');
+  await expect(editor).toBeVisible();
+  await editor.getByRole('combobox', { name: 'Account type' }).click();
+  await page.getByRole('option', { name: 'Bank', exact: true }).click();
+  await editor.getByRole('textbox', { name: 'Account name' }).fill('Money Market');
+  await editor.getByRole('textbox', { name: 'Opening balance', exact: true }).fill('1500'); // not its "as of" date
+  await editor.getByRole('button', { name: /Save & Close/ }).click();
+  await expect(page.getByText('Account "Money Market" saved.')).toBeVisible();
+  // The balance is there as soon as the account is: the server posted the entry in the same write.
+  await expect(chart.getByRole('row').filter({ hasText: 'Money Market' })).toContainText('1,500.00');
+  expect(await openingEntries()).toBe(before + 1);
+  // An inventory part: On hand, Total value and as of ride with the create; the toast says what the store now holds.
+  await page.getByRole('menubar').getByText('Lists', { exact: true }).click();
+  await page.getByRole('menuitem', { name: 'Item List' }).click();
+  await expect(page.getByTestId('item-list')).toBeVisible();
+  await page.keyboard.press('Alt+Shift+N');
+  const item = page.getByTestId('record-item');
+  await expect(item).toBeVisible();
+  await item.getByRole('combobox', { name: 'Item type' }).click();
+  await page.getByRole('option', { name: 'Inventory Part', exact: true }).click(); // not "Non-inventory Part"
+  await item.getByRole('textbox', { name: 'Item name' }).fill('Walnut Slab');
+  const pick = async (name: string, typed: string, expected: string) => {
+    const field = item.getByRole('combobox', { name });
+    await field.click();
+    await field.pressSequentially(typed);
+    await page.keyboard.press('Tab');
+    await expect(field).toHaveValue(expected);
+  };
+  await pick('COGS account', 'Cost of Goods Sold', 'Cost of Goods Sold');
+  await pick('Income account', 'Design', 'Design Services');
+  await pick('Asset account', 'Inventory', 'Inventory Asset');
+  await item.getByRole('textbox', { name: 'On hand', exact: true }).fill('12');
+  await item.getByRole('textbox', { name: 'Total value' }).fill('300');
+  await item.getByRole('button', { name: /Save & Close/ }).click();
+  await expect(page.getByText('Item "Walnut Slab" saved; 12 on hand.')).toBeVisible();
+});
+
 test('deleting an account in use is refused with the reason; terms are edited in their window', async ({ page }) => {
   await start(page, `${CO}/accounts`);
   const chart = page.getByTestId('chart-of-accounts');
