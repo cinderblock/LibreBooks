@@ -35,9 +35,18 @@ export function KeyboardProvider({ children }: { children: ReactNode }) {
     // Bubble phase on window: components that handle a key themselves (a date
     // field's `+`, an open QuickFill list's Esc) call preventDefault first and
     // the registry leaves the event alone.
+    // Esc in an open combobox (a Select's or MultiSelect's dropdown) closes the
+    // dropdown, not the window. React has already closed it (and re-rendered)
+    // by the time the bubble listener runs, so the open state is read first,
+    // in the capture phase.
+    let escapeForDropdown = false;
+    const onKeyDownCapture = (e: KeyboardEvent) => {
+      escapeForDropdown = e.key === 'Escape' && e.target instanceof Element && e.target.getAttribute('aria-expanded') === 'true';
+    };
     const onKeyDown = (e: KeyboardEvent) => {
       // A held Esc shouldn't close window after window.
       if (e.defaultPrevented || e.isComposing || (e.repeat && e.key === 'Escape')) return;
+      if (e.key === 'Escape' && escapeForDropdown) return;
       if (modalOpen()) return;
       const cmd = registry.dispatch(e, { inField: isEditableTarget(e.target) });
       if (cmd) {
@@ -45,8 +54,12 @@ export function KeyboardProvider({ children }: { children: ReactNode }) {
         e.stopPropagation();
       }
     };
+    window.addEventListener('keydown', onKeyDownCapture, true);
     window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
+    return () => {
+      window.removeEventListener('keydown', onKeyDownCapture, true);
+      window.removeEventListener('keydown', onKeyDown);
+    };
   }, [registry]);
 
   const setPlatform = useCallback((p: Platform) => {
