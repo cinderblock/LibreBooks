@@ -2,7 +2,7 @@
 // the desktop app's local session and fixture mode have nothing to sign out of).
 
 import { Avatar, Menu, Text, UnstyledButton } from '@mantine/core';
-import { IconLogout, IconUserCircle } from '@tabler/icons-react';
+import { IconBuildingStore, IconLogout, IconUserCircle } from '@tabler/icons-react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router';
 import { useApi } from '~/api/context';
@@ -37,6 +37,7 @@ export function UserMenu() {
   const { data } = useSession();
   const signOut = useSignOut();
   const open = useOpenWindow();
+  const navigate = useNavigate();
   if (!data) return null;
   const { user } = data;
   return (
@@ -60,6 +61,10 @@ export function UserMenu() {
         </Menu.Label>
         <Menu.Item leftSection={<IconUserCircle size={14} />} onClick={() => open(paths.account())}>
           My Account
+        </Menu.Item>
+        {/* The company list, where admins also start a new company or open a .lbk file. */}
+        <Menu.Item leftSection={<IconBuildingStore size={14} />} onClick={() => void navigate('/companies')}>
+          Open another company
         </Menu.Item>
         {signOut && (
           <Menu.Item leftSection={<IconLogout size={14} />} onClick={signOut}>

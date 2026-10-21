@@ -639,6 +639,38 @@ test('deleting an account in use is refused with the reason; terms are edited in
   await expect(terms.getByText('Due on the 1st')).toBeVisible();
 });
 
+test('the company picker: a new company from its information, and a .lbk file, each opens as a new company', async ({ page }) => {
+  // `/companies` shows the list even when the one company would open by itself.
+  await page.goto('/companies?fixtures=1&latency=0&keymap=browser');
+  const picker = page.getByTestId('company-picker');
+  await expect(picker.getByRole('button', { name: 'Juniper Hill Woodworks' })).toBeVisible();
+  await picker.getByRole('button', { name: 'New company…' }).click();
+  const dialog = page.getByRole('dialog', { name: 'New company' });
+  await expect(dialog.getByRole('button', { name: 'Create company' })).toBeDisabled();
+  await dialog.getByRole('textbox', { name: 'Company name' }).fill('Second Shop');
+  await dialog.getByRole('combobox', { name: 'Fiscal year starts' }).click();
+  await page.getByRole('option', { name: 'July' }).click();
+  await dialog.getByRole('button', { name: 'Create company' }).click();
+  await expect(page).toHaveURL(/\/c\/[0-9a-f-]+\/home/);
+  await expect(page).toHaveTitle(/Second Shop/);
+  await expect(page.getByText('"Second Shop" is ready.')).toBeVisible();
+  // Company → Company Information shows what was entered.
+  await page.getByRole('menubar').getByText('Company', { exact: true }).click();
+  await page.getByRole('menuitem', { name: 'Company Information' }).click();
+  await expect(page.getByTestId('company').getByText('July')).toBeVisible();
+  // The user menu leads back to the list, which now has both; a .lbk file opens as a third.
+  await page.getByRole('button', { name: 'Signed in as Demo User' }).click();
+  await page.getByRole('menuitem', { name: 'Open another company' }).click();
+  await expect(picker.getByRole('button', { name: 'Second Shop' })).toBeVisible();
+  await picker.getByRole('button', { name: 'Open a .lbk file…' }).click();
+  const open = page.getByRole('dialog', { name: 'Open a company file' });
+  await expect(open.getByRole('button', { name: 'Open as a new company' })).toBeDisabled();
+  await open.locator('input[type=file]').setInputFiles({ name: 'riverside-cafe.lbk', mimeType: 'application/zip', buffer: Buffer.from('not really a zip, which the fixture accepts') });
+  await open.getByRole('button', { name: 'Open as a new company' }).click();
+  await expect(page).toHaveTitle(/riverside-cafe/);
+  await expect(page.getByText(/"riverside-cafe" is a new company/)).toBeVisible();
+});
+
 test('QuickBooks import: a sync runs with progress and lands a report; parity compares balances', async ({ page }) => {
   await start(page, `${CO}/import/qbd`);
   const win = page.getByTestId('qbd-import');
