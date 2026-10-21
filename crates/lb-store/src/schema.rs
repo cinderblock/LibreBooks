@@ -270,4 +270,36 @@ CREATE TABLE feed_rule (
     r"
 ALTER TABLE posting ADD COLUMN downloaded INTEGER NOT NULL DEFAULT 0;
 ",
+    // 4: order fulfilment. Lines entered against another transaction's lines
+    // (a receipt's against a purchase order's, an invoice's against a sales
+    // order's or an estimate's, a bill's against a receipt's), kept beside the
+    // JSON so an order's status is one indexed query. Deposit lines keep their
+    // own table. Backfilled from the docs; an order's open balance starts at
+    // its amount and `orders::refresh_all` makes it exact on first open.
+    r"
+CREATE TABLE txn_link (
+    txn_id          TEXT NOT NULL REFERENCES txn(id) ON DELETE CASCADE,
+    line_id         TEXT NOT NULL,
+    target_txn_id   TEXT NOT NULL REFERENCES txn(id),
+    target_line_id  TEXT,
+    PRIMARY KEY (txn_id, line_id)
+) STRICT;
+CREATE INDEX txn_link_target ON txn_link(target_txn_id);
+
+INSERT OR IGNORE INTO txn_link (txn_id, line_id, target_txn_id, target_line_id)
+SELECT t.id, json_extract(l.value, '$.id'), json_extract(l.value, '$.linked_txn_id'),
+       json_extract(l.value, '$.linked_line_id')
+FROM txn t, json_each(t.doc, '$.lines') l
+WHERE t.txn_type IN ('ItemReceipt', 'Bill', 'Check', 'CreditCardCharge', 'Invoice', 'SalesReceipt')
+  AND t.is_void = 0
+  AND json_extract(l.value, '$.linked_txn_id') IS NOT NULL
+  AND EXISTS (SELECT 1 FROM txn o WHERE o.id = json_extract(l.value, '$.linked_txn_id'));
+
+UPDATE txn SET open_balance = amount
+WHERE txn_type IN ('PurchaseOrder', 'SalesOrder', 'Estimate') AND is_void = 0;
+",
 ];
+
+/// The schema version that added order fulfilment (`txn_link`, open balances
+/// on orders). Files from before it get their orders recomputed on open.
+pub const ORDER_FULFILMENT_VERSION: i64 = 4;

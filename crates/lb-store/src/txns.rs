@@ -6,10 +6,11 @@
 //! 2. fills in what QBD fills in (due date from terms, the default A/R or A/P);
 //! 3. runs the posting rules, creating role accounts (Undeposited Funds, Sales Tax
 //!    Payable…) the first time a company needs them;
-//! 4. replaces the transaction's postings, applications and deposit links, keeping
-//!    the cleared status of postings that did not change;
+//! 4. replaces the transaction's postings, applications, deposit links and line
+//!    links (to the orders it fulfils), keeping the cleared status of postings
+//!    that did not change;
 //! 5. recomputes the open balance of this transaction and every transaction it pays
-//!    or used to pay;
+//!    or used to pay, fulfils or used to fulfil;
 //! 6. writes the audit record.
 
 use std::collections::{BTreeSet, HashMap};
@@ -24,7 +25,7 @@ use ts_rs::TS;
 
 use crate::codec::{self, SqlDate, doc};
 use crate::context::StoreContext;
-use crate::{Result, StoreError, Writer, accounts, audit, company, entities};
+use crate::{Result, StoreError, Writer, accounts, audit, company, entities, orders};
 
 /// What saving produced, for the caller to show.
 #[derive(Clone, Debug, Serialize)]
@@ -142,6 +143,7 @@ fn save_inner(w: &mut Writer<'_>, mut txn: Txn, recost_after: bool) -> Result<Sa
     let mut warnings = Vec::new();
     fill_defaults(w, &mut txn, &mut warnings)?;
     check_applications(&w.tx, &txn)?;
+    orders::check_links(&w.tx, &txn, existing.as_ref())?;
 
     // A voided transaction pays nothing.
     if txn.is_void {
@@ -315,8 +317,10 @@ fn save_inner(w: &mut Writer<'_>, mut txn: Txn, recost_after: bool) -> Result<Sa
             }
         }
     }
+    orders::write_links(&w.tx, &txn)?;
 
-    // Open balances: this transaction, and everything it pays now or paid before.
+    // Open balances: this transaction, and everything it pays or fulfils now or
+    // did before.
     let mut affected = touched_txns(&txn);
     affected.extend(old_targets);
     affected.insert(txn.id);
@@ -392,7 +396,8 @@ pub fn void(w: &mut Writer<'_>, id: TxnId, edit_seq: i64) -> Result<SaveOutcome>
 }
 
 /// Delete a transaction outright (QBD's Ctrl+D). Refused while something depends
-/// on it (a payment applied to it, a deposit holding it).
+/// on it (a payment applied to it, a deposit holding it, a receipt or invoice
+/// entered against it).
 pub fn delete(w: &mut Writer<'_>, id: TxnId, edit_seq: i64) -> Result<()> {
     let txn = get(&w.tx, id)?;
     if txn.edit_seq != edit_seq {
@@ -407,13 +412,14 @@ pub fn delete(w: &mut Writer<'_>, id: TxnId, edit_seq: i64) -> Result<()> {
     let sid = id.to_string();
     let depended_on: bool = w.tx.query_row(
         "SELECT EXISTS (SELECT 1 FROM application WHERE target_txn_id = ?1 OR credit_txn_id = ?1)
-             OR EXISTS (SELECT 1 FROM deposit_link WHERE payment_txn_id = ?1)",
+             OR EXISTS (SELECT 1 FROM deposit_link WHERE payment_txn_id = ?1)
+             OR EXISTS (SELECT 1 FROM txn_link WHERE target_txn_id = ?1)",
         [&sid],
         |r| r.get(0),
     )?;
     if depended_on {
         return Err(StoreError::Invalid(
-            "other transactions pay, use or deposit this one; remove them from it first".into(),
+            "other transactions pay, use, deposit or were entered against this one; remove them from it first".into(),
         ));
     }
     let targets = touched_txns(&txn);
@@ -435,9 +441,10 @@ pub fn delete(w: &mut Writer<'_>, id: TxnId, edit_seq: i64) -> Result<()> {
     Ok(())
 }
 
-/// Every transaction this one pays or uses as a credit.
+/// Every transaction whose open balance depends on this one: what it pays or
+/// uses as a credit, and the orders (or receipt) its lines are entered against.
 fn touched_txns(txn: &Txn) -> BTreeSet<TxnId> {
-    let mut s = BTreeSet::new();
+    let mut s = orders::linked_targets(txn);
     for a in &txn.applications {
         s.insert(a.target_txn_id);
         if let Some(c) = a.credit_txn_id {
@@ -674,7 +681,8 @@ fn check_applications(c: &Connection, txn: &Txn) -> Result<()> {
 }
 
 /// Recompute what is still open on `id` (owed on an invoice or bill, unused on a
-/// credit or an overpayment). Types that are never open get NULL.
+/// credit or an overpayment, still to be received or invoiced on an order).
+/// Types that are never open get NULL.
 pub fn refresh_open_balance(c: &Connection, id: TxnId) -> Result<()> {
     let Some(txn) = find(c, id)? else {
         return Ok(());
@@ -711,6 +719,9 @@ pub fn refresh_open_balance(c: &Connection, id: TxnId) -> Result<()> {
                     sum("SELECT SUM(credit_amount) FROM application WHERE credit_txn_id = ?1")?;
                 Some(txn.amount.minor() - applied - used)
             }
+            // An order stays open for what hasn't been received or invoiced
+            // against it; closing it by hand (or every line) zeroes that.
+            t if t.is_order() => Some(orders::remaining(c, &txn)?.minor()),
             // A journal entry, check, card charge or deposit with a line in A/R
             // or A/P is an open item, as in QBD: owed (a debit to A/R, a credit
             // to A/P) or, when negative, a credit (a refund check, a prepayment).
