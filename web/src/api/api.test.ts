@@ -6,6 +6,7 @@ import { ApiError, apiErrorFromBody, errorTargets } from './errors';
 import { type FetchFn, HttpApiClient } from './http';
 import { parseApiJson, stringifyApiJson } from './json';
 import { invalidateForEvent, qk } from './keys';
+import { defaultRequest } from '~/reports/request';
 
 describe('invalidateForEvent', () => {
   test('an import event refreshes the import queries; only a sync that ended touches the books', () => {
@@ -132,6 +133,36 @@ describe('HttpApiClient', () => {
     // Without an opening: the record alone.
     await api.createRecord('co1', 'accounts', savings);
     expect(JSON.parse(calls[1]!.init.body as string)).not.toHaveProperty('opening_balance');
+  });
+
+  test('a report export posts the request with the format lower-cased in the query, the paper only when given, and takes the server\'s file name', async () => {
+    const calls: Array<{ url: string; init: RequestInit }> = [];
+    const fake = (async (url: string, init: RequestInit) => {
+      calls.push({ url, init });
+      const named = url.includes('format=xlsx');
+      return new Response('bytes', {
+        status: 200,
+        headers: named
+          ? { 'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'Content-Disposition': 'attachment; filename="Profit_and_Loss.xlsx"' }
+          : { 'Content-Type': 'application/pdf' },
+      });
+    }) as unknown as FetchFn;
+    const api = new HttpApiClient({ fetch: fake });
+    const request = defaultRequest('ProfitAndLoss');
+    const xlsx = await api.exportReport('co1', request, 'Xlsx');
+    expect(xlsx.filename).toBe('Profit_and_Loss.xlsx');
+    expect(await xlsx.blob.text()).toBe('bytes');
+    const [post] = calls;
+    expect(post!.url).toBe('/api/v1/c/co1/reports/export?format=xlsx');
+    expect(post!.init.method).toBe('POST');
+    expect((post!.init.headers as Record<string, string>).Accept).toBe('*/*');
+    expect(JSON.parse(post!.init.body as string).report).toBe('ProfitAndLoss');
+    // A PDF on A4; no Content-Disposition → named after the request and the format.
+    const pdf = await api.exportReport('co1', request, 'Pdf', 'a4');
+    expect(calls[1]!.url).toBe('/api/v1/c/co1/reports/export?format=pdf&paper=a4');
+    expect(pdf.filename).toBe('ProfitAndLoss.pdf');
+    await api.exportReport('co1', { ...request, title: 'Monthly P&L' }, 'Csv');
+    expect(calls[2]!.url).toBe('/api/v1/c/co1/reports/export?format=csv');
   });
 
   test('turns error envelopes into ApiError', async () => {

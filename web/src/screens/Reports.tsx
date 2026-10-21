@@ -205,7 +205,7 @@ export function ReportWindow() {
     if (!report) return;
     setExporting(true);
     try {
-      saveDownload(await api.exportReport(co, req, 'csv'));
+      saveDownload(await api.exportReport(co, req, 'Csv'));
     } catch (e) {
       // The server couldn't; the grid we have is just as good a CSV.
       notifications.show({ color: 'orange', message: `Export fell back to the on-screen report: ${describeError(e)}` });

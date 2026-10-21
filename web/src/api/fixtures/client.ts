@@ -7,7 +7,7 @@
 
 import { blankCompanyInfo, blankLine, blankTxn } from '../blank';
 import { ApiError } from '../errors';
-import type { ApiClient, EventHandlers, EventSubscription, FileDownload, TxnQuery } from '../client';
+import type { ApiClient, EventHandlers, EventSubscription, ExportPaper, FileDownload, TxnQuery } from '../client';
 import { clone } from '../json';
 import type {
   Account,
@@ -60,6 +60,7 @@ import type {
   ReconciliationView,
   RegisterLine,
   RegisterResponse,
+  ExportFormat,
   Report,
   ReportRequest,
   Saved,
@@ -78,8 +79,10 @@ import { addDays, addMonths, todayIso } from '~/lib/dates';
 import { div, isZero, parseDecimal, toApiString } from '~/lib/decimal';
 import { centsToDec } from '~/lib/money';
 import { hierarchicalCompare } from '~/lib/tree';
+import { EXPORT_FORMAT_INFO, exportFileName, isExportFormat, isExportPaper } from '~/reports/export';
 import { reportToCsv } from '~/reports/rows';
 import { FixtureAdmin } from './admin';
+import { placeholderPdf, placeholderXlsx } from './exportFiles';
 import { FixtureFeeds } from './feeds';
 import { fixturePost, type PostingBooks } from './post';
 import { FIXTURE_COMPANY_ID, buildSeed, stressNames } from './seed';
@@ -1044,12 +1047,21 @@ export class FixtureApiClient implements ApiClient {
     }
   }
 
-  exportReport(co: CompanyId, request: ReportRequest, format: 'csv'): Promise<FileDownload> {
+  exportReport(co: CompanyId, request: ReportRequest, format: ExportFormat, paper?: ExportPaper): Promise<FileDownload> {
     this.checkCompany(co);
     try {
+      // As the server: an unknown format or paper is a 400 `invalid`.
+      if (!isExportFormat(format)) throw new ApiError(400, 'invalid', `Unknown export format "${String(format)}"`);
+      if (paper !== undefined && !isExportPaper(paper)) throw new ApiError(400, 'invalid', `Unknown paper "${String(paper)}"`);
       const report = this.buildReport(request);
-      const name = `${report.title.replace(/[^\w -]+/g, '').trim() || 'report'}.${format}`;
-      return this.delay(() => ({ blob: new Blob([reportToCsv(report)], { type: 'text/csv;charset=utf-8' }), filename: name }));
+      const filename = exportFileName(report.title, format);
+      const blob =
+        format === 'Csv'
+          ? new Blob([reportToCsv(report)], { type: EXPORT_FORMAT_INFO.Csv.mime })
+          : format === 'Pdf'
+            ? placeholderPdf(report, paper ?? 'letter')
+            : placeholderXlsx(report);
+      return this.delay(() => ({ blob, filename }));
     } catch (e) {
       return Promise.reject(e);
     }
