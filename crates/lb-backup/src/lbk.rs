@@ -20,6 +20,7 @@ use std::path::{Path, PathBuf};
 use jiff::Timestamp;
 use lb_store::Books;
 use serde::{Deserialize, Serialize};
+use ts_rs::TS;
 use zip::write::SimpleFileOptions;
 
 use crate::pipeline::{self, Hashing};
@@ -34,15 +35,18 @@ pub const LBK_DATABASE: &str = "company.lbdb";
 /// What `kind` says, so that a zip that only looks similar is refused.
 const KIND: &str = "librebooks-company";
 
-/// `manifest.json` in a `.lbk`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// `manifest.json` in a `.lbk` (and `from` on `POST /companies/import`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
 pub struct PortableManifest {
     pub kind: String,
     pub format: u32,
     pub app_version: String,
     pub company_name: String,
+    #[ts(type = "number")]
     pub schema_version: i64,
     pub created_at: Timestamp,
+    #[ts(type = "number")]
     pub database_size: u64,
     pub database_sha256: String,
 }

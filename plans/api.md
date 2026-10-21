@@ -57,7 +57,7 @@ and the UI; change both together.
 | `POST /auth/enrollments` | admin: `{ purpose: "new_user" \| "add_device", role?, user_id?, ttl_minutes? }` → `MintedEnrolmentLink` (`MintedEnrolment` + `url`) |
 | `GET /users`, `PATCH /users/:id`, `DELETE /users/:id` | admin user management |
 | `GET /companies` | → `[{ id, name, role }]` |
-| `POST /companies` | admin: `{ info: CompanyInfo }` → `{ id }` |
+| `POST /companies` | admin: `{ info: CompanyInfo }` → `{ id, name, role }` (what `GET /companies` lists) |
 | `POST /companies/import` | admin: multipart `file` (a `.lbk` from `GET /c/:company/backups/export` or the desktop app), `name?` → 201 `{ id, name, from: PortableManifest }`: a **new** company; nothing existing is replaced. 400 without a file; 422 `damaged` for a file that isn't a sound `.lbk`. Streams to disk; up to 8 GiB. |
 | `GET /events?company=:id` | Server-Sent Events: `event: change`, `data: {kind, id, action}` |
 | `GET /server` / `PUT /server` | admin: server settings (see "Server administration") |
@@ -127,6 +127,7 @@ Each list has the same five routes. `:list` is one of `accounts`, `entities`,
 
 | | |
 | --- | --- |
+| `POST /:list` | the record (`edit_seq` 0) → 201 the saved record. `POST /accounts` also takes `opening_balance` (natural sign) and `as_of` (default today): a journal entry against Opening Balance Equity in the same write. `POST /items` also takes `opening_quantity`, `opening_value` and `as_of` for an inventory item: an inventory adjustment against Opening Balance Equity, and the returned item carries the resulting on-hand quantity and average cost. Server rules: no record inside itself, a subaccount has its parent's type, only customers have jobs, a sales tax code is one to three characters. |
 | `GET /:list?include_inactive=true` | → array (entities also take `kind=Customer\|Vendor\|Employee\|OtherName`; items `type=`) |
 | `GET /:list/:id` | → record |
 | `POST /:list` | record (`edit_seq: 0`; id may be supplied) → saved record |

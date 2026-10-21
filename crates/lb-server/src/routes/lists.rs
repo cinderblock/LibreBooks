@@ -28,12 +28,56 @@ pub struct ListQuery {
 /// A list the API serves.
 trait Resource: Serialize + DeserializeOwned + Send + 'static {
     const NOUN: &'static str;
+    /// Fields `POST` takes beside the record itself (opening balances).
+    type Extra: DeserializeOwned + Default + Send + 'static;
     fn list(c: &Connection, q: &ListQuery) -> StoreResult<Vec<Self>>;
     fn get(c: &Connection, id: &str) -> StoreResult<Self>;
     fn save(w: &mut Writer<'_>, rec: Self) -> StoreResult<Self>;
+    /// Create, then apply the extras in the same write (nothing half done).
+    fn create(w: &mut Writer<'_>, rec: Self, _extra: Self::Extra) -> StoreResult<Self> {
+        Self::save(w, rec)
+    }
     fn delete(w: &mut Writer<'_>, id: &str, edit_seq: i64) -> StoreResult<()>;
     fn id_string(&self) -> String;
     fn edit_seq(&self) -> i64;
+}
+
+/// Lists with nothing beside the record.
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
+pub struct NoExtra {}
+
+/// `POST /accounts`: QBD's "Enter Opening Balance", posted with the account as
+/// a journal entry against Opening Balance Equity.
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
+pub struct AccountExtra {
+    pub opening_balance: Option<lb_core::Money>,
+    pub as_of: Option<jiff::civil::Date>,
+}
+
+/// `POST /items`: QBD's New Item "On Hand" and "Total Value" as of a date, an
+/// inventory adjustment against Opening Balance Equity.
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
+pub struct ItemExtra {
+    #[serde(with = "rust_decimal::serde::str_option")]
+    pub opening_quantity: Option<rust_decimal::Decimal>,
+    pub opening_value: Option<lb_core::Money>,
+    pub as_of: Option<jiff::civil::Date>,
+}
+
+/// The body of a `POST`: the record and the list's extras, side by side.
+#[derive(Deserialize)]
+struct CreateBody<R, X> {
+    #[serde(flatten)]
+    record: R,
+    #[serde(flatten)]
+    extra: X,
+}
+
+fn today() -> jiff::civil::Date {
+    jiff::Zoned::now().date()
 }
 
 fn parse<T: std::str::FromStr>(id: &str, noun: &'static str) -> StoreResult<T> {
@@ -45,6 +89,7 @@ fn parse<T: std::str::FromStr>(id: &str, noun: &'static str) -> StoreResult<T> {
 
 impl Resource for Account {
     const NOUN: &'static str = "account";
+    type Extra = AccountExtra;
     fn list(c: &Connection, q: &ListQuery) -> StoreResult<Vec<Self>> {
         accounts::list(c, q.include_inactive)
     }
@@ -53,6 +98,13 @@ impl Resource for Account {
     }
     fn save(w: &mut Writer<'_>, rec: Self) -> StoreResult<Self> {
         accounts::save(w, rec)
+    }
+    fn create(w: &mut Writer<'_>, rec: Self, extra: AccountExtra) -> StoreResult<Self> {
+        let saved = accounts::save(w, rec)?;
+        if let Some(opening) = extra.opening_balance.filter(|m| !m.is_zero()) {
+            accounts::set_opening_balance(w, saved.id, opening, extra.as_of.unwrap_or_else(today))?;
+        }
+        Ok(saved)
     }
     fn delete(w: &mut Writer<'_>, id: &str, edit_seq: i64) -> StoreResult<()> {
         accounts::delete(w, parse(id, Self::NOUN)?, edit_seq)
@@ -67,6 +119,7 @@ impl Resource for Account {
 
 impl Resource for Entity {
     const NOUN: &'static str = "name";
+    type Extra = NoExtra;
     fn list(c: &Connection, q: &ListQuery) -> StoreResult<Vec<Self>> {
         let kind = match q.kind.as_deref() {
             Some(k) => Some(
@@ -96,6 +149,22 @@ impl Resource for Entity {
 
 impl Resource for Item {
     const NOUN: &'static str = "item";
+    type Extra = ItemExtra;
+    fn create(w: &mut Writer<'_>, rec: Self, extra: ItemExtra) -> StoreResult<Self> {
+        let saved = items::save(w, rec)?;
+        let Some(quantity) = extra.opening_quantity.filter(|q| !q.is_zero()) else {
+            return Ok(saved);
+        };
+        items::set_opening_quantity(
+            w,
+            saved.id,
+            quantity,
+            extra.opening_value.unwrap_or_default(),
+            extra.as_of.unwrap_or_else(today),
+        )?;
+        // The adjustment set the on-hand quantity and average cost.
+        items::get(&w.tx, saved.id)
+    }
     fn list(c: &Connection, q: &ListQuery) -> StoreResult<Vec<Self>> {
         let t = match q.r#type.as_deref() {
             Some(t) => Some(
@@ -127,6 +196,7 @@ macro_rules! small_list {
     ($t:ty) => {
         impl Resource for $t {
             const NOUN: &'static str = <$t as lists::ListRecord>::NOUN;
+            type Extra = NoExtra;
             fn list(c: &Connection, q: &ListQuery) -> StoreResult<Vec<Self>> {
                 lists::list::<$t>(c, q.include_inactive)
             }
@@ -183,14 +253,15 @@ async fn create_h<R: Resource>(
     State(s): State<AppState>,
     p: Principal,
     Path(company): Path<CompanyId>,
-    Json(rec): Json<R>,
+    Json(body): Json<CreateBody<R, R::Extra>>,
 ) -> ApiResult<(StatusCode, Json<R>)> {
-    if rec.edit_seq() != 0 {
+    let CreateBody { record, extra } = body;
+    if record.edit_seq() != 0 {
         return Err(ApiError::invalid("a new record has edit_seq 0"));
     }
     let books = s.books_for(&p, company, Role::Bookkeeper)?;
     let actor = p.actor();
-    let saved = blocking(move || books.write(&actor, |w| R::save(w, rec))).await?;
+    let saved = blocking(move || books.write(&actor, |w| R::create(w, record, extra))).await?;
     Ok((StatusCode::CREATED, Json(saved)))
 }
 

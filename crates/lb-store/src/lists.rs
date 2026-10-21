@@ -24,6 +24,10 @@ pub trait ListRecord: Serialize + DeserializeOwned + Clone {
     fn is_active(&self) -> bool;
     fn edit_seq(&self) -> i64;
     fn set_edit_seq(&mut self, v: i64);
+    /// Rules of the record beyond name uniqueness (QBD's field limits).
+    fn validate(&self) -> Result<()> {
+        Ok(())
+    }
 }
 
 macro_rules! simple_list {
@@ -52,7 +56,36 @@ macro_rules! simple_list {
 
 simple_list!(Terms, "terms", "terms", name);
 simple_list!(PaymentMethod, "payment_method", "payment method", name);
-simple_list!(SalesTaxCode, "sales_tax_code", "sales tax code", name);
+
+impl ListRecord for SalesTaxCode {
+    const LIST: &'static str = "sales_tax_code";
+    const NOUN: &'static str = "sales tax code";
+    fn id_string(&self) -> String {
+        self.id.to_string()
+    }
+    fn display_name(&self) -> String {
+        self.name.clone()
+    }
+    fn is_active(&self) -> bool {
+        self.is_active
+    }
+    fn edit_seq(&self) -> i64 {
+        self.edit_seq
+    }
+    fn set_edit_seq(&mut self, v: i64) {
+        self.edit_seq = v;
+    }
+    /// QBD's tax codes are at most three characters ("Tax", "Non", "OOS").
+    fn validate(&self) -> Result<()> {
+        let n = self.name.trim().chars().count();
+        if n == 0 || n > 3 {
+            return Err(StoreError::Invalid(
+                "a sales tax code is one to three characters".into(),
+            ));
+        }
+        Ok(())
+    }
+}
 simple_list!(SalesRep, "sales_rep", "sales rep", initials);
 
 impl ListRecord for Class {
@@ -156,6 +189,7 @@ pub fn save<T: ListRecord>(w: &mut Writer<'_>, mut rec: T) -> Result<T> {
     } else if rec.edit_seq() != 0 {
         return Err(StoreError::NotFound { kind: T::NOUN, id });
     }
+    rec.validate()?;
     let parent = rec.parent();
     hier::check_no_cycle(&w.tx, "list_entry", &id, parent.as_deref())?;
     let name = rec.display_name().trim().to_owned();

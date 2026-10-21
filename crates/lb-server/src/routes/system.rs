@@ -56,8 +56,10 @@ pub async fn create_company(
     Json(body): Json<CreateCompany>,
 ) -> ApiResult<Json<Value>> {
     p.require(Role::Admin)?;
+    let name = body.info.name.trim().to_owned();
     let id = tokio::task::spawn_blocking(move || s.companies.create(&body.info)).await??;
-    Ok(Json(json!({ "id": id })))
+    // What `GET /companies` would list, so the picker needn't ask again.
+    Ok(Json(json!({ "id": id, "name": name, "role": p.role })))
 }
 
 /// `POST /companies/import` (multipart `file`: a `.lbk` from `GET

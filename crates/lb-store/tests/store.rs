@@ -1041,3 +1041,72 @@ fn name_balances_follow_open_items_and_roll_jobs_up() {
     assert_eq!(n[&s.customer].receivable, Money(-200_000));
     assert_eq!(n[&s.customer].receivable_total, Money(20_000));
 }
+
+#[test]
+fn an_items_opening_quantity_is_an_adjustment_against_opening_balance_equity() {
+    let b = books();
+    let s = setup(&b);
+    let part = b
+        .write(&me(), |w| {
+            let cogs = accounts::save(
+                w,
+                accounts::new_account("COGS", AccountType::CostOfGoodsSold),
+            )?
+            .id;
+            let asset = accounts::save(
+                w,
+                accounts::new_account("Inventory", AccountType::OtherCurrentAsset),
+            )?
+            .id;
+            let mut i = Item::blank(ItemType::Inventory, "Widget");
+            i.income_account_id = Some(s.income);
+            i.expense_account_id = Some(cogs);
+            i.asset_account_id = Some(asset);
+            let id = items::save(w, i)?.id;
+            items::set_opening_quantity(w, id, Decimal::from(10), Money(25_000), date(2026, 1, 1))?;
+            Ok(id)
+        })
+        .unwrap();
+    let item = b.read(|c| items::get(c, part)).unwrap();
+    assert_eq!(item.quantity_on_hand, Decimal::from(10));
+    assert_eq!(item.average_cost, Decimal::new(2500, 2));
+    let obe = b
+        .read(|c| accounts::by_role(c, AccountRole::OpeningBalanceEquity))
+        .unwrap()
+        .unwrap()
+        .id;
+    let sums = b.read(|c| balances::sums(c, None, None)).unwrap();
+    assert_eq!(sums[&item.asset_account_id.unwrap()], Money(25_000));
+    assert_eq!(sums[&obe], Money(-25_000));
+    // Not for a service item, and never negative.
+    assert!(
+        b.write(&me(), |w| items::set_opening_quantity(
+            w,
+            s.labor,
+            Decimal::ONE,
+            Money(100),
+            date(2026, 1, 1)
+        ))
+        .is_err()
+    );
+    assert_eq!(b.check_integrity().unwrap(), Vec::<String>::new());
+}
+
+#[test]
+fn a_sales_tax_code_is_at_most_three_characters() {
+    let b = books();
+    let code = |name: &str| SalesTaxCode {
+        id: SalesTaxCodeId::new(),
+        name: name.into(),
+        description: None,
+        is_taxable: true,
+        is_active: true,
+        edit_seq: 0,
+    };
+    b.write(&me(), |w| lists::save(w, code("OOS"))).unwrap();
+    assert!(matches!(
+        b.write(&me(), |w| lists::save(w, code("Taxable"))),
+        Err(StoreError::Invalid(_))
+    ));
+    assert!(b.write(&me(), |w| lists::save(w, code("  "))).is_err());
+}

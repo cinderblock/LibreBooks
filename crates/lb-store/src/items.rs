@@ -5,6 +5,8 @@ use rusqlite::{Connection, OptionalExtension, params};
 
 use crate::codec::{self, doc};
 use crate::{Result, StoreError, Writer, audit, hier};
+use lb_core::{LineKind, Money, Txn, TxnId, TxnLine, TxnType};
+use rust_decimal::Decimal;
 
 pub fn list(
     c: &Connection,
@@ -170,4 +172,38 @@ pub fn delete(w: &mut Writer<'_>, id: ItemId, edit_seq: i64) -> Result<()> {
     audit::record::<Item, Item>(w, "item", &sid, "delete", Some(&item), None, None)?;
     w.changed("item", sid, "delete");
     Ok(())
+}
+
+/// QBD's New Item "On Hand" and "Total Value" as of a date: an inventory
+/// adjustment against Opening Balance Equity, the way the account editor's
+/// opening balance is a journal entry against it. Returns the adjustment.
+pub fn set_opening_quantity(
+    w: &mut Writer<'_>,
+    id: ItemId,
+    quantity: Decimal,
+    value: Money,
+    date: jiff::civil::Date,
+) -> Result<TxnId> {
+    let item = get(&w.tx, id)?;
+    if !item.item_type.is_inventory() {
+        return Err(StoreError::Invalid(
+            "only inventory items have a quantity on hand".into(),
+        ));
+    }
+    if quantity < Decimal::ZERO || value.is_negative() {
+        return Err(StoreError::Invalid(
+            "an opening quantity and its value can't be negative".into(),
+        ));
+    }
+    let obe = crate::accounts::ensure_role(w, lb_core::AccountRole::OpeningBalanceEquity)?;
+    let mut t = Txn::new(TxnType::InventoryAdjustment, date);
+    t.account_id = Some(obe);
+    t.memo = Some("Opening Balance".into());
+    let mut line = TxnLine::new(LineKind::Item);
+    line.item_id = Some(id);
+    line.quantity_change = Some(quantity);
+    line.amount = value;
+    line.description = Some("Opening quantity".into());
+    t.lines.push(line);
+    Ok(crate::txns::save(w, t)?.txn.id)
 }

@@ -614,6 +614,14 @@ Still open:
 
 Found in phase D:
 
+- Closed on the server (2026-10-20 evening): `POST /accounts` takes
+  `opening_balance` + `as_of`, `POST /items` takes `opening_quantity` +
+  `opening_value` + `as_of` (an inventory adjustment; the returned item has the
+  on-hand quantity), `POST /companies` answers `{ id, name, role }`,
+  `PortableManifest` is generated, a sales tax code is one to three characters
+  server-side, and the parent rules (no cycles, subaccount type, jobs only
+  under customers) were already enforced. The UI can drop its own JE, its
+  manifest stand-in and the extra `/session` fetch. The notes as written:
 - **An account's opening balance.** `Account` carries no balance; QBD's "Enter
   Opening Balance" is a journal entry against Opening Balance Equity, which
   the account editor posts itself after the save (`POST /txns`, a

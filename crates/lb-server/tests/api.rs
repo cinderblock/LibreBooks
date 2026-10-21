@@ -142,6 +142,23 @@ async fn write_a_check_and_read_the_register() {
             Some(account("Rent", "Expense")),
         )
         .await;
+    // An opening balance rides along with the account: one request, one write.
+    let mut savings = account("Savings", "Bank");
+    savings["opening_balance"] = json!(500_000);
+    savings["as_of"] = json!("2026-01-01");
+    let (s, savings) = api
+        .call("POST", &format!("{base}/accounts"), Some(savings))
+        .await;
+    assert_eq!(s, StatusCode::CREATED, "{savings}");
+    let (_, balances) = api.call("GET", &format!("{base}/balances"), None).await;
+    assert!(
+        balances
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|b| b["account_id"] == savings["id"] && b["debit_positive"] == 500_000),
+        "{balances}"
+    );
     let (s, list) = api.call("GET", &format!("{base}/accounts"), None).await;
     assert_eq!(s, StatusCode::OK);
     assert!(
