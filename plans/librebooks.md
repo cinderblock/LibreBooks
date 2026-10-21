@@ -213,10 +213,12 @@ Phases are ordered; each ends usable. **Current step is marked ▶.**
   tests the desktop app on both platforms (`498401b`). Merged (`eee87c4`): the
   last import type copies swapped for generated ones, the Import window driven
   by `import` events (236 web tests, 41 Playwright). A flaky lb-tunnel test
-  (heartbeat cadence) made robust (`10fe555`). ▶ Running: web phase D agent
-  (list record editors, attachments on list records, company creation and
-  `.lbk` import from the picker, the remaining import options) and a research
-  agent on native QBW access, now merged (`plans/qbw-research.md`). Next with the user: point
+  (heartbeat cadence) made robust (`10fe555`). Merged web phase D (`0ad6946`:
+  record-form engine and editors for every list, attachments on names/accounts/
+  items, New company and Open .lbk from the picker, the remaining import
+  options; 241 web tests, 47 Playwright) and the native-QBW research
+  (`plans/qbw-research.md`). ▶ Next: the server gaps phase D recorded in
+  `plans/web-ui.md` → "For the server". Next with the user: point
   QuickBooks' Web Connector on cad-3 at this server over HTTPS (steps in
   `plans/qbd-import.md`), run a sync, and see whether the 14 bridge gaps close.
 - Phase 1 — Ledger core
