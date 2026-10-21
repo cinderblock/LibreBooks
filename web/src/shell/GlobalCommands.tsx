@@ -41,6 +41,8 @@ export function useGlobalCommands(): { run: RunCommand; overlay: boolean; setOve
     'form.receivePayment': () => open(paths.form('receive-payment')),
     'form.creditMemo': () => open(paths.form('credit-memo')),
     'form.estimate': () => open(paths.form('estimate')),
+    'form.salesOrder': () => open(paths.form('sales-order')),
+    'nav.statementCharges': () => open(paths.statementCharges()),
     'form.deposit': () => open(paths.form('deposit')),
     'form.transfer': () => open(paths.form('transfer')),
     'form.journal': () => open(paths.form('journal')),

@@ -820,6 +820,201 @@ test('merge folds one vendor into another', async ({ page }) => {
   await expect(page.getByText('Merged "Office Depot" into "Main Street Properties".')).toBeVisible();
 });
 
+/** Open a saved transaction's window in-app (a page load would reset the fixture books). */
+async function openTxn(page: Page, id: string) {
+  await page.evaluate((txnId) => history.pushState(null, '', `/c/00000000-0000-4000-8000-00000000c0de/txns/${txnId}`), id);
+  await page.evaluate(() => dispatchEvent(new PopStateEvent('popstate')));
+}
+
+/** The first transaction of a kind (optionally by number), from the fixture books. */
+async function findTxn(page: Page, query: object): Promise<string> {
+  return page.evaluate(async (q) => {
+    const lb = (window as unknown as { __librebooks: { txns(co: string, q: object): Promise<Array<{ id: string }>> } }).__librebooks;
+    return (await lb.txns('00000000-0000-4000-8000-00000000c0de', q))[0]!.id;
+  }, query);
+}
+
+test("a statement charge is entered in the customer's A/R register, and opens from its row", async ({ page }) => {
+  await start(page, `${CO}/statement-charges`);
+  const win = page.getByTestId('statement-charges');
+  const customer = win.getByRole('combobox', { name: 'Customer:Job' });
+  await expect(customer).toBeFocused();
+  await customer.pressSequentially('Nguyen');
+  await page.keyboard.press('Tab');
+  await expect(customer).toHaveValue('Nguyen, David');
+  // The seeded charge (two hours of refinishing) is in the register with its open amount.
+  const rows = win.getByTestId('ar-row');
+  await expect(rows.filter({ hasText: 'STMTCHG' })).toHaveCount(1);
+  await expect(rows.filter({ hasText: 'STMTCHG' })).toContainText('110.00');
+  const balanceBefore = await win.getByTestId('ar-balance').innerText();
+  // The new-charge line: the item brings its rate, the quantity makes the amount, Enter records.
+  const entry = win.getByTestId('charge-entry');
+  const item = entry.getByRole('combobox', { name: 'Item' });
+  await item.click();
+  await item.pressSequentially('Design');
+  await page.keyboard.press('Tab');
+  await expect(item).toHaveValue('Design');
+  await expect(entry.getByRole('textbox', { name: 'Rate' })).toHaveValue('85.00');
+  await expect(entry.getByRole('textbox', { name: 'Due date' })).not.toHaveValue('');
+  await entry.getByRole('textbox', { name: 'Qty' }).fill('2');
+  await page.keyboard.press('Tab');
+  await expect(entry.getByRole('textbox', { name: 'Amount' })).toHaveValue('170.00');
+  await entry.getByRole('textbox', { name: 'Description' }).fill('Design consult');
+  await page.keyboard.press('Enter');
+  await expect(page.getByText('Statement charge for $170.00 saved.')).toBeVisible();
+  await expect(rows.filter({ hasText: 'STMTCHG' })).toHaveCount(2);
+  await expect(win.getByTestId('ar-balance')).not.toHaveText(balanceBefore);
+  await expect(entry.getByRole('combobox', { name: 'Item' })).toHaveValue('');
+  // QuickZoom: the row opens the charge in its form.
+  await rows.filter({ hasText: 'Design consult' }).dblclick();
+  await expect(page.getByRole('tab', { name: /Statement Charge/ })).toBeVisible();
+  const form = page.getByTestId('form-statement-charge');
+  await expect(form.getByRole('textbox', { name: 'Qty, line 1' })).toHaveValue('2');
+  await expect(form.getByRole('textbox', { name: 'Due date' })).not.toHaveValue('');
+  await expect(form.getByText(/Balance due/)).toBeVisible();
+});
+
+test('a sales order is invoiced in part: the invoice links to it, the order shows what remains, then closes by hand', async ({ page }) => {
+  await start(page, `${CO}/forms/sales-order/new`);
+  const so = page.getByTestId('form-sales-order');
+  await expect(so.getByText('Non-posting')).toBeVisible();
+  const customer = so.getByRole('combobox', { name: 'Customer:Job' });
+  await customer.pressSequentially('Baker');
+  await page.keyboard.press('Tab');
+  await expect(customer).toHaveValue('Baker, Ellen');
+  const item = so.getByRole('combobox', { name: 'Item, line 1' });
+  await item.click();
+  await item.pressSequentially('Walnut');
+  await page.keyboard.press('Tab');
+  await so.getByRole('textbox', { name: 'Qty, line 1' }).fill('10');
+  await page.keyboard.press('Tab');
+  await expect(so.getByRole('textbox', { name: 'Amount, line 1' })).toHaveValue('185.00');
+  await so.getByRole('textbox', { name: 'S.O. No.' }).fill('SO-77');
+  await so.getByRole('button', { name: /Save & Close/ }).click();
+  await expect(page.getByText(/Sales order SO-77 for \$185\.00 saved/)).toBeVisible();
+  // The saved order: nothing invoiced yet.
+  await openTxn(page, await findTxn(page, { types: ['SalesOrder'], number: 'SO-77' }));
+  const order = page.getByTestId('form-sales-order');
+  const panel = order.getByTestId('order-progress');
+  await expect(panel.getByTestId('order-status')).toHaveText('Open');
+  await expect(panel.getByTestId('line-remaining')).toHaveText('10');
+  // Create Invoice for 4 of the 10.
+  await panel.getByRole('button', { name: 'Create Invoice' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Create Invoice from Sales Order SO-77' });
+  await dialog.getByText('Selected items and quantities').click();
+  await dialog.getByRole('textbox', { name: 'To invoice, line 1' }).fill('4');
+  await expect(dialog.getByTestId('draw-total')).toContainText('74.00');
+  await dialog.getByRole('button', { name: 'Create Invoice' }).click();
+  const inv = page.getByTestId('form-invoice');
+  await expect(inv.getByTestId('drawn-from')).toContainText('From Sales Order SO-77');
+  await expect(inv.getByRole('combobox', { name: 'Customer:Job' })).toHaveValue('Baker, Ellen');
+  await expect(inv.getByRole('textbox', { name: 'Qty, line 1' })).toHaveValue('4');
+  await expect(inv.getByRole('textbox', { name: 'Amount, line 1' })).toHaveValue('74.00');
+  await inv.getByRole('button', { name: /Save & Close/ }).click();
+  await expect(page.getByText(/Invoice .*saved/)).toBeVisible();
+  // Back on the order: 4 invoiced, 6 remaining, the invoice listed; Mark as closed takes the rest off the table.
+  await expect(panel.getByTestId('line-fulfilled')).toHaveText('4');
+  await expect(panel.getByTestId('line-remaining')).toHaveText('6');
+  await expect(panel.getByTestId('order-status')).toHaveText('Partly invoiced');
+  await expect(panel.getByRole('button', { name: /^Open Invoice/ })).toBeVisible();
+  await panel.getByRole('button', { name: 'Mark as closed' }).click();
+  await expect(page.getByText('Sales Order marked as closed.')).toBeVisible();
+  await expect(panel.getByTestId('order-status')).toHaveText('Closed');
+  await expect(panel.getByRole('button', { name: 'Create Invoice' })).toBeDisabled();
+  await expect(panel.getByRole('button', { name: 'Reopen' })).toBeVisible();
+});
+
+test('an estimate is progress-invoiced at 50%, and shows the progress to date', async ({ page }) => {
+  await start(page);
+  await openTxn(page, await findTxn(page, { types: ['Estimate'] }));
+  const est = page.getByTestId('form-estimate');
+  const panel = est.getByTestId('order-progress');
+  // E-118: 10 hours of design at 85 and 240 board feet of white oak at 11.25.
+  await expect(panel.getByTestId('order-percent')).toContainText('0.00 of 3,550.00 (0.00%)');
+  await panel.getByRole('button', { name: 'Create Invoice' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Create Invoice from Estimate E-118' });
+  await expect(dialog.getByTestId('draw-total')).toContainText('3,550.00');
+  await dialog.getByRole('textbox', { name: 'Percent of the estimate' }).fill('50');
+  await expect(dialog.getByTestId('draw-total')).toContainText('1,775.00');
+  await expect(dialog.getByTestId('draw-total')).toContainText('50.00% of the estimate');
+  await dialog.getByRole('button', { name: 'Create Invoice' }).click();
+  // The invoice keeps the estimate's quantities and takes half of each line's amount.
+  const inv = page.getByTestId('form-invoice');
+  await expect(inv.getByTestId('drawn-from')).toContainText('From Estimate E-118');
+  await expect(inv.getByRole('textbox', { name: 'Qty, line 2' })).toHaveValue('240');
+  await expect(inv.getByRole('textbox', { name: 'Amount, line 1' })).toHaveValue('425.00');
+  await expect(inv.getByRole('textbox', { name: 'Amount, line 2' })).toHaveValue('1,350.00');
+  await inv.getByRole('button', { name: /Save & Close/ }).click();
+  await expect(page.getByText(/Invoice .*saved/)).toBeVisible();
+  await expect(panel.getByTestId('order-percent')).toContainText('1,775.00 of 3,550.00 (50.00%)');
+  await expect(panel.getByTestId('line-remaining').first()).toHaveText('425.00');
+  await expect(panel.getByTestId('order-status')).toHaveText('Partly invoiced');
+});
+
+test('a purchase order is received in part against Select PO, then billed for the rest, and closes', async ({ page }) => {
+  await start(page, `${CO}/forms/purchase-order/new`);
+  const po = page.getByTestId('form-purchase-order');
+  const vendor = po.getByRole('combobox', { name: 'Vendor' });
+  await vendor.pressSequentially('Rockler');
+  await page.keyboard.press('Tab');
+  await expect(vendor).toHaveValue('Rockler Hardware');
+  const item = po.getByRole('combobox', { name: 'Item, line 1' });
+  await item.click();
+  await item.pressSequentially('Hinges');
+  await page.keyboard.press('Tab');
+  await po.getByRole('textbox', { name: 'Qty, line 1' }).fill('20');
+  await page.keyboard.press('Tab');
+  await expect(po.getByRole('textbox', { name: 'Amount, line 1' })).toHaveValue('105.00');
+  await po.getByRole('button', { name: /Save & Close/ }).click();
+  await expect(page.getByText(/Purchase order .*for \$105\.00 saved/)).toBeVisible();
+  // Receive Items: the vendor has an open PO; Select PO brings its line in, received in part.
+  await page.getByRole('menubar').getByText('Vendors', { exact: true }).click();
+  await page.getByRole('menuitem', { name: 'Receive Items' }).click();
+  const rcpt = page.getByTestId('form-receive-items');
+  const v2 = rcpt.getByRole('combobox', { name: 'Vendor' });
+  await v2.pressSequentially('Rockler');
+  await page.keyboard.press('Tab');
+  await expect(rcpt.getByTestId('open-purchase-orders')).toContainText('1 open purchase order');
+  await rcpt.getByRole('button', { name: 'Select PO' }).click();
+  const pick = page.getByRole('dialog', { name: 'Open Purchase Orders' });
+  await expect(pick.getByTestId('order-row')).toHaveCount(1);
+  await pick.getByTestId('order-row').first().click();
+  await pick.getByRole('button', { name: 'Add selected' }).click();
+  await expect(rcpt.getByRole('combobox', { name: 'Item, line 1' })).toHaveValue('Hardware:Hinges');
+  await expect(rcpt.getByRole('textbox', { name: 'Qty, line 1' })).toHaveValue('20');
+  await rcpt.getByRole('textbox', { name: 'Qty, line 1' }).fill('12');
+  await page.keyboard.press('Tab');
+  await expect(rcpt.getByRole('textbox', { name: 'Amount, line 1' })).toHaveValue('63.00');
+  await rcpt.getByRole('button', { name: /Save & Close/ }).click();
+  await expect(page.getByText(/Item receipt .*for \$63\.00 saved/)).toBeVisible();
+  // Enter Bills for the remaining 8.
+  await page.getByRole('menubar').getByText('Vendors', { exact: true }).click();
+  await page.getByRole('menuitem', { name: /Enter Bills/ }).click();
+  const bill = page.getByTestId('form-bill');
+  const v3 = bill.getByRole('combobox', { name: 'Vendor' });
+  await v3.pressSequentially('Rockler');
+  await page.keyboard.press('Tab');
+  await bill.getByRole('button', { name: 'Select PO' }).click();
+  const pick2 = page.getByRole('dialog', { name: 'Open Purchase Orders' });
+  await expect(pick2.getByTestId('order-row').first()).toContainText('42.00'); // what remains
+  await pick2.getByTestId('order-row').first().click();
+  await pick2.getByRole('button', { name: 'Add selected' }).click();
+  await bill.getByRole('tab', { name: /Items/ }).click();
+  await expect(bill.getByRole('textbox', { name: 'Qty, line 1' })).toHaveValue('8');
+  await expect(bill.getByRole('textbox', { name: 'Amount Due' })).toHaveValue('42.00');
+  await bill.getByRole('button', { name: /Save & Close/ }).click();
+  await expect(page.getByText(/Bill .*for \$42\.00 saved/)).toBeVisible();
+  // The order: 20 of 20 received, closed, with the receipt and the bill listed.
+  await openTxn(page, await findTxn(page, { types: ['PurchaseOrder'], entity_id: await page.evaluate(() => (window as unknown as { __librebooks: { find(k: string, n: string): string } }).__librebooks.find('entity', 'Rockler Hardware')) }));
+  const panel = page.getByTestId('form-purchase-order').getByTestId('order-progress');
+  await expect(panel.getByTestId('line-fulfilled')).toHaveText('20');
+  await expect(panel.getByTestId('line-remaining')).toHaveText('0');
+  await expect(panel.getByTestId('order-status')).toHaveText('Closed: fully received');
+  await expect(panel.getByRole('button', { name: /^Open Item Receipt/ })).toBeVisible();
+  await expect(panel.getByRole('button', { name: /^Open Bill/ })).toBeVisible();
+  await expect(panel.getByRole('button', { name: 'Create Item Receipt' })).toBeDisabled();
+});
+
 test('my account from the avatar menu: passkeys and sessions', async ({ page }) => {
   await start(page);
   await page.getByRole('button', { name: 'Signed in as Demo User' }).click();

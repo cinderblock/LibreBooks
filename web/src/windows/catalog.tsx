@@ -29,6 +29,7 @@ import { FormPlaceholder } from '~/screens/Placeholder';
 import { RecordWindow, recordWindowTitle } from '~/screens/RecordWindow';
 import { Register } from '~/screens/Register';
 import { ReportCenter, ReportWindow } from '~/screens/Reports';
+import { StatementCharges } from '~/screens/StatementCharges';
 import { TxnWindow } from '~/screens/TxnWindow';
 import { FORM_LABELS } from '~/shell/menus';
 import { useWindow, useWindows } from './WindowsProvider';
@@ -92,6 +93,7 @@ export const WINDOW_KINDS: Record<WindowKind, KindDef> = {
   reports: { render: () => <ReportCenter />, title: () => 'Report Center' },
   report: { render: () => <ReportWindow />, title: () => 'Report' },
   find: { render: () => <Find />, title: () => 'Find' },
+  'statement-charges': { render: () => <StatementCharges />, title: () => 'Enter Statement Charges' },
   list: { render: () => <ListWindow />, title: (d) => LIST_TITLES[d.params.list ?? ''] ?? 'List' },
   record: { render: () => <RecordWindow />, title: (d) => recordWindowTitle(d.params) },
   company: { render: () => <Company />, title: () => 'Company' },

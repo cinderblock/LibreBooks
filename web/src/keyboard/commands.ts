@@ -44,6 +44,8 @@ export const COMMANDS = {
   'form.receivePayment': { label: 'Receive Payments', scope: 'global' },
   'form.creditMemo': { label: 'Create Credit Memos/Refunds', scope: 'global' },
   'form.estimate': { label: 'Create Estimates', scope: 'global' },
+  'form.salesOrder': { label: 'Create Sales Orders', scope: 'global' },
+  'nav.statementCharges': { label: 'Enter Statement Charges', scope: 'global' },
   'form.deposit': { label: 'Make Deposits', scope: 'global' },
   'form.transfer': { label: 'Transfer Funds', scope: 'global' },
   'form.journal': { label: 'Make General Journal Entries', scope: 'global' },

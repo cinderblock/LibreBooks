@@ -28,6 +28,8 @@ export const QBD_KEYMAP: Keymap = {
   'form.receivePayment': [],
   'form.creditMemo': [],
   'form.estimate': [],
+  'form.salesOrder': [],
+  'nav.statementCharges': [],
   'form.deposit': [],
   'form.transfer': [],
   'form.journal': [],

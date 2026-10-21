@@ -15,12 +15,22 @@ import { noErrors, putGridError, type FormErrors } from './model';
 import { blankSaleRow, estimatedTax, fromSaleLines, isBlankSale, locateSaleLine, recomputeSales, salesSubtotal, taxableAmount, toSaleLines, type SaleRow } from './salesLines';
 import { dueDate } from './terms';
 
-export type SalesType = 'Invoice' | 'SalesReceipt' | 'CreditMemo' | 'Estimate';
+export type SalesType = 'Invoice' | 'SalesReceipt' | 'CreditMemo' | 'Estimate' | 'SalesOrder' | 'StatementCharge';
 
-export const SALES_TYPES: readonly SalesType[] = ['Invoice', 'SalesReceipt', 'CreditMemo', 'Estimate'];
+export const SALES_TYPES: readonly SalesType[] = ['Invoice', 'SalesReceipt', 'CreditMemo', 'Estimate', 'SalesOrder', 'StatementCharge'];
 
 export function isSalesType(t: TxnType): t is SalesType {
   return (SALES_TYPES as readonly TxnType[]).includes(t);
+}
+
+/** Estimates and sales orders are kept with the same machinery but move no money. */
+export function isNonPostingSale(t: SalesType): boolean {
+  return t === 'Estimate' || t === 'SalesOrder';
+}
+
+/** Forms with terms and a due date: an invoice and a statement charge are owed; the rest are not. */
+export function hasDueDate(t: SalesType): boolean {
+  return t === 'Invoice' || t === 'StatementCharge';
 }
 
 export interface SalesDraft {
@@ -101,7 +111,8 @@ export function salesDraftFromTxn(txn: Txn): SalesDraft {
     class_id: txn.class_id,
     date: txn.date,
     number: txn.number ?? '',
-    numberIsAuto: false,
+    // An unsaved hand-off without a number (an invoice drawn from an order) takes the next one.
+    numberIsAuto: txn.edit_seq === 0 && !txn.number,
     po_number: txn.po_number ?? '',
     terms_id: txn.terms_id,
     due_date: txn.due_date,
@@ -132,7 +143,7 @@ export function applyCustomer(d: SalesDraft, customer: Entity | undefined, terms
     ...d,
     entity_id: customer.id,
     terms_id: termsId,
-    due_date: d.txn_type === 'Invoice' ? (dueDate(terms, d.date) ?? d.due_date) : d.due_date,
+    due_date: hasDueDate(d.txn_type) ? (dueDate(terms, d.date) ?? d.due_date) : d.due_date,
     customer_tax_code_id: customer.sales_tax_code_id ?? src.sales_tax_code_id ?? d.customer_tax_code_id,
     sales_rep_id: customer.sales_rep_id ?? src.sales_rep_id ?? d.sales_rep_id,
     bill_address: hasAddress(d.bill_address) ? d.bill_address : withName(src, src.bill_address),
@@ -190,7 +201,7 @@ export function salesDraftToTxn(d: SalesDraft, items: ReadonlyMap<string, Item>,
     number: d.number.trim() || null,
     po_number: d.po_number.trim() || null,
     terms_id: d.terms_id,
-    due_date: d.txn_type === 'Invoice' ? d.due_date : null,
+    due_date: hasDueDate(d.txn_type) ? d.due_date : null,
     sales_rep_id: d.sales_rep_id,
     ship_date: d.ship_date,
     bill_address: d.bill_address,

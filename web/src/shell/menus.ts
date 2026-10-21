@@ -2,8 +2,12 @@
 // the command palette. An item either runs a keyboard command (so its shortcut
 // shows next to it) or opens a company-relative path.
 
+import type { Preferences } from '~/api/types';
 import type { CommandId } from '~/keyboard/commands';
 import { paths } from '~/windows/paths';
+
+/** The company preferences a menu item can depend on (QBD hides a form whose feature is off). */
+export type MenuPref = 'sales_orders_enabled' | 'estimates_enabled';
 
 export interface MenuItem {
   label: string;
@@ -13,8 +17,13 @@ export interface MenuItem {
   todo?: boolean;
   /** Server admins only: hidden from everyone else (the server refuses anyway). */
   admin?: boolean;
+  /** Shown only while this company preference is on (unknown preferences show the item). */
+  pref?: MenuPref;
   keywords?: string[];
 }
+
+/** Which preferences the menus care about; `null` while the company's are unknown (everything shows). */
+export type MenuPrefs = Pick<Preferences, MenuPref> | null;
 
 export type MenuEntry = MenuItem | { divider: true } | { label: string; children: MenuItem[] };
 
@@ -30,6 +39,8 @@ export const FORM_LABELS: Record<string, string> = {
   'receive-payment': 'Receive Payments',
   'credit-memo': 'Create Credit Memos/Refunds',
   estimate: 'Create Estimates',
+  'sales-order': 'Create Sales Orders',
+  'statement-charge': 'Statement Charge',
   bill: 'Enter Bills',
   'pay-bills': 'Pay Bills',
   'vendor-credit': 'Enter Vendor Credits',
@@ -58,6 +69,8 @@ const BUILT_FORMS = new Set([
   'sales-receipt',
   'credit-memo',
   'estimate',
+  'sales-order',
+  'statement-charge',
   'receive-payment',
   'pay-bills',
   'deposit',
@@ -110,7 +123,10 @@ export const MENUS: Menu[] = [
       form('sales-receipt', { command: 'form.salesReceipt' }),
       form('receive-payment', { command: 'form.receivePayment' }),
       form('credit-memo', { command: 'form.creditMemo' }),
-      form('estimate', { command: 'form.estimate' }),
+      form('estimate', { command: 'form.estimate', pref: 'estimates_enabled', keywords: ['quote'] }),
+      form('sales-order', { command: 'form.salesOrder', pref: 'sales_orders_enabled', keywords: ['so'] }),
+      { divider: true },
+      { label: 'Enter Statement Charges', command: 'nav.statementCharges', path: paths.statementCharges(), keywords: ['a/r register', 'customer register', 'charge'] },
     ],
   },
   {
@@ -211,8 +227,15 @@ export const MENUS: Menu[] = [
   },
 ];
 
-/** Every leaf item, flattened (for the palette); admin items only for admins. */
-export function allMenuItems(admin = true): Array<MenuItem & { menu: string }> {
+/** Is this item shown to this person in this company? */
+function shows(item: MenuItem, admin: boolean, prefs: MenuPrefs): boolean {
+  if (item.admin && !admin) return false;
+  if (item.pref && prefs && prefs[item.pref] === false) return false;
+  return true;
+}
+
+/** Every leaf item, flattened (for the palette); admin items only for admins, preference-gated ones only while on. */
+export function allMenuItems(admin = true, prefs: MenuPrefs = null): Array<MenuItem & { menu: string }> {
   const out: Array<MenuItem & { menu: string }> = [];
   for (const m of MENUS) {
     for (const e of m.entries) {
@@ -221,12 +244,16 @@ export function allMenuItems(admin = true): Array<MenuItem & { menu: string }> {
       else out.push({ ...e, menu: m.label });
     }
   }
-  return admin ? out : out.filter((i) => !i.admin);
+  return out.filter((i) => shows(i, admin, prefs));
 }
 
-/** A menu's entries as this person should see them: admin items dropped, and submenus/dividers that become empty with them. */
-export function visibleEntries(entries: MenuEntry[], admin: boolean): MenuEntry[] {
-  if (admin) return entries;
+/**
+ * A menu's entries as this person should see them in this company: admin items
+ * and items whose preference is off dropped, and submenus/dividers that become
+ * empty with them.
+ */
+export function visibleEntries(entries: MenuEntry[], admin: boolean, prefs: MenuPrefs = null): MenuEntry[] {
+  if (admin && !prefs) return entries;
   const kept: MenuEntry[] = [];
   for (const e of entries) {
     if ('divider' in e) {
@@ -234,11 +261,11 @@ export function visibleEntries(entries: MenuEntry[], admin: boolean): MenuEntry[
       continue;
     }
     if ('children' in e) {
-      const children = e.children.filter((c) => !c.admin);
+      const children = e.children.filter((c) => shows(c, admin, prefs));
       if (children.length) kept.push({ ...e, children });
       continue;
     }
-    if (!e.admin) kept.push(e);
+    if (shows(e, admin, prefs)) kept.push(e);
   }
   while (kept.length && 'divider' in kept[kept.length - 1]!) kept.pop();
   return kept;
@@ -247,7 +274,7 @@ export function visibleEntries(entries: MenuEntry[], admin: boolean): MenuEntry[
 /** Desktop left navigation (QBD's icon bar), also the mobile "More" sheet. */
 export const NAV_ITEMS = [
   { label: 'Home', path: paths.home(), kinds: ['home'], icon: 'home' },
-  { label: 'Customers', path: paths.customers(), kinds: ['customers'], icon: 'customers' },
+  { label: 'Customers', path: paths.customers(), kinds: ['customers', 'statement-charges'], icon: 'customers' },
   { label: 'Vendors', path: paths.vendors(), kinds: ['vendors'], icon: 'vendors' },
   { label: 'Employees', path: paths.employees(), kinds: ['employees'], icon: 'employees' },
   { label: 'Banking', path: paths.banking(), kinds: ['banking', 'register', 'check'], icon: 'banking' },

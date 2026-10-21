@@ -28,7 +28,8 @@ interface CenterConfig {
   openTypes: TxnType[];
   /** Which side of `NameBalance` this centre's Balance is, or none (employees). */
   balance: 'receivable' | 'payable' | null;
-  newTxns: Array<{ label: string; path: string }>;
+  /** The New transaction menu; a path may be made for the selected name. */
+  newTxns: Array<{ label: string; path: string | ((e: Entity) => string) }>;
 }
 
 /** A name's own balance and the one with its jobs rolled in, positive = owed. */
@@ -55,6 +56,8 @@ const CONFIGS: Record<'customers' | 'vendors' | 'employees', CenterConfig> = {
       { label: 'Receive Payment', path: paths.form('receive-payment') },
       { label: 'Sales Receipt', path: paths.form('sales-receipt') },
       { label: 'Estimate', path: paths.form('estimate') },
+      { label: 'Sales Order', path: paths.form('sales-order') },
+      { label: 'Statement Charge', path: (e) => paths.statementCharges(e.id) },
     ],
   },
   vendors: {
@@ -246,7 +249,7 @@ function NameDetail({ entity, balance, cfg, onEdit, onAddJob, phone }: { entity:
             </Menu.Target>
             <Menu.Dropdown>
               {cfg.newTxns.map((t) => (
-                <Menu.Item key={t.label} onClick={() => open(t.path)}>
+                <Menu.Item key={t.label} onClick={() => open(typeof t.path === 'function' ? t.path(entity) : t.path)}>
                   {t.label}
                 </Menu.Item>
               ))}

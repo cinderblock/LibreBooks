@@ -14,6 +14,7 @@ import { windowTitle } from '~/windows/catalog';
 import { useWindows } from '~/windows/WindowsProvider';
 import { paths } from '~/windows/paths';
 import { allMenuItems } from './menus';
+import { useMenuPrefs } from './useMenuPrefs';
 import type { RunCommand } from './GlobalCommands';
 
 interface Entry {
@@ -36,6 +37,7 @@ export function CommandPalette({ run }: { run: RunCommand }) {
   const { data: items = [] } = useItems();
   const { data: reports = [] } = useReportCatalog();
   const admin = useIsAdmin();
+  const prefs = useMenuPrefs();
   const [query, setQuery] = useState('');
 
   const entries = useMemo<Entry[]>(() => {
@@ -43,7 +45,7 @@ export function CommandPalette({ run }: { run: RunCommand }) {
     for (const w of windows.state.windows) {
       out.push({ id: `win:${w.key}`, label: windowTitle(w, windows.state.titles), description: 'Open window', group: 'Open windows', run: () => windows.activate(w.key) });
     }
-    for (const m of allMenuItems(admin)) {
+    for (const m of allMenuItems(admin, prefs)) {
       const key = m.command ? format(m.command)[0] : undefined;
       out.push({
         id: `menu:${m.menu}:${m.label}`,
@@ -86,7 +88,7 @@ export function CommandPalette({ run }: { run: RunCommand }) {
       out.push({ id: `item:${i.id}`, label: i.full_name, description: `Item · ${ITEM_TYPE_LABEL[i.item_type]}`, group: 'Items', keys: i.sku ? [i.sku] : undefined, run: () => windows.open(paths.list('items')) });
     }
     return out;
-  }, [windows, accounts, entities, items, reports, format, run, admin]);
+  }, [windows, accounts, entities, items, reports, format, run, admin, prefs]);
 
   const prepared = useMemo(() => prepare(entries.map((e) => ({ fullName: e.label, keys: e.keys }))), [entries]);
 
