@@ -217,8 +217,12 @@ Phases are ordered; each ends usable. **Current step is marked ▶.**
   record-form engine and editors for every list, attachments on names/accounts/
   items, New company and Open .lbk from the picker, the remaining import
   options; 241 web tests, 47 Playwright) and the native-QBW research
-  (`plans/qbw-research.md`). ▶ Next: the server gaps phase D recorded in
-  `plans/web-ui.md` → "For the server". Next with the user: point
+  (`plans/qbw-research.md`). The server gaps phase D recorded are closed
+  (`c632e63`: opening balances ride with `POST /accounts` and `/items`,
+  `POST /companies` answers the summary, `PortableManifest` and
+  `MintedEnrolmentLink` generated, sales tax codes ≤ 3 chars). ▶ Running: a web
+  agent taking those up (one-request opening balances, generated types).
+  Next with the user: point
   QuickBooks' Web Connector on cad-3 at this server over HTTPS (steps in
   `plans/qbd-import.md`), run a sync, and see whether the 14 bridge gaps close.
 - Phase 1 — Ledger core
