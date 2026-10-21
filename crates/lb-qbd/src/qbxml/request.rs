@@ -51,6 +51,7 @@ pub const fn query_name(entity: QbdEntity) -> &'static str {
         QbdEntity::CreditMemo => "CreditMemoQueryRq",
         QbdEntity::SalesReceipt => "SalesReceiptQueryRq",
         QbdEntity::Estimate => "EstimateQueryRq",
+        QbdEntity::SalesOrder => "SalesOrderQueryRq",
         QbdEntity::PurchaseOrder => "PurchaseOrderQueryRq",
         QbdEntity::Bill => "BillQueryRq",
         QbdEntity::Check => "CheckQueryRq",
@@ -89,7 +90,13 @@ pub const fn capabilities(entity: QbdEntity) -> Capabilities {
         include_line_items: entity.is_transaction() && !matches!(entity, E::TimeTracking),
         include_linked_txns: matches!(
             entity,
-            E::Invoice | E::CreditMemo | E::Estimate | E::PurchaseOrder | E::Bill | E::Check
+            E::Invoice
+                | E::CreditMemo
+                | E::Estimate
+                | E::SalesOrder
+                | E::PurchaseOrder
+                | E::Bill
+                | E::Check
         ),
         owner_id: matches!(
             entity,

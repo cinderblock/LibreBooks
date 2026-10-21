@@ -1,0 +1,8 @@
+[
+  {"TxnID": "7300-1700008300", "TimeCreated": "2026-03-09T09:00:00-08:00", "TimeModified": "2026-03-31T12:00:00-08:00", "EditSequence": "1700008300",
+   "TxnNumber": "63", "CustomerRef": {"ListID": "80000033-1700000100", "FullName": "Blue Heron Cafe"},
+   "TxnDate": "2026-03-09", "RefNumber": "SO-1", "IsManuallyClosed": "false", "IsFullyInvoiced": "false",
+   "Subtotal": "450.00", "SalesTaxPercentage": "0.00", "SalesTaxTotal": "0.00", "TotalAmount": "450.00",
+   "SalesOrderLineRet": {"TxnLineID": "7301-1700008300", "ItemRef": {"ListID": "80000070-1700000200", "FullName": "Engineering"},
+     "Quantity": "3", "Rate": "150.00", "Amount": "450.00", "Invoiced": "1", "IsManuallyClosed": "false"}}
+]

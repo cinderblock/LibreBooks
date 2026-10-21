@@ -314,6 +314,16 @@ fn orders_carry_qbds_closed_and_received_marks() {
     assert!(imp.txn.is_manually_closed);
     assert!(imp.txn.lines[0].is_closed);
 
+    // A sales order QBD shows fully invoiced: closed lines; its stamp is its own.
+    let v = json!({"TxnID": "SO-9", "TxnDate": "2026-03-09", "CustomerRef": r("Acme"),
+        "IsManuallyClosed": "false", "IsFullyInvoiced": "true", "TotalAmount": "100.00",
+        "SalesOrderLineRet": {"TxnLineID": "L1", "ItemRef": r("Labor"), "Quantity": "2",
+            "Rate": "50.00", "Amount": "100.00", "Invoiced": "2", "IsManuallyClosed": "false"}});
+    let imp = qbxml::txns::txn(QbdEntity::SalesOrder, &v, &mut map).unwrap();
+    assert!(!imp.txn.is_manually_closed);
+    assert!(imp.txn.lines[0].is_closed);
+    assert_eq!(imp.txn.amount.0, 10_000);
+
     // An inactive estimate is a closed one.
     let v = json!({"TxnID": "E-1", "TxnDate": "2026-03-09", "CustomerRef": r("Acme"), "IsActive": "false",
         "TotalAmount": "100.00", "EstimateLineRet": {"TxnLineID": "L1", "ItemRef": r("Labor"),

@@ -3,4 +3,4 @@
 /**
  * A kind of QBD record the bridge exposes.
  */
-export type QbdEntity = "Account" | "Class" | "Terms" | "PaymentMethod" | "Vendor" | "Employee" | "OtherName" | "SalesRep" | "Customer" | "Item" | "ItemService" | "ItemNonInventory" | "ItemInventory" | "PayrollItemWage" | "JournalEntry" | "Invoice" | "CreditMemo" | "SalesReceipt" | "Estimate" | "PurchaseOrder" | "Bill" | "Check" | "TimeTracking" | "ReceivePayment" | "BillPaymentCheck" | "Deposit";
+export type QbdEntity = "Account" | "Class" | "Terms" | "PaymentMethod" | "Vendor" | "Employee" | "OtherName" | "SalesRep" | "Customer" | "Item" | "ItemService" | "ItemNonInventory" | "ItemInventory" | "PayrollItemWage" | "JournalEntry" | "Invoice" | "CreditMemo" | "SalesReceipt" | "Estimate" | "SalesOrder" | "PurchaseOrder" | "Bill" | "Check" | "TimeTracking" | "ReceivePayment" | "BillPaymentCheck" | "Deposit";

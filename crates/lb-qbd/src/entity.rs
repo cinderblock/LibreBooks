@@ -37,6 +37,7 @@ pub enum QbdEntity {
     CreditMemo,
     SalesReceipt,
     Estimate,
+    SalesOrder,
     PurchaseOrder,
     Bill,
     Check,
@@ -47,7 +48,7 @@ pub enum QbdEntity {
 }
 
 impl QbdEntity {
-    pub const ALL: [QbdEntity; 26] = [
+    pub const ALL: [QbdEntity; 27] = [
         QbdEntity::Account,
         QbdEntity::Class,
         QbdEntity::Terms,
@@ -67,6 +68,7 @@ impl QbdEntity {
         QbdEntity::CreditMemo,
         QbdEntity::SalesReceipt,
         QbdEntity::Estimate,
+        QbdEntity::SalesOrder,
         QbdEntity::PurchaseOrder,
         QbdEntity::Bill,
         QbdEntity::Check,
@@ -82,7 +84,7 @@ impl QbdEntity {
     /// sales reps before customers (customers name their rep); items after the
     /// accounts and vendors they use; transactions that can be paid before the
     /// payments; payments before the deposits that bank them.
-    pub const SYNC_ORDER: [QbdEntity; 22] = [
+    pub const SYNC_ORDER: [QbdEntity; 23] = [
         QbdEntity::Account,
         QbdEntity::Class,
         QbdEntity::Terms,
@@ -98,6 +100,7 @@ impl QbdEntity {
         QbdEntity::CreditMemo,
         QbdEntity::SalesReceipt,
         QbdEntity::Estimate,
+        QbdEntity::SalesOrder,
         QbdEntity::PurchaseOrder,
         QbdEntity::Bill,
         QbdEntity::Check,
@@ -130,6 +133,7 @@ impl QbdEntity {
             QbdEntity::CreditMemo => "CreditMemo",
             QbdEntity::SalesReceipt => "SalesReceipt",
             QbdEntity::Estimate => "Estimate",
+            QbdEntity::SalesOrder => "SalesOrder",
             QbdEntity::PurchaseOrder => "PurchaseOrder",
             QbdEntity::Bill => "Bill",
             QbdEntity::Check => "Check",
@@ -166,6 +170,7 @@ impl QbdEntity {
             QbdEntity::CreditMemo => "/api/v1/credit-memos",
             QbdEntity::SalesReceipt => "/api/v1/sales-receipts",
             QbdEntity::Estimate => "/api/v1/estimates",
+            QbdEntity::SalesOrder => "/api/v1/sales-orders",
             QbdEntity::PurchaseOrder => "/api/v1/purchase-orders",
             QbdEntity::Bill => "/api/v1/bills",
             QbdEntity::Check => "/api/v1/checks",
@@ -196,6 +201,7 @@ impl QbdEntity {
             QbdEntity::CreditMemo => TxnType::CreditMemo,
             QbdEntity::SalesReceipt => TxnType::SalesReceipt,
             QbdEntity::Estimate => TxnType::Estimate,
+            QbdEntity::SalesOrder => TxnType::SalesOrder,
             QbdEntity::PurchaseOrder => TxnType::PurchaseOrder,
             QbdEntity::Bill => TxnType::Bill,
             QbdEntity::Check => TxnType::Check,
@@ -265,6 +271,7 @@ impl QbdEntity {
             QbdEntity::CreditMemo => "CreditMemoRet",
             QbdEntity::SalesReceipt => "SalesReceiptRet",
             QbdEntity::Estimate => "EstimateRet",
+            QbdEntity::SalesOrder => "SalesOrderRet",
             QbdEntity::PurchaseOrder => "PurchaseOrderRet",
             QbdEntity::Bill => "BillRet",
             QbdEntity::Check => "CheckRet",

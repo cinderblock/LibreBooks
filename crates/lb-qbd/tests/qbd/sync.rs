@@ -85,6 +85,7 @@ async fn full_import_gives_the_hand_computed_books() {
         (QbdEntity::BillPaymentCheck, 1),
         (QbdEntity::SalesReceipt, 1),
         (QbdEntity::Estimate, 1),
+        (QbdEntity::SalesOrder, 1),
         (QbdEntity::PurchaseOrder, 1),
         (QbdEntity::TimeTracking, 1),
     ] {

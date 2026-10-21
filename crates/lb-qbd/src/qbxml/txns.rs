@@ -125,7 +125,8 @@ pub fn txn(
         QbdEntity::Invoice
         | QbdEntity::CreditMemo
         | QbdEntity::SalesReceipt
-        | QbdEntity::Estimate => n.sale(entity, &mut r)?,
+        | QbdEntity::Estimate
+        | QbdEntity::SalesOrder => n.sale(entity, &mut r)?,
         QbdEntity::PurchaseOrder => n.purchase_order(&mut r)?,
         QbdEntity::JournalEntry => n.journal(&mut r)?,
         QbdEntity::Deposit => n.deposit(&mut r)?,
@@ -617,13 +618,35 @@ impl Normaliser<'_> {
                 self.imp.txn.is_manually_closed = true;
             }
         }
+        // A sales order's "Closed" stamp; "fully invoiced" closes every line
+        // instead (the invoices themselves aren't linked by the import).
+        let (stamped, fully_invoiced) = if entity == QbdEntity::SalesOrder {
+            if let Some(a) = self.imp.qbd_total {
+                // Sales orders don't post either; keep QBD's total as the form's.
+                self.imp.txn.amount = a;
+            }
+            (
+                r.bool("IsManuallyClosed")?.unwrap_or(false),
+                r.bool("IsFullyInvoiced")?.unwrap_or(false),
+            )
+        } else {
+            (false, false)
+        };
+        if stamped {
+            self.imp.txn.is_manually_closed = true;
+        }
         let (line_key, group_key) = match entity {
             QbdEntity::Invoice => ("InvoiceLineRet", "InvoiceLineGroupRet"),
             QbdEntity::CreditMemo => ("CreditMemoLineRet", "CreditMemoLineGroupRet"),
             QbdEntity::SalesReceipt => ("SalesReceiptLineRet", "SalesReceiptLineGroupRet"),
+            QbdEntity::SalesOrder => ("SalesOrderLineRet", "SalesOrderLineGroupRet"),
             _ => ("EstimateLineRet", "EstimateLineGroupRet"),
         };
-        self.sales_lines(r, line_key, group_key, Side::Sale)
+        self.sales_lines(r, line_key, group_key, Side::Sale)?;
+        if fully_invoiced {
+            self.close_every_line();
+        }
+        Ok(())
     }
 
     fn journal(&mut self, r: &mut Record<'_>) -> Result<(), NormaliseError> {
