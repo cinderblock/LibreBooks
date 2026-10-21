@@ -1,4 +1,4 @@
-# LibreBooks web UI (phases A, B and C)
+# LibreBooks web UI (phases A, B, C and D)
 
 Living plan for the SPA under `web/`. Master plan: `plans/librebooks.md`
 (decisions 7 and 13). HTTP contract: `plans/api.md`. Auth library:
@@ -28,6 +28,14 @@ import envelopes (`ImportStatus`, `RunningJob`, `JobKind`, `SyncBody`,
 `import` change events, with the status long-poll answering on every progress
 step.
 
+Phase D (2026-10-20) took up four of the "What's left" items: full editors
+for every list (accounts, customers and jobs, vendors, employees, other names,
+every item type, classes, terms, payment methods, sales tax codes) as windows
+on a record-form engine beside the transaction one; attachments on names,
+accounts and items; New company and Open a .lbk file from the company picker;
+and the Import window's Options disclosures for the rest of `SyncBody` and
+`ParityBody`.
+
 User requirements this meets: mobile first class from day one; QuickBooks-quality
 input (QBD keyboard shortcuts, QuickFill, date keys, the amount calculator);
 reports and views. The Tauri desktop app loads this same SPA, so the keymap
@@ -38,9 +46,10 @@ Ctrl+W/T/N/Tab can't be captured).
 
 - Phase A was built on worktree branch `worktree-agent-ab818e840111ec792`,
   phase B on `worktree-agent-af93b28647e2ebef7` (both merged by the parent
-  session), phase C on `worktree-agent-a9571472f4dda8acb` and its import
-  follow-up on `worktree-agent-ab9ab2d43381969c5`. The parent merges `master`
-  in; the worktree never does.
+  session), phase C on `worktree-agent-a9571472f4dda8acb`, its import
+  follow-up on `worktree-agent-ab9ab2d43381969c5`, and phase D on
+  `worktree-agent-ab9aa5ed8179d8f95`. The parent merges `master` in; the
+  worktree never does.
 - Vite 8, React 19 (StrictMode), Mantine 9.7 (has `Menubar`), React Router 8.5
   (v7-style API from `react-router`), TanStack Query 5, TanStack Virtual 3,
   TypeScript 7 (`tsc`), Bun 1.4 (package manager + unit tests), Playwright 1.64,
@@ -50,10 +59,10 @@ Ctrl+W/T/N/Tab can't be captured).
   1 slot for check/tests, 2 for `vite build` and for Playwright's 2 workers):
   - `bun run dev` → http://localhost:5740. Add `?fixtures=1` (or
     `?fixtures=stress`, `&latency=0`, `&keymap=desktop|browser`).
-  - `bun run check` = `tsc --noEmit && bun test src/` (235 unit tests, 21 files).
+  - `bun run check` = `tsc --noEmit && bun test src/` (241 unit tests, 21 files).
   - `bun run test:e2e` (Playwright; starts the dev server with `VITE_FIXTURES=1`;
-    one-time `bunx playwright install chromium`). 41 smoke tests: 27 desktop
-    (1366×860) and 14 at 375px.
+    one-time `bunx playwright install chromium`). 47 smoke tests: 32 desktop
+    (1366×860) and 15 at 375px; the suite takes ~2 min.
   - `bun run build`.
 - Generated API types live in `web/src/api/generated/` (ts-rs). Never edit them.
 - Windows: the Write tool produces LF; before a commit, normalise changed files
@@ -94,6 +103,18 @@ Ctrl+W/T/N/Tab can't be captured).
 - Restoring a backup makes a **new** company; nothing is replaced in place.
 - Admin-only menu items are hidden from non-admins (`MenuItem.admin`) and the
   windows carry an `AdminGate`; the server refuses anyway.
+- List record editors are **windows** (`/lists/:list/new`, `/lists/:list/:id`),
+  not modals, though QBD's are dialogs: a half-edited customer survives a
+  switch to the register, the URL names it, and the same keys (Alt+S / Alt+A,
+  Ctrl+D, Esc) work as on a transaction form. QuickCreate stays the quick add
+  behind QuickFill's `<Add New>` and the phone's "+" sheet.
+- An account's opening balance is a general journal entry against the
+  `OpeningBalanceEquity` role account, posted after the account saves (what
+  QBD does under the hood; the API's `Account` has no balance field).
+- A new company from the picker (`POST /companies`) or a `.lbk`
+  (`POST /companies/import`) is always a NEW company, like a restore; the
+  picker refetches the session and opens it. In fixture mode such companies
+  share the demo books and differ only in their information.
 
 ## Architecture
 
@@ -121,10 +142,12 @@ web/src/
   windows/               open-window list (reducer), URL ↔ window, provider, catalog, hand-off stash
   shell/                 desktop + mobile shells, menus (with admin gating), palette, overlay, user menu
   inputs/                DateField, MoneyField, QuickFill (+ pickers, QuickCreate), LineGrid, RegisterGrid
-  forms/                 the form engine (useTxnForm) and every form with its pure draft model
+  forms/                 the form engine (useTxnForm) and every form with its pure draft model;
+                         the record engine (useRecordForm) and records/ (the list editors, AddressFields)
   reports/               request ↔ URL params, row outline + CSV, ReportViewer
   screens/               Home, Chart of Accounts, centres, Register, Reconcile, Reports, Find, Lists,
-                         Company, Banking, feeds/, Memorized, Attachments, Merge, MyAccount, admin/
+                         RecordWindow, Company (+ CompanyInfoFields), Banking, feeds/, Memorized,
+                         Attachments, Merge, MyAccount, admin/
   auth/                  SignIn (/signin), Enrol (/enroll#token=…)
   components/KeyList     keyboard-driven virtualized list used by list windows
 ```
@@ -156,6 +179,14 @@ are invalidated without cancelling a long-poll in flight, and a sync's
 | `KeyList` | List windows: virtualized, ↑↓ PgUp PgDn Home End Enter, type-to-jump. |
 | `Center` | Customer, Vendor and Employee Centers: the names with jobs indented, **Balance** (the name's own open items) and **Balance Total** (with its jobs) from `GET /balances/names`, the detail with contact, bill-to, balance card and transactions, edit, New transaction menu, Ctrl+Q QuickReport. |
 | `useTxnForm` / `TxnFormActions` | The form engine (see below) and the standard action bar: Delete, Void, Journal, Memorize, paperclip (Attachments for this transaction), Revert/Clear, Save & New, Save & Close. |
+| `useRecordForm` / `RecordFormActions` / `RecordLoader` | The list-record engine, the same shape as the transaction one and sharing its pieces (`ConflictModal`, `RemoteChangeBanner`, `FormActionBar`, `FormErrors`): a pure `RecordFormSpec` (draft ↔ record, validate, fingerprint, server-error mapping, next draft), Save & New / Save & Close, Revert/Clear, Delete (Ctrl+D) with the server's `in_use` refusal on the form, stale `edit_seq` → the conflict dialog, a change pushed while editing → banner or silent reload, Ctrl+N a fresh editor, Enter moving between fields (`enterProps`), the paperclip for `entity`/`account`/`item`. |
+| `RecordWindow` | `/lists/:list/new` (`?kind=`, `?type=`, `?parent=` presets) and `/lists/:list/:id`: loads the record and renders its editor. Titles "New Customer", "Edit Item: Walnut". |
+| `AccountEditor` | Type (fixed for role accounts), name, number, Subaccount of (same type, never inside itself), description, bank account number, tax line, cash-flow class; a new balance-sheet account's opening balance as of a date (a journal entry against Opening Balance Equity after the save); inactive. |
+| `NameEditor` | Customers and jobs (Job of), vendors, employees, other names on QBD's tabs: Address Info (names, contact details, bill-to and ship-to with Copy), Payment Settings (account no., terms, credit limit, price level, sales rep, tax code; vendors: print-as, tax id, 1099, account prefill), Additional Info (type, notes, custom fields), Job Info (status, type, dates, description), Employment (hire/release). Add Job from the Customer Center presets the parent. |
+| `ItemEditor` | Every type the generated `Item` carries: service / non-inventory / other charge (two-sided on request: purchase and sale sides), inventory (COGS, income, asset, reorder point, on hand), subtotal, group and sales tax group (members in a `LineGrid`), discount and other charge as amount or percent, payment (Undeposited Funds or an account), sales tax item (rate, agency). Type fixed once saved; subitem of the same type. |
+| `ClassEditor`, `TermsEditor`, `PaymentMethodEditor`, `SalesTaxCodeEditor` | Subclass of; standard (net days, discount % within days) or date-driven (day of month, cutoff, discount by day) terms; payment type; a ≤3-character code, taxable or not. |
+| `ListWindow` | Items, classes, terms, payment methods, sales tax codes, other names: Find, Include inactive, New / Edit / Delete, Ctrl+N / Ctrl+E (or Enter) / Ctrl+D (the server's `in_use` shown), Ctrl+Q where there's a QuickReport. The Chart of Accounts and the Centers open the same editors (Edit, New, Add job). |
+| `CompanyPicker` | `/` (one company opens by itself) and `/companies` (always the list; the user menu's "Open another company", the phone's More → Companies). Admins: New company (`CompanyInfoFields` → `POST /companies`) and Open a .lbk file (`POST /companies/import`, multipart file + name), each a NEW company opened at once after the session refetches. |
 | `PurchaseForm` | Write Checks, Enter Bills, Vendor Credits, Credit Card Charges/Credits, Item Receipts, Purchase Orders (non-posting, says so): Expenses/Items tabs, terms → due/discount dates, recall of the payee's last transaction. |
 | `SalesForm` | Invoices, Sales Receipts, Credit Memos, Estimates (non-posting): item lines with qty × rate, sales tax item and customer tax code, live server-confirmed totals (`PostingsPanel`). |
 | `PaymentForm`, `PayBills` | Receive Payments (open invoices from `GET /open`, auto-apply, credits, Undeposited Funds or a bank account) and Pay Bills (open bills from `GET /txns?types=Bill&open_only`, discounts/credits, check or card). |
@@ -164,7 +195,7 @@ are invalidated without cancelling a long-poll in flight, and a sync's
 | `Reconcile` | Begin (statement date, ending balance, service charge, interest) then the two-column window: Mark All, running difference, Enter Adjustment, Discard, Undo Last; one column at a time on phones. |
 | `BankFeeds` | Accounts summary, the download queue with Match (scored candidates) / Add (preview) / Ignore / Undo, rules (conditions → actions, reorder, apply), connections (file, SimpleFIN claim, Direct Connect, credentials write-only), file import with OFX detection and CSV mapping/preview, Amazon order matching. |
 | `MemorizedList` | Ctrl+T: every memorized transaction with its schedule, due ones first; Enter Now (`GET /memorized/:id/use` → hand-off to its form), edit schedule, delete. |
-| `Attachments` | Inbox and Attached tabs (the latter from `GET /attachments?all=true`, showing what each document is attached to with a way into the transaction) and one record's files; Add files, Take a photo (`<input capture="environment">`), image thumbnails, attach to a transaction (search by payee/memo/number), detach, delete. Reached from the paperclip on any saved form. |
+| `Attachments` | Inbox and Attached tabs (the latter from `GET /attachments?all=true`, showing what each document is attached to with a way into the transaction or the name's / account's / item's editor) and one record's files (any `record_kind`: the title and copy name the record); Add files, Take a photo (`<input capture="environment">`), image thumbnails, attach to a transaction (search by payee/memo/number) or to a name, account or item (QuickFill), detach, delete. Reached from the paperclip on any saved form or editor, and from the Centers' detail. |
 | `MergeWindow` | Names / accounts / items: pick what disappears and what it folds into; confirm; `POST /merge`. |
 | `Company` | Company information with an edit dialog (`PUT /info`, incl. the main preferences), Set Closing Date (`PUT /closing-date`), the administration grid (admins), this device's preferences. |
 | `MyAccount` | Passkeys (rename, remove), device keys (revoke), where I'm signed in (sign another device out), Add another device (an `add_device` link with QR), Add a passkey here (mints a link and follows it). |
@@ -172,7 +203,7 @@ are invalidated without cancelling a long-poll in flight, and a sync's
 | `EnrollmentsWindow` | Outstanding links (purpose, role, who for, expiry, revoke) and `MintLinkModal`: new user (role, suggested name, company access, TTL) or add device (whose); the minted link shown once as text + `QRCodeSVG`. |
 | `ServerWindow` | General (public URLs, feed auto-sync, Cloudflare Access), Updates (status, check, install with/without restart, policy), Tunnel (state, logs, token write-only, hostname, cloudflared), Backups (schedule, destinations folder/S3, encryption passphrase/age/none, retention, per-company status), Secrets (list, add, replace, delete; `in_use` refused). `PUT /server` sends the document whole; 400 `invalid` lists `detail.problems`. |
 | `BackupsWindow` | This company's backups in every destination, Back up now, Verify (checksum; contents with the passphrase/identities), Restore as a new company, Export company file. |
-| `ImportWindow` | QuickBooks import on one generated `ImportStatus` document (`GET /import/qbd`; while a job runs, `…/status?wait=` is long-polled and answers on every progress step, so the bar is live; the job's `import` change events refetch it and, on a sync's `finished`/`failed`, the books, with a notification when a job ends): Sync (now / sweep deletions / full; the running job with progress, or "waiting for the Web Connector"), the last `SyncReport` (per-entity counts, issues, mismatches, gaps, unmapped fields, created lists); Connection (the generated `ImportSettings`: bridge URL + write-only key + delay, Web Connector user name / schedule / app URL / password (set or generated once) / .qwc download, SDK file mode, company file), `400 invalid` listing `detail.problems`; Parity (`GET …/parity`: the report, QBD beside ours, differences first; a running comparison polls). |
+| `ImportWindow` | QuickBooks import on one generated `ImportStatus` document (`GET /import/qbd`; while a job runs, `…/status?wait=` is long-polled and answers on every progress step, so the bar is live; the job's `import` change events refetch it and, on a sync's `finished`/`failed`, the books, with a notification when a job ends): Sync (now / sweep deletions / full; the running job with progress, or "waiting for the Web Connector"), the last `SyncReport` (per-entity counts, issues, mismatches, gaps, unmapped fields, created lists); Connection (the generated `ImportSettings`: bridge URL + write-only key + delay, Web Connector user name / schedule / app URL / password (set or generated once) / .qwc download, SDK file mode, company file), `400 invalid` listing `detail.problems`; Parity (`GET …/parity`: the report, QBD beside ours, differences first; a running comparison polls). **Options** disclosures (phase D) hold the rest of `SyncBody` (transaction limit, date range, only some kinds of record, apply credits as server default / yes / no, re-import, full, sweep) behind their own "Sync with these options" button, and `ParityBody` (balances as of, trial balance) for Compare now; only what was set goes over the wire. |
 | Shell | Desktop: menu bar with shortcut hints, icon rail, window tabs with unsaved dots, palette button, live indicator, fixture badge, theme, user menu (My Account, Sign out). Phone: header with Back/search, stacked windows, bottom tabs with "+" create sheet and More sheet (incl. My Account). |
 | `CommandPalette` | Ctrl+K: forms, reports, accounts, names, items, open windows; QuickFill ranking; grouped; admin items only for admins. |
 | `ShortcutOverlay` | `?`/F1: every key on this platform by scope, the ones live in this window highlighted, plus field keys; keymap switch. |
@@ -229,6 +260,18 @@ Estimates, Deposits, Transfers, Journal Entries, Reconcile, Bank Feeds, Report
 Center, Vendor Center) exist as commands with empty keymaps, so menus, the
 palette and a future keymap editor reach them.
 
+Phase D added no commands; it widened where the existing ones apply. In every
+list window (Chart of Accounts, the Centers, Item / Class / Terms / Payment
+Method / Sales Tax Code / Other Names lists): **New** opens a fresh editor,
+**Edit** (or Enter) the selected record's, **Delete** asks and shows the
+server's "in use" refusal, **QuickReport** where the list has one. In an
+editor: **Save & New**, **Save & Close**, **New** (another editor of the
+kind), **Delete**, **Close window** (asks if unsaved), and Enter moves to the
+next field as Tab does (fields that take Enter themselves, an open QuickFill
+list, the calculator, a date field, a dropdown, keep it). Esc inside an open
+Select or MultiSelect dropdown closes the dropdown, not the window (a capture-
+phase check in `KeyboardProvider`).
+
 Rules: the browser keymap is derived from QBD's by dropping what browsers keep
 (Ctrl+W/T/N and their Shift forms, Ctrl+Tab, Ctrl+PgUp/PgDn; Ctrl+Q off Windows)
 and substituting the alternate; macOS also reserves ⌘Q/⌘H/⌘M, in the desktop app
@@ -254,7 +297,8 @@ window, so popovers, entry rows and dialogs that handle Escape themselves must
   reports scroll sideways inside the grid with the label column sticky;
   reconcile shows one column at a time with the difference pinned; bank-feed
   downloads and attachments are cards; the user detail is a full-screen drawer;
-  nothing scrolls the page sideways (asserted at 375px).
+  the list editors stack their fields under the tabs with the Save bar fixed
+  above the tab bar; nothing scrolls the page sideways (asserted at 375px).
 - Inputs are 16px on touch (no iOS zoom), use `inputMode`/`enterKeyHint`, QuickFill
   opens its list on tap, keyboard hints are hidden on touch. Safe-area insets
   respected. The camera input uses `capture="environment"`.
@@ -310,6 +354,18 @@ change events, and:
   and removes the duplicate.
 - The closing date refuses with 423 `closed_period` and `detail.closing_date`,
   as the server does.
+- **Companies** (phase D): `POST /companies` (name required, month 1–12) and
+  `POST /companies/import` (any non-empty file passes; the name comes from
+  the request, else the file name; the manifest carries the file's size and
+  SHA-256) make extra companies the session and `GET /companies` list and
+  `/c/:id/…` answer for; a restored backup joins them. They share the one set
+  of demo books and differ only in their `CompanyInfo` (`PUT /info` is per
+  company).
+- The sync report follows the options: `full` lists everything again; a
+  `txn_limit` or date range is a `partial_run` (watermarks untouched);
+  `entities` narrows the report to those kinds; `reimport` counts the
+  unchanged as updated. Parity's `as_of` and `trial_balance` show in the
+  summary notes.
 
 `?fixtures=stress` adds 5,000 vendors and a 100,000-line "Stress Test Checking"
 register. Console handle: `__librebooks.simulateRemoteEdit(txnId)`,
@@ -376,7 +432,30 @@ register. Console handle: `__librebooks.simulateRemoteEdit(txnId)`,
   waiting; retry.
 - Playwright: `page.goto` resets the in-memory fixture books, so a test that
   needs its own earlier writes navigates in-app (menus, Ctrl+K, or `pushState`
-  + a `popstate` event). Two workers; the suite takes ~1.6 min.
+  + a `popstate` event). Two workers; the suite takes ~2 min.
+- **Esc reached the window from an open dropdown** (phase D): Mantine's
+  Select/MultiSelect close their list on Esc without `preventDefault`, and by
+  the time the window's bubble listener ran React had already re-rendered
+  `aria-expanded="false"`, so the window-close shortcut fired. The provider
+  now samples `aria-expanded` in a capture-phase listener first. A test that
+  presses Escape with a dropdown open is the regression check.
+- Mantine `MultiSelect`'s input is a `combobox` role too (not a textbox);
+  `NumberInput`'s is a `textbox`. `Collapse` takes `expanded`.
+- The fixture status long-poll answers on every progress step, so a test that
+  wants the finished report loops `while (st.running)` on `qbdStatus(co, 10)`.
+- The record engine's Enter-moves-on handler runs on the editor's root in the
+  bubble phase and only when nothing `preventDefault`ed: QuickFill's open list,
+  the calculator and the date field consume their Enter; a closed Mantine
+  Select opens on Enter with `preventDefault`, so it keeps it too. Checkboxes,
+  buttons and textareas are skipped.
+- The generated `Account` has no opening balance and `Item.quantity_on_hand`
+  is "maintained by the store": the account editor posts a journal entry for
+  the balance after the save (`afterSave`; a failure there leaves the account
+  saved and reopens its editor with the error), and the item editor sends the
+  on-hand quantity on create only, read-only afterwards.
+- `PortableManifest` (the `.lbk` manifest `POST /companies/import` returns in
+  `from`) is not generated; `api/types.ts` has a local stand-in, with
+  `CreatedCompany` and `ImportedCompany` around it.
 
 ## Progress log
 
@@ -442,31 +521,43 @@ Phase C follow-up (commits on `worktree-agent-ab9ab2d43381969c5`, 2026-10-20):
       long-poll); Playwright 41/41.
 - [x] This document.
 
-Phase D (worktree `worktree-agent-ab9aa5ed8179d8f95`, 2026-10-20; "What's
-left" items 2, 5, 6 and 8), in progress:
+Phase D (commits on `worktree-agent-ab9aa5ed8179d8f95`, 2026-10-20; "What's
+left" items 2, 5, 6 and 8):
 
-- [ ] Step 1: `POST /companies` and `POST /companies/import` in the client,
-      HTTP and fixture (extra companies share the demo books), with tests.
-- [ ] Step 2: the record-form engine (`forms/useRecordForm.tsx`, sharing the
-      transaction engine's dialogs, action bar and error model) and the list
-      editors as windows (`/lists/:list/new`, `/lists/:list/:id`): accounts,
-      names, items, classes, terms, payment methods, sales tax codes; the list
-      windows open them (Ctrl+N / Ctrl+E / Enter / Ctrl+D).
-- [ ] Step 3: Attachments on names, accounts and items; the paperclip on the
-      editors; the Attach-to dialog targets any record kind.
-- [ ] Step 4: the company picker's New company and Open a .lbk file (admins),
-      reachable from the user menu when one company auto-opens.
-- [ ] Step 5: Import window Options disclosures (`SyncBody`, `ParityBody`).
-- [ ] Step 6: Playwright coverage (customer and item editors, new company,
-      import options; a 375px editor pass); this document.
+- [x] `POST /companies` and `POST /companies/import` in the client, HTTP
+      (JSON; multipart `file` + `name`) and fixture (extra companies share the
+      demo books; a restored backup joins them), `blankCompanyInfo`, blank
+      records for the small lists; tests on the fixture and the HTTP client.
+- [x] The record-form engine (`forms/useRecordForm.tsx`) and the editors as
+      windows: accounts (opening balance), names (customers, jobs, vendors,
+      employees, other names), items (every type), classes, terms, payment
+      methods, sales tax codes; the list windows, the Chart of Accounts and
+      the Centers open them; Sales Tax Code List in the Lists menu.
+- [x] Attachments on names, accounts and items: the window's title and copy,
+      the Attach-to dialog's record kinds, the Attached tab's way into the
+      editor, the paperclip on editors and in the Centers.
+- [x] The company picker: New company (the shared `CompanyInfoFields`) and
+      Open a .lbk file; `/companies` from the user menu and the phone's More.
+- [x] Import window Options disclosures (`SyncBody`, `ParityBody`); the
+      fixture's reports follow the options.
+- [x] Esc in an open dropdown no longer closes the window (a side issue found
+      by the Options test; its own commit).
+- [x] `bun run check` green (241 tests); Playwright 47/47 (new: customer and
+      item created and edited, an in-use delete refused and terms, attachments
+      on a vendor, the picker's new company and .lbk, the Options disclosures;
+      a vendor editor at 375px).
+- [x] This document.
 
 ## What's left (next phases)
 
 1. **Stand-ins without a generated twin** (see Findings) stay until the server
    exports them; `MintedEnrolment` would need `url` to replace
    `MintedEnrolmentLink`.
-2. **Lists**: item edit form and the other list editors (terms, classes, payment
-   methods, sales tax codes) — the list windows are read-only beyond quick add.
+2. **Lists, the rest**: sales reps and customer/vendor/job types have routes
+   but no editor or list window (`RecordWindow` says so); inventory assemblies
+   and fixed assets open in the item editor with their common fields only;
+   QBD's "Add/Edit Multiple List Entries" grid; a price level list (the API
+   has a percent per customer, no list).
 3. **Forms not built**: Pay Employees (payroll; out of scope for now), Statement
    Charges, Sales Orders (`sales_orders_enabled`), progress invoicing from an
    estimate, Receive Items against a PO (the form exists; linking lines to the PO
@@ -474,19 +565,19 @@ left" items 2, 5, 6 and 8), in progress:
 4. **Reports**: PDF/XLSX export and print styles beyond the basics; cash basis
    in the fixture engine; the real catalog's per-report params beyond what the
    options bar covers.
-5. **Attachments on list records** (names, accounts, items): the API takes any
-   `record_kind`; the window only offers transactions as targets.
-6. **Company creation** (`POST /companies`) and switching from the picker; the
-   restored-company flow relies on the picker refreshing.
+5. **Attachments**: done in phase D for every record kind; left: a filter box
+   on the Attached tab once a company has many documents (also under 7).
+6. **Companies**: creation and import are in the picker (phase D); left:
+   renaming or deleting a company (no API), and switching companies from
+   inside the shell without passing through the picker.
 7. **Polish**: code-split screens (main chunk ~300 KB gzip), Alt+letter menu
    mnemonics (conflicts with browser menus need care), ESLint (the code carries
    `react-hooks` disable comments in anticipation), the Home page's admin
    shortcuts, a filter box on the Attached tab once a company has many
    documents.
-8. **Import options the UI doesn't offer yet**: `SyncBody` has `reimport`,
-   `txn_limit`, `txn_from`/`txn_to`, `apply_credits`, `entities`; `ParityBody`
-   has `as_of` and `trial_balance`. The client sends them; the window only has
-   Sync / sweep / full and Compare now.
+8. **Import options**: every field of `SyncBody` and `ParityBody` is in the
+   Options disclosures (phase D). Left: remembering the last options per
+   company, and a Web Connector "run now" that the transport can't offer.
 
 ## For the server
 
@@ -521,6 +612,35 @@ Still open:
 - Restoring a backup creates a company; `GET /session` must include it for the
   picker to show it (the UI invalidates the session query).
 
+Found in phase D:
+
+- **An account's opening balance.** `Account` carries no balance; QBD's "Enter
+  Opening Balance" is a journal entry against Opening Balance Equity, which
+  the account editor posts itself after the save (`POST /txns`, a
+  `JournalEntry` with two `Journal` lines dated as of the chosen day). Two
+  requests where QBD's dialog is one; a failure between them leaves the
+  account saved without its balance (the editor reopens with the error). An
+  `opening_balance` + `as_of` on `POST /accounts` would make it atomic.
+- **`Item.quantity_on_hand`** is "maintained by the store". The editor sends
+  it on create (QBD's New Item takes an on-hand quantity and value as of a
+  date, which posts an inventory adjustment) and shows it read-only after.
+  Whether the server honours it on create, or needs an `InventoryAdjustment`
+  transaction, is unverified.
+- **`POST /companies` returns `{ id }` only**; the picker refetches
+  `/session` to learn the name and role before it can list the company. A
+  `CompanySummary` back would save the round-trip.
+- **`PortableManifest`** (`from` on `POST /companies/import`) isn't among the
+  generated types; `api/types.ts` has a stand-in (`kind`, `format`,
+  `app_version`, `company_name`, `schema_version`, `created_at`,
+  `database_size`, `database_sha256`).
+- **No server-side rule for a sales tax code's length**; the editor enforces
+  QBD's three characters. The server would accept a longer one from another
+  client.
+- **Parent validity for list records** (a record inside itself, a subaccount
+  of another type, a job under a vendor) is enforced by the editors' pickers;
+  whether the server refuses such a `parent_id` is unverified (the fixture
+  only checks the parent exists).
+
 ## Open questions for the user
 
 1. **Enter in grids**: default is "next field" (fast keyboard entry); QBD's own
@@ -546,3 +666,11 @@ Still open:
   a save (clear the field on success).
 - Don't `page.goto` mid-test in Playwright when the test depends on earlier
   fixture writes.
+- Don't build a list editor as a modal inside its list window; it's a `record`
+  window on `useRecordForm` (see Decisions), so unsaved edits survive window
+  switches and the keys are the transaction forms'.
+- Don't give the opening-balance entry a number or compute the balance's sign
+  client-side beyond `isDebitNormal`: a bank balance debits the account, a
+  loan balance credits it, and Opening Balance Equity takes the other side.
+- Don't press Escape in a Playwright test expecting the window to stay open
+  unless a dropdown is open (then Esc is the dropdown's).
