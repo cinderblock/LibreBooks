@@ -5,7 +5,7 @@
 // screen with a back arrow.
 
 import { ActionIcon, Alert, Badge, Button, Card, Checkbox, Group, Menu, SimpleGrid, Skeleton, Stack, Table, Text, TextInput, Title } from '@mantine/core';
-import { IconChevronDown, IconPencil, IconPlus, IconSearch } from '@tabler/icons-react';
+import { IconChevronDown, IconPaperclip, IconPencil, IconPlus, IconSearch } from '@tabler/icons-react';
 import { useEffect, useMemo, useState } from 'react';
 import { describeError } from '~/api/errors';
 import { useEntities, useNameBalanceMap, useTxns } from '~/api/hooks';
@@ -235,6 +235,9 @@ function NameDetail({ entity, balance, cfg, onEdit, onAddJob, phone }: { entity:
               Add job
             </Button>
           )}
+          <ActionIcon variant="default" size="input-xs" aria-label="Attachments" title="Attachments (documents, photos)" onClick={() => open(paths.attachments({ kind: 'entity', id: entity.id }))}>
+            <IconPaperclip size={14} />
+          </ActionIcon>
           <Menu position="bottom-end">
             <Menu.Target>
               <Button size="xs" rightSection={<IconChevronDown size={14} />}>

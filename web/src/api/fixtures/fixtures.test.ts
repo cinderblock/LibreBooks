@@ -452,6 +452,12 @@ describe('administration', () => {
     expect(await api.attachments(co, { record_kind: 'txn', record_id: txn.id })).toHaveLength(2);
     await api.attachRecord(co, first.id, null);
     expect(await api.attachments(co)).toHaveLength(2);
+    // Any record kind the API takes: a name, an account, an item.
+    const vendor = api.find('entity', 'Office Depot')!;
+    await api.attachRecord(co, first.id, { record_kind: 'entity', record_id: vendor });
+    expect((await api.attachments(co, { record_kind: 'entity', record_id: vendor })).map((a) => a.id)).toEqual([first.id]);
+    expect((await api.attachments(co, { all: true })).find((a) => a.id === first.id)?.record_kind).toBe('entity');
+    await api.attachRecord(co, first.id, null);
     await api.deleteAttachment(co, meta.id);
     expect(await api.attachments(co, { record_kind: 'txn', record_id: txn.id })).toHaveLength(0);
     expect((await rejects(api.uploadAttachment(co, new File([], 'empty.txt')))).code).toBe('invalid');

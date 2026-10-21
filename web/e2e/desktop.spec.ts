@@ -500,6 +500,24 @@ test('attachments: upload to the inbox, then attach to a transaction', async ({ 
   await expect(win.getByTestId('attachment-row')).toHaveCount(0);
   await win.getByRole('tab', { name: 'Inbox' }).click();
   await expect(win.getByTestId('attachment-row')).toHaveCount(3);
+  // Any record kind: attach the same file to a vendor, then follow it into the vendor's editor and back with its paperclip.
+  await win.getByTestId('attachment-row').filter({ hasText: 'receipt.txt' }).getByRole('button', { name: 'Attach to…' }).click();
+  const toName = page.getByRole('dialog', { name: /Attach "receipt.txt"/ });
+  await toName.getByText('Name', { exact: true }).click();
+  const who = toName.getByRole('combobox', { name: 'Attach to name' });
+  await who.pressSequentially('Office D');
+  await page.keyboard.press('Tab');
+  await expect(who).toHaveValue('Office Depot');
+  await toName.getByRole('button', { name: 'Attach', exact: true }).click();
+  await expect(page.getByText('Attached.').last()).toBeVisible();
+  await win.getByRole('tab', { name: 'Attached' }).click();
+  await win.getByRole('button', { name: 'Open name: Office Depot' }).click();
+  await expect(page.getByRole('tab', { name: 'Edit Vendor: Office Depot' })).toBeVisible();
+  await page.getByTestId('record-vendor').getByRole('button', { name: 'Attachments' }).click();
+  await expect(page.getByRole('tab', { name: 'Attachments: Office Depot' })).toBeVisible();
+  const mine = page.locator('[data-window^="attachments:entity:"]');
+  await expect(mine.getByText('On this name')).toBeVisible();
+  await expect(mine.getByTestId('attachment-row').filter({ hasText: 'receipt.txt' }).first()).toBeVisible();
 });
 
 test('the Customer Center shows Balance and Balance Total: a job carries its invoice, the customer rolls it up', async ({ page }) => {
