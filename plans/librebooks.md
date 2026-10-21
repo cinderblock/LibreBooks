@@ -220,8 +220,10 @@ Phases are ordered; each ends usable. **Current step is marked ▶.**
   (`plans/qbw-research.md`). The server gaps phase D recorded are closed
   (`c632e63`: opening balances ride with `POST /accounts` and `/items`,
   `POST /companies` answers the summary, `PortableManifest` and
-  `MintedEnrolmentLink` generated, sales tax codes ≤ 3 chars). ▶ Running: a web
-  agent taking those up (one-request opening balances, generated types).
+  `MintedEnrolmentLink` generated, sales tax codes ≤ 3 chars). Merged report
+  export in XLSX and PDF on a shared render layout (`4b59149`; the Report
+  Center still offers CSV only: UI follow-up). ▶ Running: a web agent taking
+  the server fields up (one-request opening balances, generated types).
   Next with the user: point
   QuickBooks' Web Connector on cad-3 at this server over HTTPS (steps in
   `plans/qbd-import.md`), run a sync, and see whether the 14 bridge gaps close.
