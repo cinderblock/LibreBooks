@@ -35,10 +35,36 @@ entity_id: EntityId | null, billable: BillableStatus, sales_tax_code_id: SalesTa
  */
 payment_method_id: PaymentMethodId | null, check_number: string | null, 
 /**
- * For deposit lines that move a payment out of Undeposited Funds; for item
- * lines received against a purchase order or billed from a receipt.
+ * The transaction this line fulfils or draws on. Legal links, checked by
+ * the store when saving (the names must match, a job rolling up to its
+ * customer; an item line must link to a line with the same item):
+ *
+ * - a deposit line → the payment it moves out of Undeposited Funds;
+ * - an item receipt, bill, check or credit card charge line → a purchase
+ *   order line of the same vendor (receiving against the PO);
+ * - a bill line → an item receipt line of the same vendor ("Enter Bill for
+ *   Received Items"; the receipt, not the bill, counts toward the PO);
+ * - an invoice or sales receipt line → a sales order line of the same
+ *   customer:job;
+ * - an invoice line → an estimate line (progress invoicing, by quantity or
+ *   by amount / percent).
+ *
+ * See [`TxnType::link_targets`]. A link to a closed order or closed line is
+ * refused; quantities are not capped (QBD allows over-receipt).
  */
-linked_txn_id: TxnId | null, linked_line_id: LineId | null, service_date: string | null, other1: string | null, other2: string | null, 
+linked_txn_id: TxnId | null, 
+/**
+ * The line on `linked_txn_id` this one fulfils. `None` on deposit lines,
+ * and on links an import carried with only the transaction id (the store
+ * then matches by item).
+ */
+linked_line_id: LineId | null, 
+/**
+ * On a purchase order, sales order or estimate line: closed by hand (QBD's
+ * "Clsd" check), so nothing more is expected against it however much was
+ * received or invoiced. Meaningless on other forms.
+ */
+is_closed?: boolean, service_date: string | null, other1: string | null, other2: string | null, 
 /**
  * Inventory adjustments: quantity change; builds: quantity built.
  */
