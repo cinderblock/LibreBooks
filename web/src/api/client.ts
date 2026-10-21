@@ -72,6 +72,7 @@ import type {
   LoginFinish,
   LoginStart,
   MemorizedDue,
+  OpeningFor,
   PreviewOutcome,
   ReconcileOverview,
   ReconcileStatus,
@@ -139,7 +140,13 @@ export interface ApiClient {
 
   list<L extends ListName>(co: CompanyId, list: L, query?: ListQuery): Promise<ListRecords[L][]>;
   getRecord<L extends ListName>(co: CompanyId, list: L, id: string): Promise<ListRecords[L]>;
-  createRecord<L extends ListName>(co: CompanyId, list: L, record: ListRecords[L]): Promise<ListRecords[L]>;
+  /**
+   * `POST /:list` → the saved record. `opening` rides with the record for an
+   * account (its opening balance) or an inventory item (on hand and value): the
+   * server posts the entry in the same write, so a new account never lands
+   * without its balance.
+   */
+  createRecord<L extends ListName>(co: CompanyId, list: L, record: ListRecords[L], opening?: OpeningFor<L> | null): Promise<ListRecords[L]>;
   updateRecord<L extends ListName>(co: CompanyId, list: L, record: ListRecords[L]): Promise<ListRecords[L]>;
   deleteRecord(co: CompanyId, list: ListName, id: string, editSeq: number): Promise<void>;
 

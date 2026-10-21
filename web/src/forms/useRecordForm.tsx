@@ -14,12 +14,11 @@ import { notifications } from '@mantine/notifications';
 import { IconPaperclip } from '@tabler/icons-react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
-import type { ApiClient } from '~/api/client';
 import { useApi, useCompanyId, useRecordChanges } from '~/api/context';
 import { describeError, isApiError, type ApiError } from '~/api/errors';
 import { useDeleteRecord, useRecord, useSaveRecord } from '~/api/hooks';
 import { eventKindOf, qk } from '~/api/keys';
-import type { CompanyId, ListName, ListRecords } from '~/api/types';
+import type { ListName, ListRecords, OpeningFor } from '~/api/types';
 import { useShortcut } from '~/keyboard/KeyboardProvider';
 import { useIsMobile } from '~/lib/useMobile';
 import { paths } from '~/windows/paths';
@@ -36,6 +35,12 @@ export interface RecordFormSpec<L extends ListName, D> {
   newDraft(params: Record<string, string>): D;
   fromRecord(r: ListRecords[L]): D;
   toRecord(d: D): ListRecords[L];
+  /**
+   * What rides with a NEW record's `POST` beside the record itself: an
+   * account's opening balance, an inventory item's quantity and value on
+   * hand. The server posts the entry in the same write (null: nothing).
+   */
+  opening?(d: D): OpeningFor<L> | null;
   validate(d: D): FormErrors;
   /** Nothing entered yet (closing a new form needn't ask). */
   isEmpty(d: D): boolean;
@@ -61,11 +66,6 @@ export interface RecordFormOptions<L extends ListName, D> {
   params: Record<string, string>;
   /** After Save & New: put the caret where entry starts. */
   onSavedNew?(): void;
-  /**
-   * Runs once the record is saved (a new account's opening-balance entry). The
-   * record stays saved if this fails; the error shows on the form.
-   */
-  afterSave?(d: D, saved: ListRecords[L], api: ApiClient, co: CompanyId): Promise<void>;
 }
 
 export interface RecordForm<L extends ListName, D> {
@@ -95,7 +95,7 @@ export interface RecordForm<L extends ListName, D> {
   enterProps: { onKeyDown(e: KeyboardEvent<HTMLElement>): void };
 }
 
-export function useRecordForm<L extends ListName, D>({ spec, saved, params, onSavedNew, afterSave }: RecordFormOptions<L, D>): RecordForm<L, D> {
+export function useRecordForm<L extends ListName, D>({ spec, saved, params, onSavedNew }: RecordFormOptions<L, D>): RecordForm<L, D> {
   const api = useApi();
   const co = useCompanyId();
   const qc = useQueryClient();
@@ -163,7 +163,8 @@ export function useRecordForm<L extends ListName, D>({ spec, saved, params, onSa
     }
     let out: ListRecords[L];
     try {
-      out = await saveM.mutateAsync(rec);
+      // A new record's opening entry (an account's balance, an item's on hand) goes in the same request.
+      out = await saveM.mutateAsync({ record: rec, opening: !saved && spec.opening ? spec.opening(d) : null });
     } catch (e) {
       if (isApiError(e) && e.isStaleConflict) setConflict(true);
       else if (isApiError(e)) setErrors(spec.serverErrors(d, e));
@@ -171,19 +172,6 @@ export function useRecordForm<L extends ListName, D>({ spec, saved, params, onSa
       return;
     }
     notifications.show({ message: spec.savedMessage(out), color: 'teal' });
-    if (afterSave) {
-      try {
-        await afterSave(d, out, api, co);
-      } catch (e) {
-        // The record is saved; what follows it isn't. Show the editor for the saved record with the problem on it.
-        setErrors({ ...noErrors(), form: [describeError(e)] });
-        if (!saved) {
-          win.close({ force: true });
-          windows.open(paths.record(spec.list, out.id));
-        }
-        return;
-      }
-    }
     if (mode === 'close') {
       win.close({ force: true });
     } else if (saved) {

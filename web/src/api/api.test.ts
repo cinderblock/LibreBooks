@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { QueryClient } from '@tanstack/react-query';
-import { blankCompanyInfo, blankLine, blankTxn } from './blank';
+import { blankAccount, blankCompanyInfo, blankLine, blankTxn } from './blank';
 import { txnQueryParams } from './client';
 import { ApiError, apiErrorFromBody, errorTargets } from './errors';
 import { type FetchFn, HttpApiClient } from './http';
@@ -116,6 +116,22 @@ describe('HttpApiClient', () => {
     // Multipart: the browser sets the content type with its boundary.
     expect((upload.init.headers as Record<string, string>)['Content-Type']).toBeUndefined();
     expect((upload.init.headers as Record<string, string>)['X-LibreBooks']).toBe('1');
+  });
+
+  test('a new account posts its opening balance in the same request, beside the record', async () => {
+    const calls: Array<{ url: string; init: RequestInit }> = [];
+    const fake = (async (url: string, init: RequestInit) => {
+      calls.push({ url, init });
+      return new Response(JSON.stringify({ ...JSON.parse(init.body as string), edit_seq: 1 }), { status: 201 });
+    }) as unknown as FetchFn;
+    const api = new HttpApiClient({ fetch: fake });
+    const savings = blankAccount('Savings', 'Bank');
+    await api.createRecord('co1', 'accounts', savings, { opening_balance: 150_000, as_of: '2026-10-01' });
+    expect(calls[0]!.url).toBe('/api/v1/c/co1/accounts');
+    expect(JSON.parse(calls[0]!.init.body as string)).toMatchObject({ id: savings.id, name: 'Savings', opening_balance: 150_000, as_of: '2026-10-01' });
+    // Without an opening: the record alone.
+    await api.createRecord('co1', 'accounts', savings);
+    expect(JSON.parse(calls[1]!.init.body as string)).not.toHaveProperty('opening_balance');
   });
 
   test('turns error envelopes into ApiError', async () => {

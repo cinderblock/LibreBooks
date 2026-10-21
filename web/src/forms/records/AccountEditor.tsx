@@ -2,21 +2,20 @@
 // the type, the name and number, "Subaccount of", description, the bank's
 // account number, the tax-line mapping, and for a new balance-sheet account an
 // opening balance as of a date. The opening balance is what QBD does under the
-// hood too: a general journal entry against Opening Balance Equity, posted
-// right after the account saves.
+// hood too: a general journal entry against Opening Balance Equity, which the
+// server posts in the same write as the account (`opening_balance` + `as_of`
+// on `POST /accounts`), so the account never lands without its balance.
 
 import { Checkbox, Group, Select, SimpleGrid, Text, Textarea, TextInput, Title } from '@mantine/core';
-import { useQueryClient } from '@tanstack/react-query';
 import { useMemo, useRef } from 'react';
-import { blankAccount, blankLine, blankTxn } from '~/api/blank';
+import { blankAccount } from '~/api/blank';
 import { useAccounts, useBalanceMap, useCompanyInfo } from '~/api/hooks';
-import { invalidateTxnDerived } from '~/api/keys';
 import type { Account, AccountType, CashFlowClass } from '~/api/types';
 import { DateField } from '~/inputs/DateField';
 import { MoneyField } from '~/inputs/MoneyField';
 import { accountOptions } from '~/inputs/pickers';
 import { QuickFill } from '~/inputs/QuickFill';
-import { ACCOUNT_TYPES, ACCOUNT_TYPE_LABEL, isBalanceSheet, isDebitNormal } from '~/lib/accountTypes';
+import { ACCOUNT_TYPES, ACCOUNT_TYPE_LABEL, isBalanceSheet } from '~/lib/accountTypes';
 import { todayIso, type IsoDate } from '~/lib/dates';
 import type { Cents } from '~/lib/money';
 import { paths } from '~/windows/paths';
@@ -27,7 +26,7 @@ import { fullNameOf, possibleParents, recordServerErrors, requireName, textOrNul
 
 export interface AccountDraft {
   rec: Account;
-  /** A new balance-sheet account's opening balance (natural sign), posted as a journal entry after the save. */
+  /** A new balance-sheet account's opening balance (natural sign), sent with the create as `opening_balance`. */
   opening: Cents | null;
   openingDate: IsoDate;
 }
@@ -49,7 +48,7 @@ function takesOpeningBalance(t: AccountType): boolean {
 export function validateAccount(d: AccountDraft): FormErrors {
   const e = noErrors();
   requireName(e, d.rec.name, 'an account name');
-  if (d.opening !== null && d.opening !== 0 && !d.openingDate) e.header.openingDate = 'Enter the date the balance is as of.';
+  if (d.opening && !d.openingDate) e.header.openingDate = 'Enter the date the balance is as of.';
   return e;
 }
 
@@ -59,6 +58,9 @@ const spec: RecordFormSpec<'accounts', AccountDraft> = {
   newDraft: (params) => ({ rec: blankAccount('', isAccountType(params.type) ? params.type : 'Expense'), opening: null, openingDate: todayIso() }),
   fromRecord: (rec) => ({ rec, opening: null, openingDate: todayIso() }),
   toRecord: (d) => ({ ...d.rec, name: d.rec.name.trim(), number: textOrNull(d.rec.number), description: textOrNull(d.rec.description), bank_account_number: textOrNull(d.rec.bank_account_number), tax_line: textOrNull(d.rec.tax_line) }),
+  // Natural sign as entered: the server debits a bank balance and credits a loan's, Opening Balance Equity taking the
+  // other side. A balance typed before the type changed to one without the field (the field hides) is not sent.
+  opening: (d) => (d.opening && takesOpeningBalance(d.rec.account_type) ? { opening_balance: d.opening, as_of: d.openingDate } : null),
   validate: validateAccount,
   isEmpty: (d) => !d.rec.name.trim() && !d.rec.number && !d.rec.description && d.opening === null,
   fingerprint: (d) => JSON.stringify([spec.toRecord(d), d.opening, d.openingDate]),
@@ -76,28 +78,7 @@ export function AccountEditor({ saved, params }: { saved: Account | null; params
   const balances = useBalanceMap();
   const { data: info } = useCompanyInfo();
   const firstField = useRef<HTMLInputElement>(null);
-  const qc = useQueryClient();
-  const form = useRecordForm({
-    spec,
-    saved,
-    params,
-    onSavedNew: () => firstField.current?.focus(),
-    afterSave: async (d, out, api, co) => {
-      if (saved || !d.opening) return;
-      const equity = accounts.find((a) => a.role === 'OpeningBalanceEquity');
-      if (!equity) throw new Error('The company has no Opening Balance Equity account; enter the opening balance as a journal entry instead.');
-      // Natural sign in, debit-positive out: a bank balance debits the account, a loan balance credits it.
-      const debit = isDebitNormal(out.account_type) ? d.opening : -d.opening;
-      const je = blankTxn('JournalEntry', d.openingDate);
-      je.memo = 'Opening Balance';
-      je.lines = [
-        { ...blankLine('Journal'), account_id: out.id, amount: debit, description: 'Opening Balance' },
-        { ...blankLine('Journal'), account_id: equity.id, amount: -debit, description: 'Opening Balance' },
-      ];
-      await api.createTxn(co, je);
-      invalidateTxnDerived(qc, co);
-    },
-  });
+  const form = useRecordForm({ spec, saved, params, onSavedNew: () => firstField.current?.focus() });
   const { draft, update, errors, mobile } = form;
   const rec = draft.rec;
   const type = rec.account_type;
@@ -172,7 +153,7 @@ export function AccountEditor({ saved, params }: { saved: Account | null; params
           <MoneyField label="Opening balance" value={draft.opening} onChange={(opening) => update({ opening })} blankZero aria-label="Opening balance" />
           <DateField label="as of" value={draft.openingDate} onChange={(d) => d && update({ openingDate: d })} error={errors.header.openingDate} aria-label="Opening balance as of" />
           <Text size="xs" c="dimmed" style={{ alignSelf: 'end' }}>
-            Posted as a journal entry against Opening Balance Equity when the account saves. Leave blank to enter history as transactions.
+            Saved with the account as a journal entry against Opening Balance Equity. Leave blank to enter history as transactions.
           </Text>
         </div>
       )}

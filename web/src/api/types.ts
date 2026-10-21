@@ -521,6 +521,32 @@ export interface ListRecords {
 export type ListName = keyof ListRecords;
 export type ListRecord = ListRecords[ListName];
 
+/**
+ * What `POST /accounts` takes beside the record: the opening balance (natural
+ * sign: a bank balance is positive, so is a loan's) the server posts as a
+ * journal entry against Opening Balance Equity in the same write. `as_of`
+ * defaults to today.
+ */
+export interface AccountOpening {
+  opening_balance: Money;
+  as_of?: string;
+}
+
+/**
+ * What `POST /items` takes beside an inventory item: the quantity on hand and
+ * its total value as of a date, an inventory adjustment against Opening
+ * Balance Equity in the same write. The returned item carries the resulting
+ * on-hand quantity and average cost.
+ */
+export interface ItemOpening {
+  opening_quantity: string;
+  opening_value: Money;
+  as_of?: string;
+}
+
+/** The opening extras a list's `POST` accepts (none for the other lists). */
+export type OpeningFor<L extends ListName> = L extends 'accounts' ? AccountOpening : L extends 'items' ? ItemOpening : never;
+
 export interface ListQuery {
   include_inactive?: boolean;
   /** entities only */

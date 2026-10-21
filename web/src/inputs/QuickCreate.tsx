@@ -100,7 +100,7 @@ function AccountForm({ req, onDone }: { req: Extract<Request, { kind: 'account' 
         e.preventDefault();
         const parent = accounts.find((a) => a.id === parentId) ?? null;
         const rec = { ...blankAccount(name.trim(), type, parent), number: number.trim() || null };
-        save.mutate(rec, { onSuccess: (saved) => onDone(saved.id) });
+        save.mutate({ record: rec }, { onSuccess: (saved) => onDone(saved.id) });
       }}
     >
       <Stack gap="sm">
@@ -145,7 +145,7 @@ function EntityForm({ req, onDone }: { req: Extract<Request, { kind: 'entity' }>
       onSubmit={(e) => {
         e.preventDefault();
         const parent = kind === 'Customer' ? (entities.find((x) => x.id === parentId) ?? null) : null;
-        save.mutate(blankEntity(name.trim(), kind, parent), { onSuccess: (saved) => onDone(saved.id) });
+        save.mutate({ record: blankEntity(name.trim(), kind, parent) }, { onSuccess: (saved) => onDone(saved.id) });
       }}
     >
       <Stack gap="sm">
@@ -197,7 +197,7 @@ function ItemForm({ req, onDone }: { req: Extract<Request, { kind: 'item' }>; on
           income_account_id: isIncome ? (account ?? null) : null,
           expense_account_id: isIncome ? null : (account ?? null),
         };
-        save.mutate(rec, { onSuccess: (saved) => onDone(saved.id) });
+        save.mutate({ record: rec }, { onSuccess: (saved) => onDone(saved.id) });
       }}
     >
       <Stack gap="sm">
