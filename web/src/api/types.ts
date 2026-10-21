@@ -44,6 +44,10 @@ import type { TypeEntry } from './generated/TypeEntry';
 
 export type { Account } from './generated/Account';
 export type { AccountBalance } from './generated/AccountBalance';
+export type { CashFlowClass } from './generated/CashFlowClass';
+export type { ItemComponent } from './generated/ItemComponent';
+export type { JobStatus } from './generated/JobStatus';
+export type { PaymentMethodKind } from './generated/PaymentMethodKind';
 export type { AccountId } from './generated/AccountId';
 export type { AccountRole } from './generated/AccountRole';
 export type { AccountType } from './generated/AccountType';

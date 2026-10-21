@@ -101,11 +101,11 @@ export function ConflictModal({
   );
 }
 
-export function RemoteChangeBanner({ onReload }: { onReload(): void }) {
+export function RemoteChangeBanner({ onReload, what = 'transaction' }: { onReload(): void; what?: string }) {
   return (
     <Alert color="orange" icon={<IconAlertTriangle size={18} />} p="xs">
       <Group justify="space-between" wrap="nowrap">
-        <Text size="sm">Someone else just saved a change to this transaction.</Text>
+        <Text size="sm">Someone else just saved a change to this {what}.</Text>
         <Button size="xs" variant="light" color="orange" onClick={onReload}>
           Reload
         </Button>

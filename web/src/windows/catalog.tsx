@@ -26,6 +26,7 @@ import { Find } from '~/screens/Find';
 import { Home } from '~/screens/Home';
 import { LIST_TITLES, ListWindow } from '~/screens/Lists';
 import { FormPlaceholder } from '~/screens/Placeholder';
+import { RecordWindow, recordWindowTitle } from '~/screens/RecordWindow';
 import { Register } from '~/screens/Register';
 import { ReportCenter, ReportWindow } from '~/screens/Reports';
 import { TxnWindow } from '~/screens/TxnWindow';
@@ -92,6 +93,7 @@ export const WINDOW_KINDS: Record<WindowKind, KindDef> = {
   report: { render: () => <ReportWindow />, title: () => 'Report' },
   find: { render: () => <Find />, title: () => 'Find' },
   list: { render: () => <ListWindow />, title: (d) => LIST_TITLES[d.params.list ?? ''] ?? 'List' },
+  record: { render: () => <RecordWindow />, title: (d) => recordWindowTitle(d.params) },
   company: { render: () => <Company />, title: () => 'Company' },
   form: { render: () => <FormWindow />, title: (d) => FORMS[d.params.form ?? '']?.label ?? FORM_LABELS[d.params.form ?? ''] ?? 'Form' },
   reconcile: { render: () => <Reconcile />, title: () => 'Reconcile' },

@@ -168,6 +168,21 @@ test('memorized list and server settings at 375px', async ({ page }) => {
   await expect(page.getByTestId('my-account')).toBeVisible();
 });
 
+test('a vendor editor at 375px: tabs, stacked fields, the sticky Save bar', async ({ page }) => {
+  await start(page, `${CO}/lists/entities/new?kind=Vendor`);
+  const editor = page.getByTestId('record-vendor');
+  await expect(editor).toBeVisible();
+  await editor.getByRole('textbox', { name: 'Vendor name' }).fill('Cascade Hardware');
+  await editor.getByRole('tab', { name: 'Payment Settings' }).tap();
+  await editor.getByRole('checkbox', { name: 'Vendor is eligible for a 1099' }).tap();
+  await expect(page.getByRole('button', { name: /Save & Close/ })).toBeInViewport();
+  await expectNoSideways(page);
+  await page.screenshot({ path: test.info().outputPath('vendor-editor-375.png') });
+  await page.getByRole('button', { name: /Save & Close/ }).tap();
+  await expect(page.getByText('Vendor "Cascade Hardware" saved.')).toBeVisible();
+  await expect(editor).toBeHidden();
+});
+
 test('a report scrolls sideways inside itself, not the page', async ({ page }) => {
   await start(page, `${CO}/reports/ProfitAndLoss`);
   await page.getByRole('combobox', { name: 'Dates' }).tap();

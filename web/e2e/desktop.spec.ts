@@ -521,6 +521,106 @@ test('the Customer Center shows Balance and Balance Total: a job carries its inv
   await expect(card).toContainText('with jobs');
 });
 
+test('a customer is created and edited in its own window from the Customer Center', async ({ page }) => {
+  await start(page, `${CO}/customers`);
+  await page.getByRole('button', { name: 'New Customer' }).click();
+  const editor = page.getByTestId('record-customer');
+  await expect(editor).toBeVisible();
+  await expect(page.getByRole('tab', { name: 'New Customer' })).toBeVisible();
+  const name = editor.getByRole('textbox', { name: 'Customer name' });
+  await expect(name).toBeFocused();
+  await name.fill('Pine Ridge Cabinets');
+  // Enter moves on to the next field, as in QBD's dialogs.
+  await page.keyboard.press('Enter');
+  await expect(editor.getByRole('combobox', { name: 'Job of' })).toBeFocused();
+  await editor.getByRole('textbox', { name: 'Company name' }).fill('Pine Ridge Cabinets LLC');
+  await editor.getByRole('tab', { name: 'Payment Settings' }).click();
+  await editor.getByRole('combobox', { name: 'Payment terms' }).click();
+  await page.getByRole('option', { name: 'Net 15' }).click();
+  await page.keyboard.press('Alt+A'); // Save & Close
+  await expect(page.getByText('Customer "Pine Ridge Cabinets" saved.')).toBeVisible();
+  await expect(editor).toBeHidden();
+  // Back in the Customer Center: the new name is there; Ctrl+E edits it.
+  await page.getByRole('textbox', { name: 'Find a customer' }).fill('Pine Ridge');
+  const center = page.getByTestId('center-customers');
+  await expect(center.getByRole('heading', { name: 'Pine Ridge Cabinets' })).toBeVisible();
+  await expect(center.getByText('Pine Ridge Cabinets LLC')).toBeVisible();
+  await page.keyboard.press('Control+E');
+  await expect(page.getByRole('tab', { name: 'Edit Customer: Pine Ridge Cabinets' })).toBeVisible();
+  const edit = page.getByTestId('record-customer');
+  await edit.getByRole('textbox', { name: 'Main phone' }).fill('(555) 010-2020');
+  await edit.getByRole('button', { name: /Save & Close/ }).click();
+  await expect(page.getByText('Customer "Pine Ridge Cabinets" saved.').last()).toBeVisible();
+  await expect(center.getByText('(555) 010-2020')).toBeVisible();
+  // Add Job opens a job editor under this customer.
+  await center.getByRole('button', { name: 'Add job' }).click();
+  const job = page.getByTestId('record-customer');
+  await expect(job.getByRole('combobox', { name: 'Job of' })).toHaveValue('Pine Ridge Cabinets');
+  await expect(page.getByRole('tab', { name: 'New Job' })).toBeVisible();
+});
+
+test('an item is created and edited from the Item List; a bad field is refused inline', async ({ page }) => {
+  await start(page, `${CO}/lists/items`);
+  const list = page.getByTestId('item-list');
+  await expect(list).toBeVisible();
+  await page.keyboard.press('Alt+Shift+N'); // browser keymap: New
+  const editor = page.getByTestId('record-item');
+  await expect(editor).toBeVisible();
+  await editor.getByRole('combobox', { name: 'Item type' }).click();
+  await page.getByRole('option', { name: 'Non-inventory Part' }).click();
+  await editor.getByRole('textbox', { name: 'Item name' }).fill('Cherry Board Foot');
+  await editor.getByRole('textbox', { name: 'Sales price' }).fill('twelve');
+  await editor.getByRole('button', { name: /Save & Close/ }).click();
+  await expect(editor.getByText('Not a number')).toBeVisible();
+  await expect(editor.getByText('Choose an account.')).toBeVisible();
+  await editor.getByRole('textbox', { name: 'Sales price' }).fill('12.50');
+  const account = editor.getByRole('combobox', { name: 'Account' });
+  await account.click();
+  await account.pressSequentially('Design');
+  await page.keyboard.press('Tab');
+  await expect(account).toHaveValue('Design Services');
+  await editor.getByRole('button', { name: /Save & Close/ }).click();
+  await expect(page.getByText('Item "Cherry Board Foot" saved.')).toBeVisible();
+  // The list has it; Ctrl+E opens the editor on it.
+  await list.getByRole('textbox', { name: 'Find' }).fill('Cherry');
+  await expect(list.getByText('Cherry Board Foot')).toBeVisible();
+  await list.getByText('Cherry Board Foot').click();
+  await page.keyboard.press('Control+E');
+  await expect(page.getByRole('tab', { name: 'Edit Item: Cherry Board Foot' })).toBeVisible();
+  const edit = page.getByTestId('record-item');
+  await expect(edit.getByRole('combobox', { name: 'Item type' })).toBeDisabled();
+  await edit.getByRole('textbox', { name: 'Description' }).fill('Cherry lumber, per board foot');
+  await page.keyboard.press('Alt+A');
+  await expect(page.getByText('Item "Cherry Board Foot" saved.').last()).toBeVisible();
+  await expect(list.getByText('Cherry lumber, per board foot')).toBeVisible();
+});
+
+test('deleting an account in use is refused with the reason; terms are edited in their window', async ({ page }) => {
+  await start(page, `${CO}/accounts`);
+  const chart = page.getByTestId('chart-of-accounts');
+  await chart.getByRole('textbox', { name: 'Find an account' }).fill('Checking');
+  await page.keyboard.press('Control+E');
+  const editor = page.getByTestId('record-account');
+  await expect(page.getByRole('tab', { name: 'Edit Account: Checking' })).toBeVisible();
+  page.once('dialog', (d) => void d.accept());
+  await editor.getByRole('button', { name: /Delete/ }).click();
+  await expect(editor.getByRole('alert')).toContainText('make it inactive instead');
+  await page.keyboard.press('Escape');
+  // Terms: date-driven fields appear with the kind.
+  await page.getByRole('menubar').getByText('Lists', { exact: true }).click();
+  await page.getByRole('menuitem', { name: /Terms List/ }).click();
+  const terms = page.getByTestId('terms-list');
+  await expect(terms.getByText('2% if paid in 10 days')).toBeVisible();
+  await terms.getByRole('button', { name: 'New' }).click();
+  const t = page.getByTestId('record-terms');
+  await t.getByRole('textbox', { name: 'Terms name' }).fill('1st of month');
+  await t.getByText('Date driven', { exact: true }).click();
+  await expect(t.getByRole('textbox', { name: 'Net due before the (day of month)' })).toHaveValue('1');
+  await t.getByRole('button', { name: /Save & Close/ }).click();
+  await expect(page.getByText('Terms "1st of month" saved.')).toBeVisible();
+  await expect(terms.getByText('Due on the 1st')).toBeVisible();
+});
+
 test('QuickBooks import: a sync runs with progress and lands a report; parity compares balances', async ({ page }) => {
   await start(page, `${CO}/import/qbd`);
   const win = page.getByTestId('qbd-import');

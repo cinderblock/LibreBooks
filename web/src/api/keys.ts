@@ -10,6 +10,8 @@ export const qk = {
   info: (co: CompanyId) => ['c', co, 'info'] as const,
   listAll: (co: CompanyId, list: ListName) => ['c', co, 'list', list] as const,
   list: (co: CompanyId, list: ListName, q: ListQuery = {}) => ['c', co, 'list', list, q] as const,
+  /** One record (`GET /:list/:id`), under `listAll` so a list change refreshes it. */
+  record: (co: CompanyId, list: ListName, id: string) => ['c', co, 'list', list, 'record', id] as const,
   txnsAll: (co: CompanyId) => ['c', co, 'txns'] as const,
   txns: (co: CompanyId, q: TxnQuery = {}) => ['c', co, 'txns', q] as const,
   txn: (co: CompanyId, id: string) => ['c', co, 'txn', id] as const,
@@ -96,6 +98,11 @@ const LIST_OF_KIND: Record<string, ListName> = {
   sales_rep: 'sales-reps',
   type: 'types',
 };
+
+/** The change-event `kind` the server emits for a list's records (`account`, `entity`, `payment_method`…). */
+export function eventKindOf(list: ListName): string {
+  return Object.entries(LIST_OF_KIND).find(([, l]) => l === list)![0];
+}
 
 /**
  * What a server change event makes stale. Kinds we don't recognise invalidate
