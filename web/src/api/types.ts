@@ -229,6 +229,30 @@ export interface Session {
   sign_in?: boolean;
 }
 
+/** `POST /companies` → the new company's id. */
+export interface CreatedCompany {
+  id: CompanyId;
+}
+
+/** `manifest.json` inside a `.lbk` (lb-backup's `PortableManifest`; not generated). */
+export interface PortableManifest {
+  kind: string;
+  format: number;
+  app_version: string;
+  company_name: string;
+  schema_version: number;
+  created_at: string;
+  database_size: number;
+  database_sha256: string;
+}
+
+/** `POST /companies/import` → 201: a NEW company made from the file; nothing existing is replaced. */
+export interface ImportedCompany {
+  id: CompanyId;
+  name: string;
+  from: PortableManifest;
+}
+
 /** One `event: change` from `/events?company=` (`data: {kind, id, action}`). */
 export interface ChangeEvent {
   /** The record kind: `txn`, `account`, `entity`, `item`, `class`, … */

@@ -442,6 +442,24 @@ Phase C follow-up (commits on `worktree-agent-ab9ab2d43381969c5`, 2026-10-20):
       long-poll); Playwright 41/41.
 - [x] This document.
 
+Phase D (worktree `worktree-agent-ab9aa5ed8179d8f95`, 2026-10-20; "What's
+left" items 2, 5, 6 and 8), in progress:
+
+- [ ] Step 1: `POST /companies` and `POST /companies/import` in the client,
+      HTTP and fixture (extra companies share the demo books), with tests.
+- [ ] Step 2: the record-form engine (`forms/useRecordForm.tsx`, sharing the
+      transaction engine's dialogs, action bar and error model) and the list
+      editors as windows (`/lists/:list/new`, `/lists/:list/:id`): accounts,
+      names, items, classes, terms, payment methods, sales tax codes; the list
+      windows open them (Ctrl+N / Ctrl+E / Enter / Ctrl+D).
+- [ ] Step 3: Attachments on names, accounts and items; the paperclip on the
+      editors; the Attach-to dialog targets any record kind.
+- [ ] Step 4: the company picker's New company and Open a .lbk file (admins),
+      reachable from the user menu when one company auto-opens.
+- [ ] Step 5: Import window Options disclosures (`SyncBody`, `ParityBody`).
+- [ ] Step 6: Playwright coverage (customer and item editors, new company,
+      import options; a 375px editor pass); this document.
+
 ## What's left (next phases)
 
 1. **Stand-ins without a generated twin** (see Findings) stay until the server

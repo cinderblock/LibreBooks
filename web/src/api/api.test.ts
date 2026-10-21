@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { QueryClient } from '@tanstack/react-query';
-import { blankLine, blankTxn } from './blank';
+import { blankCompanyInfo, blankLine, blankTxn } from './blank';
 import { txnQueryParams } from './client';
 import { ApiError, apiErrorFromBody, errorTargets } from './errors';
 import { type FetchFn, HttpApiClient } from './http';
@@ -88,6 +88,33 @@ describe('HttpApiClient', () => {
     expect(s.user.kind).toBe('local');
     expect(calls[0]!.url).toBe('http://127.0.0.1:8740/api/v1/session');
     expect((calls[0]!.init.headers as Record<string, string>).Authorization).toBe('Bearer s3cret');
+  });
+
+  test('creating a company posts its information; importing one is multipart with the file and name', async () => {
+    const calls: Array<{ url: string; init: RequestInit }> = [];
+    const fake = (async (url: string, init: RequestInit) => {
+      calls.push({ url, init });
+      if (url.endsWith('/companies/import')) return new Response('{"id":"co2","name":"Riverside","from":{"kind":"librebooks-company","format":1,"app_version":"0.4.1","company_name":"Riverside Cafe","schema_version":3,"created_at":"2026-10-20T00:00:00Z","database_size":5,"database_sha256":"00"}}', { status: 201 });
+      return new Response('{"id":"co1"}', { status: 200 });
+    }) as unknown as FetchFn;
+    const api = new HttpApiClient({ fetch: fake });
+    const created = await api.createCompany(blankCompanyInfo('Second Shop'));
+    expect(created.id).toBe('co1');
+    const [post] = calls;
+    expect(post!.url).toBe('/api/v1/companies');
+    expect(post!.init.method).toBe('POST');
+    expect(JSON.parse(post!.init.body as string).info.name).toBe('Second Shop');
+    const imported = await api.importCompany(new File(['books'], 'riverside.lbk'), 'Riverside');
+    expect(imported.name).toBe('Riverside');
+    expect(imported.from.company_name).toBe('Riverside Cafe');
+    const upload = calls[1]!;
+    expect(upload.url).toBe('/api/v1/companies/import');
+    const form = upload.init.body as FormData;
+    expect(form.get('name')).toBe('Riverside');
+    expect((form.get('file') as File).name).toBe('riverside.lbk');
+    // Multipart: the browser sets the content type with its boundary.
+    expect((upload.init.headers as Record<string, string>)['Content-Type']).toBeUndefined();
+    expect((upload.init.headers as Record<string, string>)['X-LibreBooks']).toBe('1');
   });
 
   test('turns error envelopes into ApiError', async () => {

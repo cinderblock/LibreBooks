@@ -60,11 +60,13 @@ import type {
   CompanyId,
   CompanyInfo,
   CompanySummary,
+  CreatedCompany,
   DateRange,
   EnrolFinish,
   EnrolStart,
   EnrolStartRequest,
   Health,
+  ImportedCompany,
   ListName,
   ListQuery,
   ListRecords,
@@ -117,6 +119,14 @@ export interface ApiClient {
   health(): Promise<Health>;
   session(): Promise<Session>;
   companies(): Promise<CompanySummary[]>;
+  /** Admin: a new, empty company from its information (`POST /companies`). */
+  createCompany(info: CompanyInfo): Promise<CreatedCompany>;
+  /**
+   * Admin: a NEW company from a `.lbk` file (`POST /companies/import`,
+   * multipart `file` plus an optional `name`); nothing existing is replaced.
+   * 400 without a file; 422 `damaged` when the file isn't a sound `.lbk`.
+   */
+  importCompany(file: File, name?: string | null): Promise<ImportedCompany>;
 
   /** Passkey sign-in: options for `startAuthentication`, then its result. */
   loginStart(): Promise<LoginStart>;

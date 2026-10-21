@@ -69,11 +69,13 @@ import type {
   CompanyId,
   CompanyInfo,
   CompanySummary,
+  CreatedCompany,
   DateRange,
   EnrolFinish,
   EnrolStart,
   EnrolStartRequest,
   Health,
+  ImportedCompany,
   ListName,
   ListQuery,
   ListRecords,
@@ -203,6 +205,16 @@ export class HttpApiClient implements ApiClient {
   }
   companies() {
     return this.request<CompanySummary[]>('GET', '/companies');
+  }
+  createCompany(info: CompanyInfo) {
+    return this.request<CreatedCompany>('POST', '/companies', { body: { info } });
+  }
+  importCompany(file: File, name?: string | null) {
+    // Multipart: the browser sets the content type (it carries the boundary).
+    const body = new FormData();
+    body.append('file', file, file.name);
+    if (name?.trim()) body.append('name', name.trim());
+    return this.request<ImportedCompany>('POST', '/companies/import', { body });
   }
   loginStart() {
     return this.request<LoginStart>('POST', '/auth/login/start');
