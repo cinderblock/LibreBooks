@@ -228,9 +228,11 @@ Phases are ordered; each ends usable. **Current step is marked ▶.**
   Export menu with Excel/PDF (`f2c40f9`; 251 web tests, 50 Playwright).
   ▶ Running: a web agent on the forms not yet built (statement charges, sales
   orders, progress invoicing from an estimate, receiving against a purchase
-  order) and a server agent on order fulfilment (linked-line validation,
-  `GET /txns/:id/fulfilment`, open orders in `/open`, line/order close flags).
-  Next with the user: point
+  order; resumed 2026-10-21 00:00 PT after a session limit). Merged order
+  fulfilment (`306c9f5`: `plans/orders.md`; `TxnLine.is_closed`,
+  `Txn.is_manually_closed`, link rules, migration 4 `txn_link`,
+  `GET /txns/:id/fulfilment`, open orders in `/open`) and the import's closed
+  marks for orders (`fdfd0e3`). Next with the user: point
   QuickBooks' Web Connector on cad-3 at this server over HTTPS (steps in
   `plans/qbd-import.md`), run a sync, and see whether the 14 bridge gaps close.
 - Phase 1 — Ledger core
