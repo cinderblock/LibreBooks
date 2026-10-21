@@ -234,6 +234,7 @@ async fn back_up_list_verify_restore_and_export() {
         .await;
     assert_eq!(st, StatusCode::CREATED, "{v}");
     assert_eq!(v["name"], "Backup Co (moved)");
+    assert_eq!(v["role"], "admin");
     assert_eq!(v["from"]["company_name"], "Backup Co");
     let moved = v["id"].as_str().unwrap().to_owned();
     assert_ne!(moved, c, "a fresh id");

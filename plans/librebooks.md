@@ -222,9 +222,10 @@ Phases are ordered; each ends usable. **Current step is marked ▶.**
   `POST /companies` answers the summary, `PortableManifest` and
   `MintedEnrolmentLink` generated, sales tax codes ≤ 3 chars). Merged report
   export in XLSX and PDF on a shared render layout (`4b59149`; the Report
-  Center still offers CSV only: UI follow-up). ▶ Running: a web agent taking
-  the server fields up (one-request opening balances, generated types).
-  Next with the user: point
+  Center still offers CSV only: UI follow-up). Merged the web follow-up
+  (`54b7fbd`: one-request opening balances, generated company/manifest/
+  enrolment types; 246 web tests, 48 Playwright). ▶ Running: a web agent
+  adding XLSX/PDF to the Report Center's export. Next with the user: point
   QuickBooks' Web Connector on cad-3 at this server over HTTPS (steps in
   `plans/qbd-import.md`), run a sync, and see whether the 14 bridge gaps close.
 - Phase 1 — Ledger core

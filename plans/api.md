@@ -58,7 +58,7 @@ and the UI; change both together.
 | `GET /users`, `PATCH /users/:id`, `DELETE /users/:id` | admin user management |
 | `GET /companies` | → `[{ id, name, role }]` |
 | `POST /companies` | admin: `{ info: CompanyInfo }` → `{ id, name, role }` (what `GET /companies` lists) |
-| `POST /companies/import` | admin: multipart `file` (a `.lbk` from `GET /c/:company/backups/export` or the desktop app), `name?` → 201 `{ id, name, from: PortableManifest }`: a **new** company; nothing existing is replaced. 400 without a file; 422 `damaged` for a file that isn't a sound `.lbk`. Streams to disk; up to 8 GiB. |
+| `POST /companies/import` | admin: multipart `file` (a `.lbk` from `GET /c/:company/backups/export` or the desktop app), `name?` → 201 `{ id, name, role, from: PortableManifest }`: a **new** company; nothing existing is replaced. 400 without a file; 422 `damaged` for a file that isn't a sound `.lbk`. Streams to disk; up to 8 GiB. |
 | `GET /events?company=:id` | Server-Sent Events: `event: change`, `data: {kind, id, action}` |
 | `GET /server` / `PUT /server` | admin: server settings (see "Server administration") |
 | `POST /server/update/check`, `POST /server/update/install` | admin |

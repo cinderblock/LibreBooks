@@ -135,6 +135,6 @@ pub async fn import_company(
     .await??;
     Ok((
         StatusCode::CREATED,
-        Json(json!({ "id": id, "name": name, "from": manifest })),
+        Json(json!({ "id": id, "name": name, "role": p.role, "from": manifest })),
     ))
 }
