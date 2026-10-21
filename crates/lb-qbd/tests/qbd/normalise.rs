@@ -280,3 +280,45 @@ fn terms_both_kinds() {
         jiff::civil::date(2026, 4, 15)
     );
 }
+
+#[test]
+fn orders_carry_qbds_closed_and_received_marks() {
+    // A PO QBD shows partly received: the fully received line is closed on import
+    // (its receipts aren't linked), the open one isn't; the stamp is QBD's.
+    let v = json!({"TxnID": "PO-1", "TxnDate": "2026-03-08", "VendorRef": r("Office Mart"),
+        "TotalAmount": "500.00", "IsManuallyClosed": "false", "IsFullyReceived": "false",
+        "PurchaseOrderLineRet": [
+            {"TxnLineID": "L1", "ItemRef": r("Cable Kit"), "Quantity": "10", "Rate": "30.00", "Amount": "300.00",
+             "ReceivedQuantity": "10", "IsManuallyClosed": "false"},
+            {"TxnLineID": "L2", "ItemRef": r("Hub"), "Quantity": "4", "Rate": "50.00", "Amount": "200.00",
+             "ReceivedQuantity": "1", "IsManuallyClosed": "false"},
+            {"TxnLineID": "L3", "ItemRef": r("Tape"), "Quantity": "2", "Rate": "0.00", "Amount": "0.00",
+             "ReceivedQuantity": "0", "IsManuallyClosed": "true"}]});
+    let mut map = Map::default();
+    let imp = qbxml::txns::txn(QbdEntity::PurchaseOrder, &v, &mut map).unwrap();
+    assert!(!imp.txn.is_manually_closed);
+    let closed: Vec<bool> = imp.txn.lines.iter().map(|l| l.is_closed).collect();
+    assert_eq!(closed, [true, false, true]);
+    assert_eq!(
+        imp.txn.lines[1].extra.as_ref().unwrap()["ReceivedQuantity"],
+        "1",
+        "the count QBD had stays with the line"
+    );
+
+    // Fully received: every line closes. Manually closed: the order's own stamp.
+    let v = json!({"TxnID": "PO-2", "TxnDate": "2026-03-09", "VendorRef": r("Office Mart"),
+        "TotalAmount": "300.00", "IsManuallyClosed": "true", "IsFullyReceived": "true",
+        "PurchaseOrderLineRet": {"TxnLineID": "L1", "ItemRef": r("Cable Kit"), "Quantity": "10",
+            "Rate": "30.00", "Amount": "300.00", "ReceivedQuantity": "3", "IsManuallyClosed": "false"}});
+    let imp = qbxml::txns::txn(QbdEntity::PurchaseOrder, &v, &mut map).unwrap();
+    assert!(imp.txn.is_manually_closed);
+    assert!(imp.txn.lines[0].is_closed);
+
+    // An inactive estimate is a closed one.
+    let v = json!({"TxnID": "E-1", "TxnDate": "2026-03-09", "CustomerRef": r("Acme"), "IsActive": "false",
+        "TotalAmount": "100.00", "EstimateLineRet": {"TxnLineID": "L1", "ItemRef": r("Labor"),
+            "Quantity": "1", "Rate": "100.00", "Amount": "100.00"}});
+    let imp = qbxml::txns::txn(QbdEntity::Estimate, &v, &mut map).unwrap();
+    assert!(imp.txn.is_manually_closed);
+    assert!(!imp.txn.lines[0].is_closed);
+}

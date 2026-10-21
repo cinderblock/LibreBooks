@@ -80,7 +80,10 @@ Done on the worktree branch; left for the merge and for other threads:
 - Web UI: Receive Items against a PO, Create Invoice from a sales order or
   estimate, the open-order lists and the "Clsd"/"Closed" marks (consumes
   `Fulfilment`, `/open?kind=…`).
-- Import: map QBD's closed marks (`ISSUES.md`).
+- [x] Import: QBD's closed marks mapped (an order's `IsManuallyClosed` → the
+  stamp, a line's → `is_closed`, a fully received/invoiced line or order →
+  closed lines; an inactive estimate → closed). Sales orders aren't imported
+  at all yet (`ISSUES.md`).
 
 ## Findings / gotchas
 
@@ -94,12 +97,11 @@ Done on the worktree branch; left for the merge and for other threads:
   piggyback on it. Migration 4 sets a baseline in SQL and `Books::open`
   recomputes orders precisely (`orders::refresh_all`) right after upgrading a
   file from a schema below 4.
-- The QBD import maps no `IsManuallyClosed`/`IsFullyReceived`/`ReceivedQuantity`
-  yet, so imported POs all read as open after the upgrade. Logged in
-  `ISSUES.md`.
-
-## Progress log
-
+- The QBD import can't link the receipts and invoices QBD counted against an
+  order, so a line QBD reports fully received or invoiced is closed on import
+  (`is_closed`), with QBD's `ReceivedQuantity`/`Invoiced` kept in the line's
+  `extra`; the fulfilment shown for imported orders is therefore closed-or-open,
+  not a running count, until LibreBooks receives against them itself.
 - [x] Plan written.
 - [x] lb-core model + tests (`4a5fc49`).
 - [x] lb-store migration, orders module, save wiring, 5 integration tests

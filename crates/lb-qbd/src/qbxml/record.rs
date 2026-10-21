@@ -267,6 +267,12 @@ impl<'a> Record<'a> {
         self.take(key)
     }
 
+    /// The raw value under `key` without marking it handled: for a field that
+    /// informs a decision but should still travel in the record's `extra`.
+    pub fn peek(&self, key: &str) -> Option<&'a Value> {
+        self.map.get(key)
+    }
+
     /// Fields nobody read, verbatim.
     pub fn leftovers(&self) -> Map<String, Value> {
         self.map

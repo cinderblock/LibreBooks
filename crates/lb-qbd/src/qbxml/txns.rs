@@ -373,6 +373,22 @@ impl Normaliser<'_> {
             line.entity_id = self.opt_entity("customer", l.reference("CustomerRef"))?;
             line.billable = billable(l.text("BillableStatus").as_deref());
         }
+        // Order lines: QBD's "Clsd" mark, and a line QBD shows fully received or
+        // invoiced. We can't link the receipts and invoices QBD counted, so a
+        // fulfilled line is closed on import; the quantities stay in `extra`.
+        let manually = l.bool("IsManuallyClosed")?.unwrap_or(false);
+        let drawn = match l.peek("ReceivedQuantity").or_else(|| l.peek("Invoiced")) {
+            Some(v) => v
+                .as_str()
+                .and_then(|t| t.trim().parse::<Decimal>().ok())
+                .or_else(|| v.as_f64().and_then(Decimal::from_f64_retain)),
+            None => None,
+        };
+        let fulfilled = match (drawn, line.quantity) {
+            (Some(d), Some(q)) => q > Decimal::ZERO && d >= q,
+            _ => false,
+        };
+        line.is_closed = manually || fulfilled;
         line.extra = line_extra(&l, id.as_deref());
         Ok(line)
     }
@@ -509,11 +525,16 @@ impl Normaliser<'_> {
         let total = r.money("TotalAmount")?;
         self.imp.qbd_total = total;
         let message = r.reference("VendorMsg").and_then(|m| m.full_name);
+        // QBD's "Closed" stamp; "fully received" closes every line instead (the
+        // receipts themselves aren't linked by the import).
+        let closed = r.bool("IsManuallyClosed")?.unwrap_or(false);
+        let fully_received = r.bool("IsFullyReceived")?.unwrap_or(false);
         let t = self.txn();
         t.entity_id = vendor;
         t.bill_address = bill_to;
         t.ship_address = ship_to;
         t.message = message;
+        t.is_manually_closed = closed;
         if let Some(a) = total {
             t.amount = a;
         }
@@ -522,7 +543,21 @@ impl Normaliser<'_> {
             "PurchaseOrderLineRet",
             "PurchaseOrderLineGroupRet",
             Side::Purchase,
-        )
+        )?;
+        if fully_received {
+            self.close_every_line();
+        }
+        Ok(())
+    }
+
+    /// Mark every item line closed (an order QBD reports fully received or
+    /// invoiced, whose receipts and invoices the import can't link).
+    fn close_every_line(&mut self) {
+        for (_, lines) in &mut self.blocks {
+            for l in lines.iter_mut().filter(|l| l.kind == LineKind::Item) {
+                l.is_closed = true;
+            }
+        }
     }
 
     fn sale(&mut self, entity: QbdEntity, r: &mut Record<'_>) -> Result<(), NormaliseError> {
@@ -572,11 +607,15 @@ impl Normaliser<'_> {
         t.customer_tax_code_id = customer_code;
         t.account_id = deposit_to;
         t.payment_method_id = method;
-        if entity == QbdEntity::Estimate
-            && let Some(a) = self.imp.qbd_total
-        {
-            // Estimates don't post; keep QBD's total as the form's.
-            self.imp.txn.amount = a;
+        if entity == QbdEntity::Estimate {
+            if let Some(a) = self.imp.qbd_total {
+                // Estimates don't post; keep QBD's total as the form's.
+                self.imp.txn.amount = a;
+            }
+            // An inactive estimate is QBD's closed one.
+            if r.bool("IsActive")? == Some(false) {
+                self.imp.txn.is_manually_closed = true;
+            }
         }
         let (line_key, group_key) = match entity {
             QbdEntity::Invoice => ("InvoiceLineRet", "InvoiceLineGroupRet"),
