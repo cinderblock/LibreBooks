@@ -51,6 +51,7 @@ export const QBD_KEYMAP: Keymap = {
   'report.quick': ['Mod+Q'],
   'txn.memorize': ['Mod+M'],
   'report.memorize': ['Mod+M'],
+  'report.export': ['Mod+E'],
   'txn.journal': ['Mod+Y'],
   'register.goToOther': ['Mod+G'],
   'record.print': ['Mod+P'],

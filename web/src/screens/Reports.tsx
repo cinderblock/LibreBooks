@@ -1,7 +1,8 @@
 // Report Center (the catalog, grouped as QBD's Reports menu, plus memorized
 // reports) and a report window: QBD's "Modify Report" options as a toolbar
 // (dates, basis, columns, comparisons, percentages, sort, filters) over the
-// ReportViewer, with QuickZoom drill-down, CSV export, memorize and print.
+// ReportViewer, with QuickZoom drill-down, export (Excel, PDF on Letter or A4,
+// CSV; Ctrl+E repeats the last pick), memorize and print (with Save as PDF).
 
 import {
   ActionIcon,
@@ -11,7 +12,9 @@ import {
   Card,
   Checkbox,
   Group,
+  Kbd,
   Loader,
+  Menu,
   Modal,
   MultiSelect,
   Popover,
@@ -27,28 +30,53 @@ import {
   UnstyledButton,
 } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
-import { IconAdjustments, IconDeviceFloppy, IconDownload, IconFilter, IconPrinter, IconRefresh, IconSearch, IconTrash } from '@tabler/icons-react';
+import { IconAdjustments, IconCheck, IconChevronDown, IconDeviceFloppy, IconDots, IconDownload, IconFileSpreadsheet, IconFileTypeCsv, IconFileTypePdf, IconFilter, IconPrinter, IconRefresh, IconSearch, IconTrash } from '@tabler/icons-react';
 import { useEffect, useMemo, useState } from 'react';
 import { useApi, useCompanyId } from '~/api/context';
-import { saveDownload } from '~/api/client';
+import { type ExportPaper, saveDownload } from '~/api/client';
 import { describeError } from '~/api/errors';
 import { useAccountIndex, useAccounts, useClasses, useCompanyInfo, useDeleteSaved, useEntityIndex, useEntities, useItems, useReport, useReportCatalog, useSaved, useSaveSaved } from '~/api/hooks';
-import type { Basis, CatalogEntry, ClearedFilter, ColumnLayout, DateMacro, Drill, ReportFilters, ReportRequest, Saved, SortBy, TxnType } from '~/api/types';
+import type { Basis, CatalogEntry, ClearedFilter, ColumnLayout, DateMacro, Drill, ExportFormat, ReportFilters, ReportRequest, Saved, SortBy, TxnType } from '~/api/types';
 import { DateField } from '~/inputs/DateField';
 import { MoneyField } from '~/inputs/MoneyField';
-import { useShortcut } from '~/keyboard/KeyboardProvider';
+import { useComboHint, useShortcut } from '~/keyboard/KeyboardProvider';
 import { ACCOUNT_TYPES, ACCOUNT_TYPE_LABEL } from '~/lib/accountTypes';
 import { MACRO_LABELS, todayIso } from '~/lib/dates';
+import { useExportFormat, useExportPaper } from '~/lib/prefs';
 import { prepare, search } from '~/lib/quickfill';
 import { TXN_LABEL, TXN_TYPES } from '~/lib/txnTypes';
 import { useIsMobile } from '~/lib/useMobile';
 import { ReportViewer } from '~/reports/ReportViewer';
+import { EXPORT_FORMAT_INFO, EXPORT_FORMATS, EXPORT_PAPER_LABEL, EXPORT_PAPERS, exportFileName } from '~/reports/export';
 import { COLUMN_LAYOUT_LABEL, EMPTY_FILTERS, filterCount, paramsToRequest, requestRange, requestToParams, SORT_LABEL, withDefaults } from '~/reports/request';
 import { allSections, reportToCsv } from '~/reports/rows';
 import { useOpenWindow, useWindow, useWindows } from '~/windows/WindowsProvider';
 import { paths } from '~/windows/paths';
 import { ShortcutButton } from '~/forms/common';
 import classes from './screens.module.css';
+
+const FORMAT_ICON: Record<ExportFormat, typeof IconDownload> = { Xlsx: IconFileSpreadsheet, Pdf: IconFileTypePdf, Csv: IconFileTypeCsv };
+
+/** The export formats as menu items; the one the shortcut repeats shows its key. */
+function ExportItems({ current, hint, disabled, onExport }: { current: ExportFormat; hint: string; disabled: boolean; onExport(format: ExportFormat): void }) {
+  return EXPORT_FORMATS.map((f) => {
+    const Icon = FORMAT_ICON[f];
+    return (
+      <Menu.Item key={f} leftSection={<Icon size={14} />} rightSection={hint && f === current ? <Kbd size="xs">{hint}</Kbd> : undefined} disabled={disabled} onClick={() => onExport(f)}>
+        {EXPORT_FORMAT_INFO[f].label} (.{EXPORT_FORMAT_INFO[f].ext})
+      </Menu.Item>
+    );
+  });
+}
+
+/** Letter / A4 for the PDF, ticked; choosing one leaves the menu open. */
+function PaperItems({ paper, onChange }: { paper: ExportPaper; onChange(paper: ExportPaper): void }) {
+  return EXPORT_PAPERS.map((p) => (
+    <Menu.Item key={p} closeMenuOnClick={false} leftSection={p === paper ? <IconCheck size={14} /> : <span style={{ width: 14 }} />} onClick={() => onChange(p)}>
+      {EXPORT_PAPER_LABEL[p]}
+    </Menu.Item>
+  ));
+}
 
 /** A saved report opens with its request, keyed by its own title. */
 function memorizedPath(s: Saved): string {
@@ -201,16 +229,24 @@ export function ReportWindow() {
     }
   };
 
-  const exportCsv = async () => {
+  // Export: the server renders the file (`POST /reports/export`); the pick becomes what Ctrl+E repeats.
+  const [exportFormat, setExportFormat] = useExportFormat();
+  const [paper, setPaper] = useExportPaper();
+  const exportHint = useComboHint('report.export');
+  const exportAs = async (format: ExportFormat) => {
     if (!report) return;
+    setExportFormat(format);
     setExporting(true);
     try {
-      saveDownload(await api.exportReport(co, req, 'csv'));
+      saveDownload(await api.exportReport(co, req, format, format === 'Pdf' ? paper : undefined));
     } catch (e) {
-      // The server couldn't; the grid we have is just as good a CSV.
-      notifications.show({ color: 'orange', message: `Export fell back to the on-screen report: ${describeError(e)}` });
-      const name = `${(req.title ?? report.title).replace(/[^\w -]+/g, '').trim() || 'report'}.csv`;
-      saveDownload({ blob: new Blob([reportToCsv(report)], { type: 'text/csv;charset=utf-8' }), filename: name });
+      if (format === 'Csv') {
+        // The server couldn't; the grid we have is just as good a CSV.
+        notifications.show({ color: 'orange', message: `Export fell back to the on-screen report: ${describeError(e)}` });
+        saveDownload({ blob: new Blob([reportToCsv(report)], { type: EXPORT_FORMAT_INFO.Csv.mime }), filename: exportFileName(req.title ?? report.title, 'Csv') });
+      } else {
+        notifications.show({ color: 'red', message: `Could not export the report: ${describeError(e)}` });
+      }
     } finally {
       setExporting(false);
     }
@@ -219,6 +255,10 @@ export function ReportWindow() {
   const enabled = win.isActiveNow;
   useShortcut('record.print', () => window.print(), { enabled });
   useShortcut('report.memorize', () => setMemorizeOpen(true), { enabled });
+  useShortcut('report.export', () => void exportAs(exportFormat), { enabled });
+
+  const paperItems = <PaperItems paper={paper} onChange={setPaper} />;
+  const exportItems = <ExportItems current={exportFormat} hint={mobile ? '' : exportHint} disabled={!report} onExport={(f) => void exportAs(f)} />;
 
   const allCollapsed = collapsed.size > 0;
   const comparisons = p?.comparisons && (req.previous_period || req.previous_year);
@@ -226,7 +266,8 @@ export function ReportWindow() {
   const nFilters = filterCount(req.filters);
 
   return (
-    <div className={mobile ? classes.mobileFill : classes.fill} data-testid="report-window">
+    // aria-busy: the previous report stays on screen while a changed request loads (keepPreviousData); this says so.
+    <div className={mobile ? classes.mobileFill : classes.fill} data-testid="report-window" aria-busy={isFetching}>
       <Group gap="xs" align="flex-end" wrap="wrap" px={mobile ? 'sm' : 0} pt={mobile ? 'xs' : 0}>
         {p && p.dates !== 'None' && (
           <>
@@ -315,29 +356,83 @@ export function ReportWindow() {
             Filters
           </Button>
         )}
-        <Group gap="xs" ml={mobile ? 0 : 'auto'}>
-          <Button size="xs" variant="default" onClick={() => setCollapsed(allCollapsed ? new Set() : allSections(report?.rows ?? []))} disabled={!report}>
-            {allCollapsed ? 'Expand' : 'Collapse'}
-          </Button>
-          <Tooltip label="Refresh">
-            <ActionIcon size="input-xs" variant="default" aria-label="Refresh" onClick={() => void refetch()} loading={isFetching}>
-              <IconRefresh size={14} />
-            </ActionIcon>
-          </Tooltip>
-          <Tooltip label="Memorize this report (Ctrl+M)">
-            <ActionIcon size="input-xs" variant="default" aria-label="Memorize report" onClick={() => setMemorizeOpen(true)} disabled={!report}>
-              <IconDeviceFloppy size={14} />
-            </ActionIcon>
-          </Tooltip>
-          <Button size="xs" variant="default" leftSection={<IconDownload size={14} />} onClick={() => void exportCsv()} disabled={!report} loading={exporting}>
-            CSV
-          </Button>
-          {!mobile && (
-            <ShortcutButton size="xs" variant="default" command="record.print" leftSection={<IconPrinter size={14} />} onClick={() => window.print()}>
-              Print
-            </ShortcutButton>
-          )}
-        </Group>
+        {mobile ? (
+          // A phone has no room for the row of buttons: one overflow menu holds them, the export formats among them.
+          <Menu position="bottom-end" width={240}>
+            <Menu.Target>
+              <ActionIcon size="input-xs" variant="default" aria-label="More actions" loading={exporting}>
+                <IconDots size={16} />
+              </ActionIcon>
+            </Menu.Target>
+            <Menu.Dropdown>
+              <Menu.Item onClick={() => setCollapsed(allCollapsed ? new Set() : allSections(report?.rows ?? []))} disabled={!report}>
+                {allCollapsed ? 'Expand all' : 'Collapse all'}
+              </Menu.Item>
+              <Menu.Item leftSection={<IconRefresh size={14} />} onClick={() => void refetch()}>
+                Refresh
+              </Menu.Item>
+              <Menu.Item leftSection={<IconDeviceFloppy size={14} />} onClick={() => setMemorizeOpen(true)} disabled={!report}>
+                Memorize report
+              </Menu.Item>
+              <Menu.Divider />
+              <Menu.Label>Export</Menu.Label>
+              {exportItems}
+              <Menu.Divider />
+              <Menu.Label>PDF paper</Menu.Label>
+              {paperItems}
+            </Menu.Dropdown>
+          </Menu>
+        ) : (
+          <Group gap="xs" ml="auto">
+            <Button size="xs" variant="default" onClick={() => setCollapsed(allCollapsed ? new Set() : allSections(report?.rows ?? []))} disabled={!report}>
+              {allCollapsed ? 'Expand' : 'Collapse'}
+            </Button>
+            <Tooltip label="Refresh">
+              <ActionIcon size="input-xs" variant="default" aria-label="Refresh" onClick={() => void refetch()} loading={isFetching}>
+                <IconRefresh size={14} />
+              </ActionIcon>
+            </Tooltip>
+            <Tooltip label="Memorize this report (Ctrl+M)">
+              <ActionIcon size="input-xs" variant="default" aria-label="Memorize report" onClick={() => setMemorizeOpen(true)} disabled={!report}>
+                <IconDeviceFloppy size={14} />
+              </ActionIcon>
+            </Tooltip>
+            <Menu position="bottom-end" width={240}>
+              {/* No Tooltip between Menu.Target and the button: it would keep Menu's aria-expanded from the button, and Esc would then close the window. */}
+              <Menu.Target>
+                <Button size="xs" variant="default" leftSection={<IconDownload size={14} />} rightSection={<IconChevronDown size={12} />} disabled={!report} loading={exporting}>
+                  Export
+                </Button>
+              </Menu.Target>
+              <Menu.Dropdown>
+                {exportItems}
+                <Menu.Divider />
+                <Menu.Label>PDF paper</Menu.Label>
+                {paperItems}
+              </Menu.Dropdown>
+            </Menu>
+            <Button.Group>
+              <ShortcutButton size="xs" variant="default" command="record.print" leftSection={<IconPrinter size={14} />} onClick={() => window.print()}>
+                Print
+              </ShortcutButton>
+              <Menu position="bottom-end" width={240}>
+                <Menu.Target>
+                  <ActionIcon size="input-xs" variant="default" aria-label="Print menu">
+                    <IconChevronDown size={12} />
+                  </ActionIcon>
+                </Menu.Target>
+                <Menu.Dropdown>
+                  <Menu.Item leftSection={<IconFileTypePdf size={14} />} onClick={() => void exportAs('Pdf')} disabled={!report}>
+                    Save as PDF ({EXPORT_PAPER_LABEL[paper]})
+                  </Menu.Item>
+                  <Menu.Divider />
+                  <Menu.Label>Paper</Menu.Label>
+                  {paperItems}
+                </Menu.Dropdown>
+              </Menu>
+            </Button.Group>
+          </Group>
+        )}
       </Group>
       {error && <Alert color="red">{describeError(error)}</Alert>}
       {!report && !error && <Loader m="md" />}

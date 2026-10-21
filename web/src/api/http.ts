@@ -8,7 +8,7 @@
 //   instead; pass it as `token`.
 // - Non-2xx answers become a typed `ApiError` from the error envelope.
 
-import { type ApiClient, type EventHandlers, type EventSubscription, type FileDownload, type TxnQuery, txnQueryParams } from './client';
+import { type ApiClient, type EventHandlers, type EventSubscription, type ExportPaper, type FileDownload, type TxnQuery, txnQueryParams } from './client';
 import { ApiError, apiErrorFromBody } from './errors';
 import { parseApiJson, stringifyApiJson } from './json';
 import type {
@@ -89,6 +89,7 @@ import type {
   ReconciliationView,
   RegisterResponse,
   Report,
+  ExportFormat,
   ReportRequest,
   Saved,
   SavedKind,
@@ -326,11 +327,11 @@ export class HttpApiClient implements ApiClient {
   runReport(co: CompanyId, request: ReportRequest) {
     return this.request<Report>('POST', this.co(co, '/reports/run'), { body: request });
   }
-  exportReport(co: CompanyId, request: ReportRequest, format: 'csv') {
-    return this.download('POST', this.co(co, '/reports/export'), `${request.title ?? request.report}.${format}`, {
-      query: new URLSearchParams({ format }),
-      body: request,
-    });
+  exportReport(co: CompanyId, request: ReportRequest, format: ExportFormat, paper?: ExportPaper) {
+    // The generated enum spells the formats Csv | Xlsx | Pdf; the query takes them lower-cased.
+    const query = new URLSearchParams({ format: format.toLowerCase() });
+    if (paper) query.set('paper', paper);
+    return this.download('POST', this.co(co, '/reports/export'), `${request.title ?? request.report}.${format.toLowerCase()}`, { query, body: request });
   }
 
   saved(co: CompanyId, kind: SavedKind) {

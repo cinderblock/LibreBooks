@@ -70,6 +70,8 @@ export const COMMANDS = {
   'report.quick': { label: 'QuickReport', scope: 'window' },
   'txn.memorize': { label: 'Memorize transaction', scope: 'window' },
   'report.memorize': { label: 'Memorize report', scope: 'window' },
+  // Ctrl+E is Edit in a list or register; a report has nothing to edit, so it exports (the last format picked).
+  'report.export': { label: 'Export report', scope: 'window' },
   // Ctrl+Y is redo inside a text field on Windows; leave it there.
   'txn.journal': { label: 'Transaction journal', scope: 'window', inFields: false },
   'register.goToOther': { label: 'Go to the other register', scope: 'window' },

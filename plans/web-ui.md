@@ -36,6 +36,12 @@ accounts and items; New company and Open a .lbk file from the company picker;
 and the Import window's Options disclosures for the rest of `SyncBody` and
 `ParityBody`.
 
+A report export follow-up (2026-10-20) took up the server's XLSX and PDF
+export (`plans/reports.md`, "Export: CSV, XLSX, PDF"): the report window's
+Export menu offers Excel, PDF (Letter or A4) and CSV, Ctrl+E repeats the last
+pick, Print offers Save as PDF, and a phone reaches it all from one overflow
+menu.
+
 User requirements this meets: mobile first class from day one; QuickBooks-quality
 input (QBD keyboard shortcuts, QuickFill, date keys, the amount calculator);
 reports and views. The Tauri desktop app loads this same SPA, so the keymap
@@ -47,8 +53,9 @@ Ctrl+W/T/N/Tab can't be captured).
 - Phase A was built on worktree branch `worktree-agent-ab818e840111ec792`,
   phase B on `worktree-agent-af93b28647e2ebef7` (both merged by the parent
   session), phase C on `worktree-agent-a9571472f4dda8acb`, its import
-  follow-up on `worktree-agent-ab9ab2d43381969c5`, and phase D on
-  `worktree-agent-ab9aa5ed8179d8f95`. The parent merges `master` in; the
+  follow-up on `worktree-agent-ab9ab2d43381969c5`, phase D on
+  `worktree-agent-ab9aa5ed8179d8f95`, and the report export follow-up on
+  `worktree-agent-a3a9fec5729e41528`. The parent merges `master` in; the
   worktree never does.
 - Vite 8, React 19 (StrictMode), Mantine 9.7 (has `Menubar`), React Router 8.5
   (v7-style API from `react-router`), TanStack Query 5, TanStack Virtual 3,
@@ -59,10 +66,10 @@ Ctrl+W/T/N/Tab can't be captured).
   1 slot for check/tests, 2 for `vite build` and for Playwright's 2 workers):
   - `bun run dev` → http://localhost:5740. Add `?fixtures=1` (or
     `?fixtures=stress`, `&latency=0`, `&keymap=desktop|browser`).
-  - `bun run check` = `tsc --noEmit && bun test src/` (241 unit tests, 21 files).
+  - `bun run check` = `tsc --noEmit && bun test src/` (251 unit tests, 22 files).
   - `bun run test:e2e` (Playwright; starts the dev server with `VITE_FIXTURES=1`;
-    one-time `bunx playwright install chromium`). 47 smoke tests: 32 desktop
-    (1366×860) and 15 at 375px; the suite takes ~2 min.
+    one-time `bunx playwright install chromium`). 50 smoke tests: 34 desktop
+    (1366×860) and 16 at 375px; the suite takes ~2 min.
   - `bun run build`.
 - Generated API types live in `web/src/api/generated/` (ts-rs). Never edit them.
 - Windows: the Write tool produces LF; before a commit, normalise changed files
@@ -174,8 +181,8 @@ are invalidated without cancelling a long-poll in flight, and a sync's
 | `QuickCreateProvider` | The modal behind `<Add New>`: account, name (incl. job of), item. |
 | `LineGrid` | Form line grid: Tab/arrows/Enter navigation, Ctrl+Insert/Delete, one trailing blank line, per-cell errors, footer totals; card-per-line on phones. |
 | `RegisterGrid` | QBD two-line register, virtualized (tested at 100k lines), keyboard selection, cleared toggle (optimistic), the ⚡ downloaded mark, inline new-transaction line, **edit in place** (Ctrl+E / double-click; Esc cancels; stale `edit_seq` → conflict dialog), 1-Line mode; tappable list on phones. |
-| `ReportViewer` | Any `Report`: sticky header and label column, outline collapse showing subtotals, QuickZoom drill (txn / report / register), keyboard, virtualized; CSV export. |
-| `ReportCenter`, `ReportWindow` | `GET /reports` catalog by QBD category with memorized reports; a report window with the options bar (date macro / from–to, basis, columns, comparisons, show zero), filters modal, Export CSV (`POST /reports/export?format=csv`), Memorize (`POST /saved/memorized_report`), drill-down from `Drill`. |
+| `ReportViewer` | Any `Report`: sticky header and label column, outline collapse showing subtotals, QuickZoom drill (txn / report / register), keyboard, virtualized. |
+| `ReportCenter`, `ReportWindow` | `GET /reports` catalog by QBD category with memorized reports; a report window with the options bar (date macro / from–to, basis, columns, comparisons, show zero), filters modal, an **Export menu** (Excel, PDF on Letter or A4 with the paper remembered, CSV: `POST /reports/export?format=xlsx\|pdf\|csv&paper=`; Ctrl+E repeats the last pick; the server's file name from `Content-Disposition`; the on-screen CSV as the fallback for CSV only), Print as a split button with Save as PDF, one "More actions" overflow menu at 375px, Memorize (`POST /saved/memorized_report`), drill-down from `Drill`; `aria-busy` while a changed request loads behind the kept report. |
 | `KeyList` | List windows: virtualized, ↑↓ PgUp PgDn Home End Enter, type-to-jump. |
 | `Center` | Customer, Vendor and Employee Centers: the names with jobs indented, **Balance** (the name's own open items) and **Balance Total** (with its jobs) from `GET /balances/names`, the detail with contact, bill-to, balance card and transactions, edit, New transaction menu, Ctrl+Q QuickReport. |
 | `useTxnForm` / `TxnFormActions` | The form engine (see below) and the standard action bar: Delete, Void, Journal, Memorize, paperclip (Attachments for this transaction), Revert/Clear, Save & New, Save & Close. |
@@ -239,6 +246,7 @@ shows a banner, and reloads silently when there are no local edits.
 | Close window (asks if unsaved) | window | Esc, Ctrl+F4 | Esc, Ctrl+F4 | Esc, Ctrl+F4 | Esc, ⌃F4 |
 | New | window | Ctrl+N | Alt+Shift+N | Alt+Shift+N | ⌥⇧N |
 | Edit (register: edit the line in place) | window | Ctrl+E | Ctrl+E | Ctrl+E | ⌘E |
+| Export report (the format picked last) | window | Ctrl+E | Ctrl+E | Ctrl+E | ⌘E |
 | Delete | window | Ctrl+D | Ctrl+D | Ctrl+D | ⌘D |
 | Transaction history | window | Ctrl+H | Ctrl+H | Ctrl+H | ⌥⇧H |
 | QuickReport / QuickZoom | window | Ctrl+Q | Ctrl+Q | Alt+Shift+Q | ⌥⇧Q |
@@ -269,8 +277,13 @@ editor: **Save & New**, **Save & Close**, **New** (another editor of the
 kind), **Delete**, **Close window** (asks if unsaved), and Enter moves to the
 next field as Tab does (fields that take Enter themselves, an open QuickFill
 list, the calculator, a date field, a dropdown, keep it). Esc inside an open
-Select or MultiSelect dropdown closes the dropdown, not the window (a capture-
-phase check in `KeyboardProvider`).
+Select or MultiSelect dropdown, or an open Menu, closes the dropdown, not the
+window (a capture-phase check in `KeyboardProvider`).
+
+The report export follow-up added one command, **Export report** (Ctrl+E in a
+report window): it sends the format picked last from the Export menu (CSV to
+begin with) and shows its key on that item. Ctrl+E stays Edit in lists and
+registers; a report has nothing to edit, so the two never meet in one window.
 
 Rules: the browser keymap is derived from QBD's by dropping what browsers keep
 (Ctrl+W/T/N and their Shift forms, Ctrl+Tab, Ctrl+PgUp/PgDn; Ctrl+Q off Windows)
@@ -320,6 +333,11 @@ change events, and:
 - **Reports** (`fixtures/reports.ts`): the 46-id catalog, every report built
   from the posted books with date macros, basis, column layouts (by month /
   quarter / class / name), comparisons and % columns, filters, and drills.
+  Exports (`fixtures/exportFiles.ts`): the CSV as the server writes it; a PDF
+  that is a real one-page document (title block and the first rows in
+  Helvetica, on the paper asked for, a correct xref); the "workbook" is the
+  CSV bytes under the XLSX MIME type, a placeholder Excel won't open. An
+  unknown format or paper is a 400 `invalid`, as on the server.
 - **Saved documents**: memorized transactions (with the due list and
   `/memorized/:id/use`) and memorized reports.
 - **Reconciliation**: Pending while in progress, Cleared on finish, the
@@ -443,6 +461,25 @@ register. Console handle: `__librebooks.simulateRemoteEdit(txnId)`,
   `aria-expanded="false"`, so the window-close shortcut fired. The provider
   now samples `aria-expanded` in a capture-phase listener first. A test that
   presses Escape with a dropdown open is the regression check.
+- **Esc reached the window from an open Menu** (report export): with the focus
+  inside a Mantine `Menu` dropdown (after arrow keys, or an item with
+  `closeMenuOnClick={false}`) the event's target is the item, not the button
+  carrying `aria-expanded`; and a `Tooltip` between `Menu.Target` and its
+  button keeps `aria-expanded` off the button altogether (Tooltip forwards
+  events, not attributes). The capture-phase check also excuses a target
+  inside `[role="menu"]`, and menu targets take no Tooltip wrapper. The export
+  test presses Escape inside the open menu.
+- **A changed report request keeps the previous report on screen**
+  (`useReport` uses `keepPreviousData`), so a test that changes an option and
+  then acts on rows must wait for the new data or the rows it touched are
+  replaced (and the collapse set reset) under it. The report window carries
+  `aria-busy` while fetching and the subtitle names the period; the drill-down
+  test waits on both. This was the "collapse Income" flake seen only in full
+  runs on a busy machine.
+- Playwright sees a blob-URL `a.download` click as a `download` event;
+  `suggestedFilename()` is the `FileDownload.filename` and `download.path()`
+  has the bytes (the export test reads the PDF's MediaBox to prove A4 was
+  sent). Works in the mobile project too.
 - Mantine `MultiSelect`'s input is a `combobox` role too (not a textbox);
   `NumberInput`'s is a `textbox`. `Collapse` takes `expanded`.
 - The fixture status long-poll answers on every progress step, so a test that
@@ -593,6 +630,33 @@ Phase D follow-up (the server's phase D pass taken up; commits on
       chart from one request; an inventory part saves with its quantity.
 - [x] This document.
 
+Report export follow-up (the server's XLSX and PDF export taken up; commits on
+`worktree-agent-a3a9fec5729e41528`, 2026-10-20):
+
+- [x] `exportReport(co, request, format: ExportFormat, paper?: ExportPaper)`
+      in the client, HTTP (`?format=` lower-cased from the generated enum,
+      `&paper=` only when given, the header's file name with the request's
+      title as the fallback) and fixture (400 `invalid` as the server; a real
+      one-page PDF on the paper asked for and the CSV bytes under the workbook
+      MIME type as placeholders). `reports/export.ts` holds the shared menu
+      order, labels, extensions, MIME types, guards and file name.
+- [x] The report window's Export menu (Excel, PDF, CSV; Letter / A4 ticked
+      and remembered), `report.export` on Ctrl+E repeating the last pick
+      (`lib/prefs.ts`: `librebooks.reportExportFormat`, `librebooks.reportPaper`),
+      Print as a split button with Save as PDF, the 375px "More actions"
+      overflow menu holding collapse, refresh, memorize and the exports.
+- [x] Esc inside an open Menu closes the menu, not the window; the drill-down
+      test waits for the new period (`aria-busy`, the subtitle) before it
+      collapses a section.
+- [x] Tests: HTTP (the query string with and without paper, `Accept: */*`,
+      the header's name and the fallback), fixture (MIME types, bodies, the
+      MediaBox per paper, the 400s), the pure helpers; Playwright desktop (the
+      three formats, the key hint on the default, Esc in the menu, A4 then the
+      PDF's MediaBox from the download, Ctrl+E repeating, the Print menu) and
+      mobile (the overflow menu's formats, a PDF download at 375px).
+      `bun run check` green (251 tests); Playwright 50/50.
+- [x] This document; `plans/reports.md`'s open web item closed.
+
 ## What's left (next phases)
 
 1. **Stand-ins without a generated twin** (see Findings) stay until the server
@@ -607,9 +671,10 @@ Phase D follow-up (the server's phase D pass taken up; commits on
    Charges, Sales Orders (`sales_orders_enabled`), progress invoicing from an
    estimate, Receive Items against a PO (the form exists; linking lines to the PO
    does not).
-4. **Reports**: PDF/XLSX export and print styles beyond the basics; cash basis
-   in the fixture engine; the real catalog's per-report params beyond what the
-   options bar covers.
+4. **Reports**: print styles beyond the basics (the browser's print of the
+   on-screen grid; Save as PDF now covers paper output); cash basis in the
+   fixture engine; the real catalog's per-report params beyond what the
+   options bar covers. XLSX and PDF export landed in the export follow-up.
 5. **Attachments**: done in phase D for every record kind; left: a filter box
    on the Attached tab once a company has many documents (also under 7).
 6. **Companies**: creation and import are in the picker (phase D); left:

@@ -121,9 +121,9 @@ the PDF, counts pages, reads the MediaBox and extracts each page's text.
 **Known limits.** No text wrapping in the PDF (cells are cut, columns shrink);
 no per-report column width choices; XLSX cells are values, not formulas (totals
 don't recompute); the PDF has no bookmarks or links; one sheet per workbook;
-no page-break control (a section heading can end a page). The web UI still
-offers CSV only; XLSX and PDF are a format switch away (`ExportFormat` in the
-generated types now lists them).
+no page-break control (a section heading can end a page). The web UI's Export
+menu offers all three, with Letter / A4 for the PDF and Ctrl+E repeating the
+last pick (`plans/web-ui.md`, the report export follow-up).
 
 ## Cash basis: the exact algorithm
 
@@ -232,8 +232,7 @@ Key semantics:
   folds it into the brought-forward balance and says so in a note).
 - Audit Trail ranges are UTC days of the change.
 - Export: the limits under "Export: CSV, XLSX, PDF" (no wrapping in the PDF,
-  values not formulas in the XLSX); the web UI's export button still asks for
-  CSV only.
+  values not formulas in the XLSX).
 - Memorized reports are saved requests in the store's `saved` table (kind
   `memorized_report`), via `/saved/...`; Ctrl+M in the web UI. Not yet: budgets,
   multi-currency, payroll, estimates/orders and time reports.
@@ -250,8 +249,9 @@ Key semantics:
 - [x] XLSX and PDF export on a shared `render` layout; `?format=xlsx|pdf`,
       `?paper=letter|a4`; layout grid snapshots, XLSX round trip (calamine),
       PDF parse-back (lopdf), route tests.
-- [ ] Web UI: XLSX and PDF in the Report Center's export menu (and a paper
-      choice for PDF).
+- [x] Web UI: XLSX and PDF in the report window's Export menu, with Letter /
+      A4 for the PDF and Ctrl+E repeating the last pick (web follow-up,
+      2026-10-20; `plans/web-ui.md`).
 
 ## Things not to do
 

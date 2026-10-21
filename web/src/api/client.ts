@@ -80,6 +80,7 @@ import type {
   ReconciliationView,
   RegisterResponse,
   Report,
+  ExportFormat,
   ReportRequest,
   StartReconcile,
   Saved,
@@ -107,11 +108,14 @@ export interface EventHandlers {
   onStatus?(status: 'connecting' | 'open' | 'error'): void;
 }
 
-/** A file the server produced (a CSV export, a company file). */
+/** A file the server produced (a report export, a company file). */
 export interface FileDownload {
   blob: Blob;
   filename: string;
 }
+
+/** The PDF's page size for `POST /reports/export?paper=`. */
+export type ExportPaper = 'letter' | 'a4';
 
 export interface ApiClient {
   readonly mode: 'http' | 'fixtures';
@@ -180,7 +184,12 @@ export interface ApiClient {
 
   reportCatalog(co: CompanyId): Promise<CatalogEntry[]>;
   runReport(co: CompanyId, request: ReportRequest): Promise<Report>;
-  exportReport(co: CompanyId, request: ReportRequest, format: 'csv'): Promise<FileDownload>;
+  /**
+   * The report as a file (`POST /reports/export?format=csv|xlsx|pdf&paper=letter|a4`):
+   * `text/csv`, an Excel workbook or a PDF, named by the server (`Profit_and_Loss.xlsx`).
+   * `paper` is the PDF's page size (letter when omitted).
+   */
+  exportReport(co: CompanyId, request: ReportRequest, format: ExportFormat, paper?: ExportPaper): Promise<FileDownload>;
 
   /** Saved documents: memorized transactions (`doc: Memorized`) and reports (`doc: ReportRequest`). */
   saved(co: CompanyId, kind: SavedKind): Promise<Saved[]>;

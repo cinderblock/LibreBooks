@@ -35,13 +35,14 @@ export function KeyboardProvider({ children }: { children: ReactNode }) {
     // Bubble phase on window: components that handle a key themselves (a date
     // field's `+`, an open QuickFill list's Esc) call preventDefault first and
     // the registry leaves the event alone.
-    // Esc in an open combobox (a Select's or MultiSelect's dropdown) closes the
-    // dropdown, not the window. React has already closed it (and re-rendered)
-    // by the time the bubble listener runs, so the open state is read first,
-    // in the capture phase.
+    // Esc in an open combobox (a Select's or MultiSelect's dropdown) or an
+    // open menu (focus on one of its items after arrow keys or a pick that
+    // kept it open) closes the dropdown, not the window. React has already
+    // closed it (and re-rendered) by the time the bubble listener runs, so the
+    // open state is read first, in the capture phase.
     let escapeForDropdown = false;
     const onKeyDownCapture = (e: KeyboardEvent) => {
-      escapeForDropdown = e.key === 'Escape' && e.target instanceof Element && e.target.getAttribute('aria-expanded') === 'true';
+      escapeForDropdown = e.key === 'Escape' && e.target instanceof Element && (e.target.getAttribute('aria-expanded') === 'true' || e.target.closest('[role="menu"]') !== null);
     };
     const onKeyDown = (e: KeyboardEvent) => {
       // A held Esc shouldn't close window after window.

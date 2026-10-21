@@ -196,3 +196,15 @@ test('a report scrolls sideways inside itself, not the page', async ({ page }) =
   await expectNoSideways(page);
   await page.screenshot({ path: test.info().outputPath('report-375.png') });
 });
+
+test('a report at 375px exports from its overflow menu', async ({ page }) => {
+  await start(page, `${CO}/reports/BalanceSheet`);
+  await expect(page.getByTestId('report-grid').getByText('TOTAL ASSETS')).toBeVisible();
+  await page.getByTestId('report-window').getByRole('button', { name: 'More actions' }).tap();
+  const menu = page.getByRole('menu');
+  for (const f of ['Excel workbook (.xlsx)', 'PDF (.pdf)', 'CSV (.csv)']) await expect(menu.getByRole('menuitem', { name: f })).toBeVisible();
+  const pdf = page.waitForEvent('download');
+  await menu.getByRole('menuitem', { name: 'PDF (.pdf)' }).tap();
+  expect((await pdf).suggestedFilename()).toBe('Balance Sheet.pdf');
+  await expectNoSideways(page);
+});

@@ -214,9 +214,29 @@ describe('fixture books', () => {
 
   test('CSV export names the file after the report', async () => {
     const api = make();
-    const file = await api.exportReport(co, { ...defaultRequest('TrialBalance') }, 'csv');
+    const file = await api.exportReport(co, { ...defaultRequest('TrialBalance') }, 'Csv');
     expect(file.filename).toBe('Trial Balance.csv');
     expect((await file.blob.text()).startsWith('Juniper Hill Woodworks\r\nTrial Balance')).toBe(true);
+  });
+
+  test('XLSX and PDF exports are typed placeholders with a body; the PDF takes the paper; an unknown format or paper is a 400', async () => {
+    const api = make();
+    const xlsx = await api.exportReport(co, defaultRequest('BalanceSheet'), 'Xlsx');
+    expect(xlsx.filename).toBe('Balance Sheet.xlsx');
+    expect(xlsx.blob.type).toBe('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    expect(xlsx.blob.size).toBeGreaterThan(0);
+    const letter = await api.exportReport(co, defaultRequest('BalanceSheet'), 'Pdf');
+    expect(letter.filename).toBe('Balance Sheet.pdf');
+    expect(letter.blob.type).toBe('application/pdf');
+    const text = await letter.blob.text();
+    expect(text.startsWith('%PDF-1.4')).toBe(true);
+    expect(text).toContain('/MediaBox [0 0 612 792]');
+    expect(text).toContain('(Balance Sheet) Tj');
+    expect(text.trimEnd().endsWith('%%EOF')).toBe(true);
+    const a4 = await api.exportReport(co, defaultRequest('BalanceSheet'), 'Pdf', 'a4');
+    expect(await a4.blob.text()).toContain('/MediaBox [0 0 595 842]');
+    await expect(api.exportReport(co, defaultRequest('BalanceSheet'), 'Pdf', 'legal' as never)).rejects.toMatchObject({ status: 400, code: 'invalid' });
+    await expect(api.exportReport(co, defaultRequest('BalanceSheet'), 'Docx' as never)).rejects.toMatchObject({ status: 400, code: 'invalid' });
   });
 
   test('memorized reports and transactions are saved documents', async () => {
