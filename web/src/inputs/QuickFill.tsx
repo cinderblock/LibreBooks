@@ -385,7 +385,8 @@ export function QuickFill(props: QuickFillProps) {
       shadow="md"
       offset={2}
       middlewares={{ flip: true, shift: true }}
-      styles={{ dropdown: { padding: 0, minWidth: dropdownMinWidth } }}
+      // Never wider than a phone: the list opens on tap at 375px and must not push the page sideways.
+      styles={{ dropdown: { padding: 0, minWidth: `min(${dropdownMinWidth}px, calc(100vw - 16px))` } }}
     >
       <Popover.Target>{input}</Popover.Target>
       <Popover.Dropdown
