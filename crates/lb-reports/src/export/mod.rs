@@ -1,6 +1,8 @@
-//! Exporting a finished report to a file. CSV now; the [`ExportFormat`] enum is
-//! where XLSX and PDF go, working from the same [`Report`] so every report exports
-//! without knowing how.
+//! Exporting a finished report to a file: CSV, XLSX (what QBD's "Export to Excel"
+//! gives) and PDF (its "Print"). All three draw the same [`Layout`] from
+//! [`crate::render`], so the title block, headings, indentation, emphasis and
+//! footer agree; each writer only chooses how to spell a value and how wide a
+//! column is in its own medium.
 //!
 //! CSV follows RFC 4180 (CRLF line ends, fields quoted when they contain a comma,
 //! quote or line break). Amounts are plain decimals (`-1234.50`, no symbol or
@@ -8,30 +10,69 @@
 //! spaces in the first column. Text that a spreadsheet would run as a formula
 //! (`=`, `+`, `-`, `@` first) is prefixed with `'`.
 
+mod pdf;
+mod xlsx;
+
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use crate::model::{Report, RowKind, Value};
-use crate::request::Basis;
+use crate::model::{Report, Value};
+use crate::render::{self, Layout, Style};
+
+pub use pdf::{Paper, PdfOptions};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub enum ExportFormat {
     Csv,
+    Xlsx,
+    Pdf,
 }
 
 impl ExportFormat {
     pub const fn mime(self) -> &'static str {
         match self {
             ExportFormat::Csv => "text/csv; charset=utf-8",
+            ExportFormat::Xlsx => {
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            }
+            ExportFormat::Pdf => "application/pdf",
         }
     }
 
     pub const fn extension(self) -> &'static str {
         match self {
             ExportFormat::Csv => "csv",
+            ExportFormat::Xlsx => "xlsx",
+            ExportFormat::Pdf => "pdf",
         }
     }
+
+    /// The format a query string names (`csv`, `xlsx`, `pdf`; case-insensitive).
+    pub fn parse(s: &str) -> Option<ExportFormat> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "csv" => Some(ExportFormat::Csv),
+            "xlsx" => Some(ExportFormat::Xlsx),
+            "pdf" => Some(ExportFormat::Pdf),
+            _ => None,
+        }
+    }
+}
+
+/// Choices that apply to some formats.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ExportOptions {
+    /// PDF paper size.
+    pub paper: Paper,
+}
+
+/// Why a file could not be built. CSV never fails; the XLSX and PDF writers can
+/// (an impossible sheet name, a font that did not load).
+#[derive(Debug, thiserror::Error)]
+#[error("could not build the {format} file: {message}")]
+pub struct ExportError {
+    pub format: &'static str,
+    pub message: String,
 }
 
 /// CSV options.
@@ -47,10 +88,21 @@ impl Default for CsvOptions {
     }
 }
 
+/// The report as a file in `format`, with the default options.
+pub fn export(report: &Report, format: ExportFormat) -> Result<Vec<u8>, ExportError> {
+    export_with(report, format, &ExportOptions::default())
+}
+
 /// The report as a file in `format`.
-pub fn export(report: &Report, format: ExportFormat) -> Vec<u8> {
+pub fn export_with(
+    report: &Report,
+    format: ExportFormat,
+    opts: &ExportOptions,
+) -> Result<Vec<u8>, ExportError> {
     match format {
-        ExportFormat::Csv => to_csv(report, CsvOptions::default()).into_bytes(),
+        ExportFormat::Csv => Ok(to_csv(report, CsvOptions::default()).into_bytes()),
+        ExportFormat::Xlsx => xlsx::to_xlsx(report),
+        ExportFormat::Pdf => pdf::to_pdf(report, PdfOptions { paper: opts.paper }),
     }
 }
 
@@ -75,35 +127,29 @@ pub fn file_name(report: &Report, format: ExportFormat) -> String {
 
 /// The report as CSV.
 pub fn to_csv(report: &Report, opts: CsvOptions) -> String {
+    let lay: Layout<'_> = render::layout(report);
     let mut out = String::new();
     if opts.header_block {
-        line(&mut out, std::slice::from_ref(&report.title));
-        line(&mut out, std::slice::from_ref(&report.company_name));
-        line(&mut out, std::slice::from_ref(&report.subtitle));
-        if let Some(b) = report.basis {
-            line(
-                &mut out,
-                &[match b {
-                    Basis::Accrual => "Accrual Basis".to_owned(),
-                    Basis::Cash => "Cash Basis".to_owned(),
-                }],
-            );
+        for l in lay.title.lines() {
+            line(&mut out, &[l.to_owned()]);
         }
         out.push_str("\r\n");
     }
-    let has_groups = report.columns.iter().any(|c| c.group.is_some());
-    if has_groups {
-        let groups: Vec<String> = report
-            .columns
-            .iter()
-            .map(|c| c.group.clone().unwrap_or_default())
-            .collect();
-        line(&mut out, &groups);
+    if let Some(groups) = &lay.groups {
+        // The heading repeated over every column it spans, so a spreadsheet
+        // without merged cells still shows which column belongs to which.
+        let mut fields = vec![String::new(); lay.columns.len()];
+        for span in groups {
+            for f in &mut fields[span.first..=span.last] {
+                f.clone_from(&span.label);
+            }
+        }
+        line(&mut out, &fields);
     }
-    let labels: Vec<String> = report.columns.iter().map(|c| c.label.clone()).collect();
+    let labels: Vec<String> = lay.columns.iter().map(|c| c.label.clone()).collect();
     line(&mut out, &labels);
-    for row in &report.rows {
-        if row.kind == RowKind::Spacer {
+    for row in &lay.rows {
+        if row.is_spacer() {
             out.push_str("\r\n");
             continue;
         }
@@ -112,9 +158,9 @@ pub fn to_csv(report: &Report, opts: CsvOptions) -> String {
             .iter()
             .enumerate()
             .map(|(i, c)| {
-                let text = value_text(&c.value);
+                let text = csv_text(&c.value);
                 if i == 0 && row.depth > 0 && !text.is_empty() {
-                    format!("{}{text}", "    ".repeat(row.depth as usize))
+                    format!("{}{text}", " ".repeat(row.depth as usize * render::INDENT))
                 } else {
                     text
                 }
@@ -122,20 +168,16 @@ pub fn to_csv(report: &Report, opts: CsvOptions) -> String {
             .collect();
         line(&mut out, &fields);
     }
-    for n in &report.notes {
+    for n in lay.notes {
         line(&mut out, std::slice::from_ref(n));
     }
     out
 }
 
-fn value_text(v: &Value) -> String {
+fn csv_text(v: &Value) -> String {
     match v {
-        Value::Empty => String::new(),
         Value::Text(t) => defuse(t),
-        Value::Money(m) => m.to_string(),
-        Value::Date(d) => format!("{:02}/{:02}/{}", d.month(), d.day(), d.year()),
-        Value::Number(n) => n.clone(),
-        Value::Percent(p) => format!("{p}%"),
+        other => render::cell_text(other, Style::Plain),
     }
 }
 
@@ -163,5 +205,5 @@ fn quote(f: &str) -> String {
 
 /// The date format CSV uses (`MM/DD/YYYY`, as QBD exports).
 pub fn csv_date(d: jiff::civil::Date) -> String {
-    value_text(&Value::Date(d))
+    render::date_text(d)
 }

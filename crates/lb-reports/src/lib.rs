@@ -7,7 +7,8 @@
 //! reads the books in one consistent snapshot and returns a [`Report`]: one
 //! generic shape (title block, typed columns, indented rows with subtotals and
 //! totals, QuickZoom targets) that the UI renders without knowing which report
-//! it is, and that [`export`] turns into a file.
+//! it is, and that [`export`] turns into a file (CSV, XLSX or PDF, all drawn from
+//! the one [`render::Layout`]).
 //!
 //! Summary reports aggregate in SQL by account, period bucket and dimension, so a
 //! company with hundreds of thousands of postings costs a handful of grouped
@@ -22,6 +23,7 @@
 pub mod catalog;
 pub mod export;
 pub mod model;
+pub mod render;
 pub mod request;
 
 mod cash;
@@ -38,7 +40,10 @@ use lb_store::{Books, StoreError};
 use rusqlite::Connection;
 
 pub use catalog::{CatalogEntry, DatesKind, FilterKind, ReportCategory, ReportParams, catalog};
-pub use export::{CsvOptions, ExportFormat, export, file_name, to_csv};
+pub use export::{
+    CsvOptions, ExportError, ExportFormat, ExportOptions, Paper, PdfOptions, export, export_with,
+    file_name, to_csv,
+};
 pub use model::{Align, Cell, Column, ColumnKind, Drill, Report, Row, RowKind, Value};
 pub use request::{
     Basis, ClearedFilter, ColumnLayout, ReportFilters, ReportId, ReportRequest, SortBy,

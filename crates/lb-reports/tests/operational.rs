@@ -553,7 +553,7 @@ fn csv_export_quotes_indents_and_defuses() {
         "Profit_and_Loss.csv"
     );
     assert_eq!(
-        lb_reports::export(&pl, ExportFormat::Csv),
+        lb_reports::export(&pl, ExportFormat::Csv).unwrap(),
         csv.clone().into_bytes()
     );
 

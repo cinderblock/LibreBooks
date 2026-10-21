@@ -20,10 +20,16 @@ uuid.workspace = true
 ts-rs.workspace = true
 # Quantities and exact percentages (never floats).
 rust_decimal.workspace = true
+# Export: Excel files and PDFs.
+rust_xlsxwriter.workspace = true
+printpdf.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
 pretty_assertions.workspace = true
+# Reading the exports back.
+calamine.workspace = true
+lopdf.workspace = true
 
 [lints]
 workspace = true
