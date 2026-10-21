@@ -19,6 +19,7 @@ export type WindowKind =
   | 'reports'
   | 'report'
   | 'find'
+  | 'statement-charges'
   | 'list'
   | 'record'
   | 'company'

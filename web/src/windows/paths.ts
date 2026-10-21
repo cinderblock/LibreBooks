@@ -58,6 +58,9 @@ export function parseWindowPath(relPath: string): WindowDesc | null {
       return null;
     case 'find':
       return seg.length === 1 ? one('find', 'find') : null;
+    // One Statement Charges window; `?customer=` presets the name.
+    case 'statement-charges':
+      return seg.length === 1 ? one('statement-charges', 'statement-charges') : null;
     case 'lists':
       if (seg.length === 2 && b) return one('list', `list:${b}`, { list: b });
       // A record editor: one window per new form of a kind (a New Customer beside a New Vendor), one per saved record.
@@ -123,6 +126,8 @@ export const paths = {
     return `/reports/${encodeURIComponent(id)}${s ? `?${s}` : ''}`;
   },
   find: () => '/find',
+  /** Enter Statement Charges, preset to a customer:job. */
+  statementCharges: (customer?: string | null) => withQuery('/statement-charges', { customer }),
   list: (list: string) => `/lists/${encodeURIComponent(list)}`,
   /** A new list record's editor; `kind` (names), `type` (items) and `parent` preset the form. */
   newRecord: (list: string, params: { kind?: string; type?: string; parent?: string } = {}) => withQuery(`/lists/${encodeURIComponent(list)}/new`, params),

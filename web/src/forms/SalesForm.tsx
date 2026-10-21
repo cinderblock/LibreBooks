@@ -4,9 +4,9 @@
 // preview confirms (tax is the server's call), and a "postings" panel showing
 // what saving will do.
 
-import { Checkbox, Collapse, Group, Select, Table, Text, TextInput, Textarea } from '@mantine/core';
+import { Alert, Button, Checkbox, Collapse, Group, Select, Table, Text, TextInput, Textarea } from '@mantine/core';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useAccountIndex, useCompanyInfo, useEntityIndex, useIndex, useItemIndex, useItems, useNextNumber, usePaymentMethods, useSalesReps, useSalesTaxCodes, useTerms, useTxnPreview, useTxns } from '~/api/hooks';
+import { useAccountIndex, useCompanyInfo, useEntityIndex, useIndex, useItemIndex, useItems, useNextNumber, useOpenOrders, usePaymentMethods, useSalesReps, useSalesTaxCodes, useTerms, useTxnPreview, useTxns } from '~/api/hooks';
 import type { Address, SalesTaxCode, SaveOutcome, Txn } from '~/api/types';
 import { warningText } from '~/api/types';
 import { DateField } from '~/inputs/DateField';
@@ -16,12 +16,20 @@ import { AccountQuickFill, ClassQuickFill, ItemQuickFill, NameQuickFill } from '
 import { useDateWarning } from '~/inputs/useDateWarning';
 import { todayIso } from '~/lib/dates';
 import { formatMoney } from '~/lib/money';
+import { isOrderType, type OrderProgress } from '~/lib/orders';
 import { TXN_LABEL } from '~/lib/txnTypes';
+import { stashTxn } from '~/windows/handoff';
 import { paths } from '~/windows/paths';
+import { useOpenWindow } from '~/windows/WindowsProvider';
+import { CreateFromOrderModal } from './CreateFromOrder';
 import { gridErrors, type TxnFormSpec } from './model';
+import { DrawnFromNote, OrderProgressPanel } from './OrderProgress';
+import { OrderPickerModal } from './OrderPicker';
 import {
   applyCustomer,
   applySalesTerms,
+  hasDueDate,
+  isNonPostingSale,
   isSalesEmpty,
   newSalesDraft,
   nextSalesDraft,
@@ -46,16 +54,24 @@ export const SALES_FORM_SLUG: Record<SalesType, string> = {
   SalesReceipt: 'sales-receipt',
   CreditMemo: 'credit-memo',
   Estimate: 'estimate',
+  SalesOrder: 'sales-order',
+  StatementCharge: 'statement-charge',
 };
 
-const NOUN: Record<SalesType, string> = { Invoice: 'invoice', SalesReceipt: 'sales receipt', CreditMemo: 'credit memo', Estimate: 'estimate' };
+const NOUN: Record<SalesType, string> = { Invoice: 'invoice', SalesReceipt: 'sales receipt', CreditMemo: 'credit memo', Estimate: 'estimate', SalesOrder: 'sales order', StatementCharge: 'statement charge' };
 const FORM_TITLE: Record<SalesType, string> = {
   Invoice: 'Create Invoices',
   SalesReceipt: 'Enter Sales Receipts',
   CreditMemo: 'Create Credit Memos/Refunds',
   Estimate: 'Create Estimates',
+  SalesOrder: 'Create Sales Orders',
+  StatementCharge: 'Statement Charge',
 };
-const NUMBER_LABEL: Record<SalesType, string> = { Invoice: 'Invoice #', SalesReceipt: 'Sale No.', CreditMemo: 'Credit No.', Estimate: 'Estimate #' };
+const NUMBER_LABEL: Record<SalesType, string> = { Invoice: 'Invoice #', SalesReceipt: 'Sale No.', CreditMemo: 'Credit No.', Estimate: 'Estimate #', SalesOrder: 'S.O. No.', StatementCharge: 'Number' };
+const NON_POSTING_NOTE: Partial<Record<SalesType, string>> = {
+  Estimate: 'An estimate is a quote. It posts nothing; the invoice made from it does.',
+  SalesOrder: 'A sales order is a promise to sell. It posts nothing; the invoice made from it does.',
+};
 const TAX_ITEM_KEY = 'librebooks.sales.taxItem';
 
 /** Address ↔ the textarea people edit (one line per row; the structured fields stay). */
@@ -84,7 +100,11 @@ export function SalesForm({ type, saved, initial }: { type: SalesType; saved: Tx
   const { data: reps = [] } = useSalesReps();
   const { data: methods = [] } = usePaymentMethods();
   const firstField = useRef<HTMLInputElement>(null);
+  const open = useOpenWindow();
   const [showPostings, setShowPostings] = useState(false);
+  /** The order being drawn on: Create Invoice on a saved order, or a sales order picked for a new invoice. */
+  const [drawing, setDrawing] = useState<{ order: Txn; progress: OrderProgress } | null>(null);
+  const [pickOrder, setPickOrder] = useState(false);
 
   const taxItems = useMemo(() => itemList.filter((i) => (i.item_type === 'SalesTax' || i.item_type === 'SalesTaxGroup') && i.is_active), [itemList]);
   const defaults = useMemo<SalesDefaults>(
@@ -130,7 +150,7 @@ export function SalesForm({ type, saved, initial }: { type: SalesType; saved: Tx
   const next = useNextNumber(t, null, wantsAuto);
   useEffect(() => {
     if (next.data !== undefined && wantsAuto) update((d) => (d.numberIsAuto ? { ...d, number: next.data ?? '' } : d));
-  }, [next.data]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [next.data, wantsAuto]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Lines change → derived amounts (subtotals, percent discounts) follow.
   const setLines = (rows: SaleRow[]) => update((d) => setSaleLines(d, rows, items));
@@ -144,19 +164,22 @@ export function SalesForm({ type, saved, initial }: { type: SalesType; saved: Tx
 
   const totals = salesTotals(draft, items, codes);
   const txnForPreview = useMemo(() => (form.dirty || saved ? salesDraftToTxn(draft, items, codes) : null), [draft, items, codes, form.dirty, saved]);
-  const preview = useTxnPreview(txnForPreview, t !== 'Estimate');
+  const preview = useTxnPreview(txnForPreview, !isNonPostingSale(t));
   const serverTotals = preview.data && !preview.isPlaceholderData ? preview.data : null;
   const tax = serverTotals ? serverTotals.sales_tax : totals.tax;
   const total = serverTotals ? serverTotals.total : totals.total;
   const taxItem = draft.sales_tax_item_id ? items.get(draft.sales_tax_item_id) : undefined;
 
   // A saved invoice's balance due, from the transaction list (open_balance).
-  const mine = useTxns({ types: [t], entity_id: draft.entity_id ?? undefined, include_jobs: true, include_void: true, limit: 200 }, !!saved && t === 'Invoice');
+  const mine = useTxns({ types: [t], entity_id: draft.entity_id ?? undefined, include_jobs: true, include_void: true, limit: 200 }, !!saved && hasDueDate(t));
   const openBalance = saved ? (mine.data?.find((s) => s.id === saved.id)?.open_balance ?? null) : null;
 
   const dateWarning = useDateWarning(draft.date);
   const useClasses = prefs?.use_class_tracking ?? false;
   const salesTax = prefs?.sales_tax_enabled ?? true;
+  // A new invoice for a customer with open sales orders may draw on one (QBD's Available Sales Orders).
+  const openOrders = useOpenOrders('SalesOrder', draft.entity_id, t === 'Invoice' && !saved && prefs?.sales_orders_enabled !== false);
+  const openOrderCount = openOrders.data?.length ?? 0;
 
   const columns = useMemo<GridColumn<SaleRow>[]>(() => {
     const cols: GridColumn<SaleRow>[] = [
@@ -316,15 +339,39 @@ export function SalesForm({ type, saved, initial }: { type: SalesType; saved: Tx
 
   const invoice = t === 'Invoice';
   const receipt = t === 'SalesReceipt';
+  const charge = t === 'StatementCharge';
+  const dated = hasDueDate(t);
+  const shipped = invoice || t === 'Estimate' || t === 'SalesOrder';
+  const nonPosting = isNonPostingSale(t);
+
+  /** A drawn document: from a saved order it opens in its own window; on a new invoice it fills this form. */
+  const onDrawn = (doc: Txn) => {
+    setDrawing(null);
+    if (saved) open(paths.form('invoice', stashTxn(doc)));
+    else form.reset(salesDraftFromTxn(doc));
+  };
 
   const header = (
     <>
       <Group align="flex-end" gap="md" wrap="wrap">
-        <FormBadges saved={form.saved} nonPosting={t === 'Estimate'} />
-        {t === 'Estimate' && (
+        <FormBadges saved={form.saved} nonPosting={nonPosting} />
+        {NON_POSTING_NOTE[t] && (
           <Text size="sm" c="dimmed">
-            An estimate is a quote. It posts nothing; the invoice made from it does.
+            {NON_POSTING_NOTE[t]}
           </Text>
+        )}
+        <DrawnFromNote txn={draft.base ?? saved} />
+        {openOrderCount > 0 && (
+          <Alert color="blue" p="xs" data-testid="available-sales-orders">
+            <Group gap="xs" wrap="wrap">
+              <Text size="sm">
+                This customer has {openOrderCount} open sales {openOrderCount === 1 ? 'order' : 'orders'}.
+              </Text>
+              <Button size="xs" variant="light" onClick={() => setPickOrder(true)}>
+                Invoice from a sales order…
+              </Button>
+            </Group>
+          </Alert>
         )}
         {openBalance !== null && (
           <Text size="sm" c="dimmed">
@@ -350,7 +397,7 @@ export function SalesForm({ type, saved, initial }: { type: SalesType; saved: Tx
         <DateField
           label="Date"
           value={draft.date}
-          onChange={(date) => date && update((d) => (invoice && d.terms_id ? applySalesTerms({ ...d, date }, terms.find((x) => x.id === d.terms_id)) : { ...d, date }))}
+          onChange={(date) => date && update((d) => (dated && d.terms_id ? applySalesTerms({ ...d, date }, terms.find((x) => x.id === d.terms_id)) : { ...d, date }))}
           error={errors.header.date}
           warning={dateWarning}
           aria-label="Date"
@@ -365,7 +412,7 @@ export function SalesForm({ type, saved, initial }: { type: SalesType; saved: Tx
           error={errors.header.number}
           aria-label={NUMBER_LABEL[t]}
         />
-        {!mobile && (
+        {!mobile && !charge && (
           <Textarea
             label="Bill To"
             value={addressText(draft.bill_address)}
@@ -379,7 +426,7 @@ export function SalesForm({ type, saved, initial }: { type: SalesType; saved: Tx
             className={classes.wide}
           />
         )}
-        {!mobile && (invoice || t === 'Estimate') && (
+        {!mobile && shipped && (
           <Textarea
             label="Ship To"
             value={addressText(draft.ship_address)}
@@ -393,7 +440,7 @@ export function SalesForm({ type, saved, initial }: { type: SalesType; saved: Tx
             className={classes.wide}
           />
         )}
-        {(invoice || t === 'Estimate') && (
+        {shipped && (
           <TextInput
             label="P.O. No."
             value={draft.po_number}
@@ -404,7 +451,7 @@ export function SalesForm({ type, saved, initial }: { type: SalesType; saved: Tx
             aria-label="P.O. number"
           />
         )}
-        {invoice && (
+        {dated && (
           <Select
             label="Terms"
             data={terms.filter((x) => x.is_active || x.id === draft.terms_id).map((x) => ({ value: x.id, label: x.name }))}
@@ -415,7 +462,7 @@ export function SalesForm({ type, saved, initial }: { type: SalesType; saved: Tx
             aria-label="Terms"
           />
         )}
-        {invoice && <DateField label="Due Date" value={draft.due_date} onChange={(due_date) => update({ due_date })} aria-label="Due date" />}
+        {dated && <DateField label="Due Date" value={draft.due_date} onChange={(due_date) => update({ due_date })} aria-label="Due date" />}
         {reps.length > 0 && (
           <Select
             label="Rep"
@@ -426,7 +473,7 @@ export function SalesForm({ type, saved, initial }: { type: SalesType; saved: Tx
             aria-label="Sales rep"
           />
         )}
-        {invoice && <DateField label="Ship Date" value={draft.ship_date} onChange={(ship_date) => update({ ship_date })} aria-label="Ship date" />}
+        {(invoice || t === 'SalesOrder') && <DateField label="Ship Date" value={draft.ship_date} onChange={(ship_date) => update({ ship_date })} aria-label="Ship date" />}
         {receipt && (
           <Select
             label="Payment Method"
@@ -456,17 +503,21 @@ export function SalesForm({ type, saved, initial }: { type: SalesType; saved: Tx
   const taxLabel = taxItem ? `${taxItem.name} (${taxRate(taxItem, items) ?? '0'}%)` : 'Tax';
   const totalsBox = (
     <div className={mobile ? undefined : classes.headerGrid} style={mobile ? undefined : { gridTemplateColumns: '1fr 1fr 320px' }}>
-      <Textarea
-        label="Customer Message"
-        value={draft.message}
-        onChange={(e) => {
-          const message = e.currentTarget.value;
-          update({ message });
-        }}
-        autosize
-        minRows={2}
-        aria-label="Customer message"
-      />
+      {charge ? (
+        <span />
+      ) : (
+        <Textarea
+          label="Customer Message"
+          value={draft.message}
+          onChange={(e) => {
+            const message = e.currentTarget.value;
+            update({ message });
+          }}
+          autosize
+          minRows={2}
+          aria-label="Customer message"
+        />
+      )}
       <div>
         <TextInput
           label="Memo"
@@ -477,10 +528,12 @@ export function SalesForm({ type, saved, initial }: { type: SalesType; saved: Tx
           }}
           aria-label="Memo"
         />
-        <Group gap="md" mt="xs">
-          <Checkbox size="xs" label="To be printed" checked={draft.to_be_printed} onChange={(e) => update({ to_be_printed: e.currentTarget.checked })} />
-          <Checkbox size="xs" label="To be e-mailed" checked={draft.to_be_emailed} onChange={(e) => update({ to_be_emailed: e.currentTarget.checked })} />
-        </Group>
+        {!charge && (
+          <Group gap="md" mt="xs">
+            <Checkbox size="xs" label="To be printed" checked={draft.to_be_printed} onChange={(e) => update({ to_be_printed: e.currentTarget.checked })} />
+            <Checkbox size="xs" label="To be e-mailed" checked={draft.to_be_emailed} onChange={(e) => update({ to_be_emailed: e.currentTarget.checked })} />
+          </Group>
+        )}
       </div>
       <div>
         {salesTax && (
@@ -527,7 +580,7 @@ export function SalesForm({ type, saved, initial }: { type: SalesType; saved: Tx
             {preview.data.warnings.map(warningText).join(' ')}
           </Text>
         ) : null}
-        {t !== 'Estimate' && (
+        {!nonPosting && (
           <Checkbox size="xs" mt="xs" label="Show postings" checked={showPostings} onChange={(e) => setShowPostings(e.currentTarget.checked)} />
         )}
       </div>
@@ -554,11 +607,24 @@ export function SalesForm({ type, saved, initial }: { type: SalesType; saved: Tx
         minVisibleRows={5}
       />
       {totalsBox}
+      {saved && isOrderType(saved.txn_type) && <OrderProgressPanel order={saved} dirty={form.dirty} onDraw={(_target, progress) => setDrawing({ order: saved, progress })} />}
       <Collapse expanded={showPostings}>
         <PostingsPanel postings={preview.data?.postings ?? []} accounts={accounts} error={preview.error ? String((preview.error as Error).message) : null} />
       </Collapse>
-      <TxnFormActions form={form} hideVoid={t === 'Estimate'} />
+      <TxnFormActions form={form} hideVoid={nonPosting} />
       {form.chrome}
+      <CreateFromOrderModal order={drawing?.order ?? null} progress={drawing?.progress ?? null} target="Invoice" onClose={() => setDrawing(null)} onCreate={onDrawn} />
+      <OrderPickerModal
+        opened={pickOrder}
+        type="SalesOrder"
+        entityId={draft.entity_id}
+        multiple={false}
+        onClose={() => setPickOrder(false)}
+        onPick={([picked]) => {
+          setPickOrder(false);
+          if (picked) setDrawing(picked);
+        }}
+      />
     </div>
   );
 }

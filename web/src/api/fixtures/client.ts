@@ -78,6 +78,7 @@ import { accountTypeOrder, isDebitNormal, naturalBalance } from '~/lib/accountTy
 import { addDays, addMonths, todayIso } from '~/lib/dates';
 import { div, isZero, parseDecimal, toApiString } from '~/lib/decimal';
 import { centsToDec } from '~/lib/money';
+import { isOrderType, orderOpenAmount } from '~/lib/orders';
 import { hierarchicalCompare } from '~/lib/tree';
 import { EXPORT_FORMAT_INFO, exportFileName, isExportFormat, isExportPaper } from '~/reports/export';
 import { reportToCsv } from '~/reports/rows';
@@ -583,8 +584,21 @@ export class FixtureApiClient implements ApiClient {
     if (s.txn.is_void) return 0;
     // A payment's open balance is what it hasn't applied yet (an unapplied credit).
     if (PAYMENT_TYPES.includes(s.txn.txn_type)) return s.txn.amount - s.txn.applications.reduce((t, a) => t + a.amount + a.discount, 0);
+    // An order (sales order, purchase order, estimate) is open for what no
+    // invoice, receipt or bill has drawn from it yet, and not at all once it is
+    // fully drawn or closed by hand: what `open_only` then honours. The server
+    // keeps `open_balance` NULL for non-posting types (plans/web-ui.md, "For the
+    // server"); this is the behaviour the UI would want from it.
+    if (isOrderType(s.txn.txn_type)) return orderOpenAmount(s.txn, this.linkedDocs(s.txn.id));
     if (![...AR_TYPES, ...AP_TYPES].includes(s.txn.txn_type)) return null;
     return s.total - (applied.get(s.txn.id) ?? 0);
+  }
+
+  /** The documents with a line drawing on an order (invoices on a sales order or estimate; receipts and bills on a PO). */
+  private linkedDocs(orderId: string): Txn[] {
+    const out: Txn[] = [];
+    for (const s of this.txnStore.values()) if (s.txn.lines.some((l) => l.linked_txn_id === orderId)) out.push(s.txn);
+    return out;
   }
 
   private summaryOf(s: StoredTxn, applied: Map<string, number>): TxnSummary {

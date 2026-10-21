@@ -1,4 +1,4 @@
-# LibreBooks web UI (phases A, B, C and D)
+# LibreBooks web UI (phases A, B, C, D and E)
 
 Living plan for the SPA under `web/`. Master plan: `plans/librebooks.md`
 (decisions 7 and 13). HTTP contract: `plans/api.md`. Auth library:
@@ -42,6 +42,17 @@ Export menu offers Excel, PDF (Letter or A4) and CSV, Ctrl+E repeats the last
 pick, Print offers Save as PDF, and a phone reaches it all from one overflow
 menu.
 
+Phase E (2026-10-20) took up "What's left" item 3 bar payroll: the forms that
+draw on one another. Statement Charges (a customer's A/R register with a
+new-charge line), Sales Orders (non-posting, invoiced whole or in part),
+progress invoicing from an estimate (100%, a percentage, or per-line amounts)
+and Receive Items / Enter Bills against a purchase order (Select PO, partial
+receipts). Every drawn line carries `linked_txn_id` / `linked_line_id` back to
+the order line it fulfils, and the invoiced / received / remaining figures,
+the closing of an order and the open-order lists are all derived from those
+links on the client (`lib/orders.ts`), because the server keeps nothing else
+(see "For the server", phase E).
+
 User requirements this meets: mobile first class from day one; QuickBooks-quality
 input (QBD keyboard shortcuts, QuickFill, date keys, the amount calculator);
 reports and views. The Tauri desktop app loads this same SPA, so the keymap
@@ -54,8 +65,9 @@ Ctrl+W/T/N/Tab can't be captured).
   phase B on `worktree-agent-af93b28647e2ebef7` (both merged by the parent
   session), phase C on `worktree-agent-a9571472f4dda8acb`, its import
   follow-up on `worktree-agent-ab9ab2d43381969c5`, phase D on
-  `worktree-agent-ab9aa5ed8179d8f95`, and the report export follow-up on
-  `worktree-agent-a3a9fec5729e41528`. The parent merges `master` in; the
+  `worktree-agent-ab9aa5ed8179d8f95`, the report export follow-up on
+  `worktree-agent-a3a9fec5729e41528`, and phase E on
+  `worktree-agent-a19a3c5986ee129af`. The parent merges `master` in; the
   worktree never does.
 - Vite 8, React 19 (StrictMode), Mantine 9.7 (has `Menubar`), React Router 8.5
   (v7-style API from `react-router`), TanStack Query 5, TanStack Virtual 3,
@@ -66,10 +78,10 @@ Ctrl+W/T/N/Tab can't be captured).
   1 slot for check/tests, 2 for `vite build` and for Playwright's 2 workers):
   - `bun run dev` → http://localhost:5740. Add `?fixtures=1` (or
     `?fixtures=stress`, `&latency=0`, `&keymap=desktop|browser`).
-  - `bun run check` = `tsc --noEmit && bun test src/` (251 unit tests, 22 files).
+  - `bun run check` = `tsc --noEmit && bun test src/` (269 unit tests, 25 files).
   - `bun run test:e2e` (Playwright; starts the dev server with `VITE_FIXTURES=1`;
-    one-time `bunx playwright install chromium`). 50 smoke tests: 34 desktop
-    (1366×860) and 16 at 375px; the suite takes ~2 min.
+    one-time `bunx playwright install chromium`). 55 smoke tests: 38 desktop
+    (1366×860) and 17 at 375px; the suite takes ~2.5 min.
   - `bun run build`.
 - Generated API types live in `web/src/api/generated/` (ts-rs). Never edit them.
 - Windows: the Write tool produces LF; before a commit, normalise changed files
@@ -122,6 +134,25 @@ Ctrl+W/T/N/Tab can't be captured).
   (`POST /companies/import`) is always a NEW company, like a restore; the
   picker refetches the session and opens it. In fixture mode such companies
   share the demo books and differ only in their information.
+- **Orders are derived, never stored** (phase E). What has been invoiced
+  from a sales order or estimate, or received against a purchase order, is
+  read back from the lines of the documents that link to it
+  (`TxnLine.linked_txn_id` / `linked_line_id`); remaining = ordered − Σ linked,
+  per line, in exact decimals (`lib/orders.ts`). An order is closed when every
+  line is fully drawn (sales and purchase orders by quantity, estimates by
+  amount) or when closed by hand, which is kept in `Txn.extra` under QBD's own
+  tag `IsManuallyClosed` (the server stores `extra` verbatim; an import that
+  carried the tag would land in the same place). Nothing else is invented on
+  the client: the UI reads no `open_balance` for an order, so it works the
+  same against the real server as against the fixture.
+- Statement charges are entered in a customer's A/R register (QBD's Enter
+  Statement Charges), one item line per charge, no sales tax; a saved charge
+  opens in the sales form as a `StatementCharge` for editing, voiding and
+  deleting. Sales orders are a sales form too (non-posting, like estimates).
+- Drawing on an order makes a NEW, unsaved document handed to its form
+  through `windows/handoff.ts` (as memorized transactions are): the person
+  sees the invoice, receipt or bill before anything is saved, and the number,
+  terms and dates are the form's.
 
 ## Architecture
 
@@ -134,6 +165,7 @@ web/src/
     format                   byte sizes, ISO 8601 durations (PT6H ↔ minutes)
     quickfill, tree          ranked hierarchical matching; Parent:Child helpers
     accountTypes, txnTypes   mirrors of lb-core facts (labels, classes, register columns)
+    orders                   what an order's linked documents have drawn: remaining quantities and amounts, closed, IsManuallyClosed
     platform, prefs, useMobile
   api/                   the data layer
     client.ts                ApiClient interface (the one thing screens talk to)
@@ -150,10 +182,12 @@ web/src/
   shell/                 desktop + mobile shells, menus (with admin gating), palette, overlay, user menu
   inputs/                DateField, MoneyField, QuickFill (+ pickers, QuickCreate), LineGrid, RegisterGrid
   forms/                 the form engine (useTxnForm) and every form with its pure draft model;
-                         the record engine (useRecordForm) and records/ (the list editors, AddressFields)
+                         the record engine (useRecordForm) and records/ (the list editors, AddressFields);
+                         linked.ts (drawing on an order), CreateFromOrder (the dialog), OrderProgress (the panel),
+                         statementCharge.ts (the register's new-charge line)
   reports/               request ↔ URL params, row outline + CSV, ReportViewer
-  screens/               Home, Chart of Accounts, centres, Register, Reconcile, Reports, Find, Lists,
-                         RecordWindow, Company (+ CompanyInfoFields), Banking, feeds/, Memorized,
+  screens/               Home, Chart of Accounts, centres, Register, StatementCharges, Reconcile, Reports, Find,
+                         Lists, RecordWindow, Company (+ CompanyInfoFields), Banking, feeds/, Memorized,
                          Attachments, Merge, MyAccount, admin/
   auth/                  SignIn (/signin), Enrol (/enroll#token=…)
   components/KeyList     keyboard-driven virtualized list used by list windows
@@ -184,7 +218,7 @@ are invalidated without cancelling a long-poll in flight, and a sync's
 | `ReportViewer` | Any `Report`: sticky header and label column, outline collapse showing subtotals, QuickZoom drill (txn / report / register), keyboard, virtualized. |
 | `ReportCenter`, `ReportWindow` | `GET /reports` catalog by QBD category with memorized reports; a report window with the options bar (date macro / from–to, basis, columns, comparisons, show zero), filters modal, an **Export menu** (Excel, PDF on Letter or A4 with the paper remembered, CSV: `POST /reports/export?format=xlsx\|pdf\|csv&paper=`; Ctrl+E repeats the last pick; the server's file name from `Content-Disposition`; the on-screen CSV as the fallback for CSV only), Print as a split button with Save as PDF, one "More actions" overflow menu at 375px, Memorize (`POST /saved/memorized_report`), drill-down from `Drill`; `aria-busy` while a changed request loads behind the kept report. |
 | `KeyList` | List windows: virtualized, ↑↓ PgUp PgDn Home End Enter, type-to-jump. |
-| `Center` | Customer, Vendor and Employee Centers: the names with jobs indented, **Balance** (the name's own open items) and **Balance Total** (with its jobs) from `GET /balances/names`, the detail with contact, bill-to, balance card and transactions, edit, New transaction menu, Ctrl+Q QuickReport. |
+| `Center` | Customer, Vendor and Employee Centers: the names with jobs indented, **Balance** (the name's own open items) and **Balance Total** (with its jobs) from `GET /balances/names`, the detail with contact, bill-to, balance card and transactions (statement charges among them, with their open amount), edit, New transaction menu (Customers: Invoice, Receive Payment, Sales Receipt, Estimate, Sales Order, Statement Charge for this name), Ctrl+Q QuickReport. |
 | `useTxnForm` / `TxnFormActions` | The form engine (see below) and the standard action bar: Delete, Void, Journal, Memorize, paperclip (Attachments for this transaction), Revert/Clear, Save & New, Save & Close. |
 | `useRecordForm` / `RecordFormActions` / `RecordLoader` | The list-record engine, the same shape as the transaction one and sharing its pieces (`ConflictModal`, `RemoteChangeBanner`, `FormActionBar`, `FormErrors`): a pure `RecordFormSpec` (draft ↔ record, validate, fingerprint, server-error mapping, next draft), Save & New / Save & Close, Revert/Clear, Delete (Ctrl+D) with the server's `in_use` refusal on the form, stale `edit_seq` → the conflict dialog, a change pushed while editing → banner or silent reload, Ctrl+N a fresh editor, Enter moving between fields (`enterProps`), the paperclip for `entity`/`account`/`item`. |
 | `RecordWindow` | `/lists/:list/new` (`?kind=`, `?type=`, `?parent=` presets) and `/lists/:list/:id`: loads the record and renders its editor. Titles "New Customer", "Edit Item: Walnut". |
@@ -194,8 +228,12 @@ are invalidated without cancelling a long-poll in flight, and a sync's
 | `ClassEditor`, `TermsEditor`, `PaymentMethodEditor`, `SalesTaxCodeEditor` | Subclass of; standard (net days, discount % within days) or date-driven (day of month, cutoff, discount by day) terms; payment type; a ≤3-character code, taxable or not. |
 | `ListWindow` | Items, classes, terms, payment methods, sales tax codes, other names: Find, Include inactive, New / Edit / Delete, Ctrl+N / Ctrl+E (or Enter) / Ctrl+D (the server's `in_use` shown), Ctrl+Q where there's a QuickReport. The Chart of Accounts and the Centers open the same editors (Edit, New, Add job). |
 | `CompanyPicker` | `/` (one company opens by itself) and `/companies` (always the list; the user menu's "Open another company", the phone's More → Companies). Admins: New company (`CompanyInfoFields` → `POST /companies`) and Open a .lbk file (`POST /companies/import`, multipart file + name), each a NEW company opened at once after the session refetches. |
-| `PurchaseForm` | Write Checks, Enter Bills, Vendor Credits, Credit Card Charges/Credits, Item Receipts, Purchase Orders (non-posting, says so): Expenses/Items tabs, terms → due/discount dates, recall of the payee's last transaction. |
-| `SalesForm` | Invoices, Sales Receipts, Credit Memos, Estimates (non-posting): item lines with qty × rate, sales tax item and customer tax code, live server-confirmed totals (`PostingsPanel`). |
+| `PurchaseForm` | Write Checks, Enter Bills, Vendor Credits, Credit Card Charges/Credits, Item Receipts, Purchase Orders (non-posting, says so): Expenses/Items tabs, terms → due/discount dates, recall of the payee's last transaction. **Receive Items and Enter Bills against a PO** (phase E): a vendor with open purchase orders gets a notice and a **Select PO** button (an `OrderPicker` of the open ones with what remains on each); the chosen orders' remaining lines land on the Items tab linked to their PO lines, quantities editable for a partial receipt. A saved PO shows the `OrderProgress` panel (ordered / received / remaining per line, the receipts and bills drawing on it, Open / Closed, Mark as closed / Reopen, Create Item Receipt / Enter Bill). |
+| `SalesForm` | Invoices, Sales Receipts, Credit Memos, Estimates and **Sales Orders** (both non-posting), **Statement Charges** (a saved charge's editor): item lines with qty × rate, sales tax item and customer tax code, live server-confirmed totals (`PostingsPanel`) on the posting kinds. Phase E: a saved sales order or estimate shows `OrderProgress` (invoiced / remaining per line, the invoices drawing on it, progress to date in percent for an estimate) with **Create Invoice** → `CreateFromOrder`; a new invoice for a customer with open sales orders offers **Invoice from a sales order…**; an invoice made from an order says "From Sales Order N" with a link to it, and its lines carry `linked_txn_id` / `linked_line_id`. |
+| `CreateFromOrder` | The dialog behind Create Invoice / Create Item Receipt / Enter Bill on an order. Sales and purchase orders: everything that remains, or selected items and quantities (Ordered, Invoiced or Received, Remaining, To invoice / To receive per line). Estimates, QBD's three: the entire estimate (100%), a percentage of the whole, or selected items with an amount or a percent per line (Est Amt, Prior Amt, Prior %, Amount, Curr %), the total and its percent of the estimate at the foot. Makes a new unsaved document (`forms/linked.ts: documentFromOrder`) and hands it to the form. |
+| `OrderProgress` | Under a saved order: status (Open, Closed: fully invoiced / received, Closed by hand), per-line Ordered / Invoiced or Received / Remaining (amounts and percent for an estimate), the linked documents with a way into each, Mark as closed / Reopen (sales and purchase orders; `IsManuallyClosed` in `extra`), and the Create… button. Disabled while the form has unsaved edits (save first). |
+| `OrderPicker` | A name's open orders of a kind (Select PO; Available Sales Orders): number, date, memo, amount and what remains; pick one or several. |
+| `StatementCharges` | Customers → Enter Statement Charges: a customer:job and its A/R register (invoices, charges, credits, payments; Amt Chrg / Amt Paid / Open / running Balance; ↑↓, Enter or a click QuickZooms into the transaction) with the new-charge line at the foot (Date, Number, Item, Qty, Rate, Amount, Class, Due date from the customer's terms, Description) that records a `StatementCharge` with one item line and no sales tax. Reached from the menu, the palette, the Customer Center's New transaction menu (preset to the name) and a phone's More. Stacked fields and cards at 375px. |
 | `PaymentForm`, `PayBills` | Receive Payments (open invoices from `GET /open`, auto-apply, credits, Undeposited Funds or a bank account) and Pay Bills (open bills from `GET /txns?types=Bill&open_only`, discounts/credits, check or card). |
 | `DepositForm`, `TransferForm`, `JournalForm` | Make Deposits (payments waiting in Undeposited Funds from `GET /undeposited`, cash back), Transfer Funds, General Journal (debit/credit columns, must balance, auto-numbered). |
 | `MemorizeModal` | Ctrl+M: name, Never / Remind / Automatic, interval, next date, days in advance, remaining, group → `POST /saved/memorized_txn`. |
@@ -264,9 +302,18 @@ shows a banner, and reloads silently when there are no local edits.
 
 Commands with no key in QBD (Enter Bills, Pay Bills, Vendor Credits, Purchase
 Orders, Credit Card Charges, Sales Receipts, Receive Payments, Credit Memos,
-Estimates, Deposits, Transfers, Journal Entries, Reconcile, Bank Feeds, Report
-Center, Vendor Center) exist as commands with empty keymaps, so menus, the
-palette and a future keymap editor reach them.
+Estimates, Sales Orders, Statement Charges, Deposits, Transfers, Journal
+Entries, Reconcile, Bank Feeds, Report Center, Vendor Center) exist as
+commands with empty keymaps, so menus, the palette and a future keymap editor
+reach them. Phase E added two of those (`form.salesOrder`,
+`nav.statementCharges`) and no keys. In the Statement Charges window **New**
+(Ctrl+N / Alt+Shift+N) puts the caret in the new-charge line, **QuickZoom**
+(Ctrl+Q) and Enter open the selected register line, Enter in the new-charge
+line records it. Menu items can depend on a company preference
+(`MenuItem.pref`): Create Sales Orders shows only with `sales_orders_enabled`,
+Create Estimates with `estimates_enabled`, Purchase Orders and Receive Items
+with `inventory_enabled` off are still shown (QBD hides them; our fixture
+company has inventory off and uses them).
 
 Phase D added no commands; it widened where the existing ones apply. In every
 list window (Chart of Accounts, the Centers, Item / Class / Terms / Payment
@@ -372,6 +419,18 @@ change events, and:
   and removes the duplicate.
 - The closing date refuses with 423 `closed_period` and `detail.closing_date`,
   as the server does.
+- **Orders** (phase E): the seed has an open sales order (SO-1001 for Acme
+  Corp:Conference Table), a purchase order (PO-2041 to Hardwood Supply Co) of
+  which 50 of 80 walnut came in on an item receipt whose lines link back to
+  the order's, and a statement charge for Nguyen, David; `sales_orders_enabled`
+  and `progress_invoicing` are on. `TxnSummary.open_balance` for a sales
+  order, purchase order or estimate is what no linked document has drawn yet
+  (`lib/orders.ts: orderOpenAmount`), 0 once fully drawn or closed by hand
+  (`extra.IsManuallyClosed`), so `open_only` honours closed orders: the
+  behaviour the UI would want from the server, which keeps `open_balance`
+  NULL for non-posting types (the UI derives the same figures itself and reads
+  no `open_balance` for orders). Deleting an order something draws on is
+  `in_use`. Orders post nothing whatever is drawn from them.
 - **Companies** (phase D): `POST /companies` (name required, month 1–12) and
   `POST /companies/import` (any non-empty file passes; the name comes from
   the request, else the file name; the manifest carries the file's size and
@@ -510,6 +569,26 @@ register. Console handle: `__librebooks.simulateRemoteEdit(txnId)`,
   query's company list from it before invalidating, so the shell knows the
   name without waiting on the refetch. `POST /companies/import` answers no
   role; the picker fills in `admin` (only a server admin can import).
+- **A non-posting form's total is the lines' sum on the server** (`Txn.amount`
+  comes back without tax for an estimate or sales order: `lines_total()`),
+  while the form shows the client's estimated tax under the lines, so the
+  saved toast says 185.00 where the form said 198.41. Pre-existing for
+  estimates; sales orders inherit it. A server preview for non-posting kinds,
+  or a decision that quotes carry no tax, would settle it (phase E).
+- **QuickFill's list on a phone** (phase E): a field's list opens on tap and
+  stays open while the field has the focus, and its 380px minimum width made
+  a 375px page scroll sideways. The dropdown's minimum is now
+  `min(380px, 100vw − 16px)`; the statement-charges mobile test measures with
+  the list open.
+- **Drawing a PO onto a bill** meets the vendor's prefilled expense line (its
+  default account, no amount), which would fail validation ("Enter an
+  amount"); Select PO drops such a line as the order's items arrive.
+- A hand-off without a number (an invoice drawn from an order) now takes the
+  next number: `salesDraftFromTxn` sets `numberIsAuto` for an unsaved
+  transaction with no number, and the next-number effect also runs when
+  `wantsAuto` flips.
+- A statement charge for a customer without terms is due on its own date
+  (QBD's due-on-receipt), so the due date is never blank.
 
 ## Progress log
 
@@ -657,6 +736,45 @@ Report export follow-up (the server's XLSX and PDF export taken up; commits on
       `bun run check` green (251 tests); Playwright 50/50.
 - [x] This document; `plans/reports.md`'s open web item closed.
 
+Phase E (commits on `worktree-agent-a19a3c5986ee129af`, 2026-10-20; "What's
+left" item 3 bar payroll):
+
+- [x] `lib/orders.ts` (progress per line and per order, closed, the
+      `IsManuallyClosed` mark in `extra`) and `forms/linked.ts` (drawing the
+      remainder, typed quantities, a percent or amounts per line; the drawn
+      lines; the new document from an order), unit-tested with exact decimals.
+- [x] Fixture: the seed's sales order, partly received PO (linked lines) and
+      statement charge; `open_balance` for orders as what remains, `open_only`
+      honouring closed orders; a test.
+- [x] Hooks: `useLinkedDocs` / `useOrderProgress` (the documents linked to an
+      order) and `useOpenOrders` (a name's open orders with their progress):
+      summaries, then the transactions whole, since there is no `linked_to`
+      filter; both under `txnsAll` so any transaction change refreshes them.
+- [x] Sales Orders and Statement Charges as sales-form kinds (`hasDueDate`,
+      `isNonPostingSale`); the forms' registry, menus (`MenuItem.pref`,
+      `useMenuPrefs`), the two commands, GlobalCommands, the Customer Center's
+      New transaction menu (Sales Order; Statement Charge preset to the name).
+- [x] `OrderProgress` (panel, status, Mark as closed / Reopen, "From Sales
+      Order N" note), `CreateFromOrder` (QBD's choices), `OrderPicker` (Select
+      PO, Available Sales Orders); Create Invoice from a sales order and an
+      estimate; Select PO on Receive Items and Enter Bills (the vendor's
+      prefilled expense line gives way to the order's items); Invoice from a
+      sales order on a new invoice.
+- [x] The Statement Charges window (`screens/StatementCharges.tsx`) and its
+      pure model (`forms/statementCharge.ts`: the charge's transaction, the
+      register's Amt Chrg / Amt Paid / running balance); the
+      `statement-charges` window kind and `paths.statementCharges(customer)`.
+- [x] QuickFill's list capped at the phone's width (its 380px minimum pushed
+      a 375px page sideways once a field opened it on tap; its own commit).
+- [x] Tests: unit (orders, drawing, the statement charge model, menus by
+      preference, the fixture's open orders), Playwright desktop (a statement
+      charge recorded and QuickZoomed; a sales order invoiced for 4 of 10,
+      remaining 6, closed by hand; E-118 at 50%, 425 + 1,350, progress 50%;
+      a PO of 20 hinges received 12 then billed 8 through Select PO, closed)
+      and 375px (statement charges with the QuickFill list open, a sales
+      order). `bun run check` green (269 tests); Playwright 55/55.
+- [x] This document.
+
 ## What's left (next phases)
 
 1. **Stand-ins without a generated twin** (see Findings) stay until the server
@@ -667,10 +785,14 @@ Report export follow-up (the server's XLSX and PDF export taken up; commits on
    and fixed assets open in the item editor with their common fields only;
    QBD's "Add/Edit Multiple List Entries" grid; a price level list (the API
    has a percent per customer, no list).
-3. **Forms not built**: Pay Employees (payroll; out of scope for now), Statement
-   Charges, Sales Orders (`sales_orders_enabled`), progress invoicing from an
-   estimate, Receive Items against a PO (the form exists; linking lines to the PO
-   does not).
+3. **Forms not built**: Pay Employees (payroll; out of scope for now).
+   Statement Charges, Sales Orders, progress invoicing and Receive Items
+   against a PO landed in phase E; left from that family: Enter Bill for
+   Received Items (a bill drawing on an item receipt, QBD's `linked` receipt
+   lines), a sales order made from an estimate, per-line manual close
+   (QBD's "Clsd" column; only the whole order closes here), and the
+   Open Sales Orders / Open Purchase Orders reports (the fixture's `open_only`
+   lists them; the server's would need the open amount below).
 4. **Reports**: print styles beyond the basics (the browser's print of the
    on-screen grid; Save as PDF now covers paper output); cash basis in the
    fixture engine; the real catalog's per-report params beyond what the
@@ -766,6 +888,42 @@ Found in phase D:
   whether the server refuses such a `parent_id` is unverified (the fixture
   only checks the parent exists).
 
+Found in phase E (orders and what draws on them); none worked around twice,
+all derived on the client from `linked_txn_id` / `linked_line_id`. **A server
+pass is under way in parallel** (2026-10-21) adding order fulfilment on the
+Rust side: `TxnLine.is_closed`, `Txn.is_manually_closed`,
+`GET /txns/:id/fulfilment` and open orders in `GET /open`. When it lands and
+the generated types carry the fields, the switch is small and in one place
+each: `lib/orders.ts` reads `is_manually_closed` instead of
+`extra.IsManuallyClosed` (keep reading the tag for imported books until a
+migration moves it), `useOrderProgress` reads the fulfilment route instead of
+fanning out over the name's documents, `useOpenOrders` reads `/open` with an
+order kind, and `OrderProgress` gains the per-line close QBD's "Clsd" column
+shows. The fixture then mirrors those routes rather than the open-amount
+guess below.
+
+- **No invoiced / received quantity, no "fully invoiced / received", no
+  "manually closed" on a sales order, purchase order or estimate.** QBD has
+  `IsFullyInvoiced` / `IsFullyReceived`, per-line `Invoiced` / `ReceivedQuantity`
+  and `IsManuallyClosed` (order and line). The UI derives the first two from
+  the linked documents (`lib/orders.ts`) and keeps the manual close in
+  `Txn.extra.IsManuallyClosed` (stored verbatim). Server fields for these,
+  maintained like `open_balance` is for A/R items, would make the figures
+  authoritative and let the store refuse over-drawing a line.
+- **`open_balance` is NULL for non-posting types**, so `GET /txns?open_only`
+  cannot list open orders and `GET /open` knows nothing of them. The UI lists
+  a name's open orders by fetching its orders and the documents that could
+  draw on them, whole. The fixture answers what the server could: an order's
+  `open_balance` = its remaining amount, 0 once closed.
+- **No `linked_to=<txn id>` filter on `GET /txns`** (nor a lines-included
+  summary), so the documents drawing on an order are found by listing the
+  name's candidate types and reading each transaction whole
+  (`useLinkedDocs`). One request would do with a filter.
+- **A line's link is not validated**: the server stores any
+  `linked_txn_id` / `linked_line_id` (only deposit lines are read). The forms
+  send ids they just read; a check that the target exists, belongs to the
+  same name and is of a kind the form may draw on would catch a stale pick.
+
 ## Open questions for the user
 
 1. **Enter in grids**: default is "next field" (fast keyboard entry); QBD's own
@@ -802,3 +960,9 @@ Found in phase D:
   fixture mirrors that, nobody else computes it.
 - Don't press Escape in a Playwright test expecting the window to stay open
   unless a dropdown is open (then Esc is the dropdown's).
+- Don't read `open_balance`, or invent an `is_closed`, for a sales order,
+  purchase order or estimate in the UI: derive it from the linked documents
+  (`lib/orders.ts`), the one place that knows, so the UI behaves the same
+  against the server (where `open_balance` is NULL for them) and the fixture.
+- Don't link a drawn line by `linked_txn_id` alone: the quantity roll-up is
+  per order line (`linked_line_id`); a line without it counts for nothing.

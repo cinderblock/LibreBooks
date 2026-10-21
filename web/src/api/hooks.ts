@@ -4,13 +4,15 @@
 import { useDebouncedValue } from '@mantine/hooks';
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useMemo } from 'react';
-import type { TxnQuery } from './client';
+import { LINK_TARGETS, isOrderType, orderProgress, type OrderProgress, type OrderType } from '~/lib/orders';
+import type { ApiClient, TxnQuery } from './client';
 import { useApi, useCompanyId } from './context';
 import { invalidateTxnDerived, qk, sk } from './keys';
 import type {
   Account,
   AttachmentQuery,
   ClearedStatus,
+  CompanyId,
   DateRange,
   Entity,
   FeedQuery,
@@ -321,6 +323,67 @@ export function useReport(req: ReportRequest | null) {
     enabled: !!req,
     staleTime: 30_000,
     placeholderData: keepPreviousData,
+  });
+}
+
+/**
+ * The documents drawing on an order (invoices on a sales order or estimate;
+ * item receipts and bills on a purchase order), whole. There is no
+ * `linked_to` filter on `GET /txns` (plans/web-ui.md, "For the server"), so
+ * this lists the name's candidate kinds and reads each transaction to find the
+ * lines whose `linked_txn_id` is the order. Under `txnsAll`, so any
+ * transaction change refreshes it.
+ */
+export function useLinkedDocs(order: Txn | null) {
+  const api = useApi();
+  const co = useCompanyId();
+  const types = order && isOrderType(order.txn_type) ? LINK_TARGETS[order.txn_type] : undefined;
+  return useQuery({
+    queryKey: [...qk.txnsAll(co), 'linked', order?.id ?? '', order?.entity_id ?? ''],
+    queryFn: () => linkedDocs(api, co, order!, types!),
+    enabled: !!order && !!types && !!order.entity_id,
+    staleTime: 30_000,
+  });
+}
+
+async function linkedDocs(api: ApiClient, co: CompanyId, order: Txn, types: readonly TxnType[]): Promise<Txn[]> {
+  const summaries = await api.txns(co, { types: [...types], entity_id: order.entity_id!, include_jobs: true, include_void: false, from: order.date, limit: 500 });
+  const whole = await Promise.all(summaries.map((s) => api.txn(co, s.id)));
+  return whole.map((w) => w.txn).filter((t) => t.lines.some((l) => l.linked_txn_id === order.id));
+}
+
+/** What has been drawn on a saved order, derived from the documents linked to it; null until they load. */
+export function useOrderProgress(order: Txn | null): OrderProgress | null {
+  const linked = useLinkedDocs(order);
+  return useMemo(() => (order && linked.data ? orderProgress(order, linked.data) : null), [order, linked.data]);
+}
+
+export interface OpenOrder {
+  order: Txn;
+  progress: OrderProgress;
+}
+
+/**
+ * A name's open orders of a kind, with their progress (Select PO on a receipt
+ * or bill; the sales orders an invoice may draw on): the orders and every
+ * document that could draw on them, read whole, then those not yet closed.
+ */
+export function useOpenOrders(type: OrderType, entityId: string | null, enabled = true) {
+  const api = useApi();
+  const co = useCompanyId();
+  return useQuery({
+    queryKey: [...qk.txnsAll(co), 'open-orders', type, entityId ?? ''],
+    queryFn: async (): Promise<OpenOrder[]> => {
+      const [orders, docs] = await Promise.all([
+        api.txns(co, { types: [type], entity_id: entityId!, include_jobs: true, include_void: false, limit: 200 }),
+        api.txns(co, { types: [...(LINK_TARGETS[type] ?? [])], entity_id: entityId!, include_jobs: true, include_void: false, limit: 500 }),
+      ]);
+      const [ordersWhole, docsWhole] = await Promise.all([Promise.all(orders.map((s) => api.txn(co, s.id))), Promise.all(docs.map((s) => api.txn(co, s.id)))]);
+      const candidates = docsWhole.map((w) => w.txn);
+      return ordersWhole.map((w) => ({ order: w.txn, progress: orderProgress(w.txn, candidates) })).filter((o) => !o.progress.closed);
+    },
+    enabled: enabled && !!entityId,
+    staleTime: 30_000,
   });
 }
 

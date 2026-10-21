@@ -4,11 +4,19 @@
 // (and from which account), the Expenses and Items tabs, and the total. What
 // differs per type is the header's face and which lines are allowed.
 
-import { Checkbox, Group, SegmentedControl, Select, Stack, Tabs, Text, TextInput, Textarea } from '@mantine/core';
-import { useCallback, useEffect, useMemo, useRef, type ReactNode } from 'react';
+import { Alert, Button, Checkbox, Group, SegmentedControl, Select, Stack, Tabs, Text, TextInput, Textarea } from '@mantine/core';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useApi, useCompanyId } from '~/api/context';
-import { useAccountIndex, useBalanceMap, useCompanyInfo, useEntityIndex, useItemIndex, useNextNumber, useTerms } from '~/api/hooks';
-import type { SaveOutcome, Txn } from '~/api/types';
+import { useAccountIndex, useBalanceMap, useCompanyInfo, useEntityIndex, useItemIndex, useNextNumber, useOpenOrders, useTerms, type OpenOrder } from '~/api/hooks';
+import type { SaveOutcome, Txn, TxnType } from '~/api/types';
+import { withTrailingBlank } from '~/inputs/gridRows';
+import { isOrderType, type OrderProgress } from '~/lib/orders';
+import { stashTxn } from '~/windows/handoff';
+import { useOpenWindow } from '~/windows/WindowsProvider';
+import { CreateFromOrderModal } from './CreateFromOrder';
+import { drawRemaining, drawnLines } from './linked';
+import { DrawnFromNote, OrderProgressPanel } from './OrderProgress';
+import { OrderPickerModal } from './OrderPicker';
 import { DateField } from '~/inputs/DateField';
 import { LineGrid, type GridColumn } from '~/inputs/LineGrid';
 import { MoneyField } from '~/inputs/MoneyField';
@@ -45,6 +53,7 @@ import {
   chooseItem,
   decimalTextError,
   expensesTotal,
+  fromTxnLines,
   isBlankExpense,
   isBlankItem,
   itemsTotal,
@@ -125,6 +134,11 @@ export function PurchaseForm({ type, saved, initial }: { type: PurchaseType; sav
   const balances = useBalanceMap();
   const { data: terms = [] } = useTerms();
   const firstField = useRef<HTMLInputElement>(null);
+  const open = useOpenWindow();
+  /** Receive Items / Enter Bills: the vendor's open purchase orders to draw on (Select PO). */
+  const [pickPo, setPickPo] = useState(false);
+  /** Create Item Receipt / Enter Bill from a saved purchase order. */
+  const [drawing, setDrawing] = useState<{ order: Txn; progress: OrderProgress; target: TxnType } | null>(null);
 
   const defaultAccount = useCallback(() => {
     const remembered = localStorage.getItem(lastAccountKey(type));
@@ -163,6 +177,28 @@ export function PurchaseForm({ type, saved, initial }: { type: PurchaseType; sav
   const payee = draft.entity_id ? entities.get(draft.entity_id) : undefined;
   const useClasses = info?.preferences.use_class_tracking ?? false;
   const total = purchaseTotal(draft);
+  const receives = t === 'ItemReceipt' || t === 'Bill';
+  const openPos = useOpenOrders('PurchaseOrder', draft.entity_id, receives);
+  const openPoCount = openPos.data?.length ?? 0;
+
+  /** Select PO: the chosen orders' remaining lines join the Items tab, each linked to its PO line (quantities editable for a partial receipt). */
+  const addFromOrders = (orders: OpenOrder[]) => {
+    setPickPo(false);
+    const lines = orders.flatMap((o) => drawnLines(o.order, o.progress, drawRemaining(o.progress)));
+    if (!lines.length) return;
+    const { items: rows } = fromTxnLines(lines);
+    update((d) => ({
+      ...d,
+      // The vendor's prefilled expense line (its default account, no amount) gives way to the order's items.
+      expenses: withTrailingBlank(d.expenses.filter((r) => !(r.account_id && r.amount === null && !r.memo.trim() && !r.entity_id)), isBlankExpense, blankExpense),
+      items: withTrailingBlank([...d.items.filter((r) => !isBlankItem(r)), ...rows.map((r) => ({ ...r, lineId: null }))], isBlankItem, blankItemRow),
+    }));
+  };
+  /** A receipt or bill drawn from a saved PO opens in its own window. */
+  const onDrawn = (doc: Txn) => {
+    setDrawing(null);
+    open(paths.form(doc.txn_type === 'Bill' ? 'bill' : 'receive-items', stashTxn(doc)));
+  };
 
   const onPayee = async (id: string | null) => {
     const who = id ? entities.get(id) : undefined;
@@ -504,6 +540,22 @@ export function PurchaseForm({ type, saved, initial }: { type: PurchaseType; sav
     />
   );
 
+  // QBD asks "open purchase orders exist for this vendor" on a receipt or bill; Select PO brings their lines in.
+  const selectPo = receives && (
+    <Group gap="xs" wrap="wrap" align="center">
+      <Button size="xs" variant="default" onClick={() => setPickPo(true)} disabled={!draft.entity_id}>
+        Select PO
+      </Button>
+      {openPoCount > 0 && (
+        <Alert color="blue" p={4} px="xs" data-testid="open-purchase-orders">
+          <Text size="sm">
+            {openPoCount} open purchase {openPoCount === 1 ? 'order' : 'orders'} for this vendor.
+          </Text>
+        </Alert>
+      )}
+    </Group>
+  );
+
   let header: ReactNode;
   if (t === 'Check') {
     header = (
@@ -607,6 +659,8 @@ export function PurchaseForm({ type, saved, initial }: { type: PurchaseType; sav
             disabled={!!form.saved}
           />
           <FormBadges saved={form.saved} />
+          <DrawnFromNote txn={draft.base ?? form.saved} />
+          {selectPo}
         </Group>
         <div className={mobile ? undefined : classes.headerGrid}>
           {nameField('Vendor')}
@@ -641,6 +695,8 @@ export function PurchaseForm({ type, saved, initial }: { type: PurchaseType; sav
               A purchase order is a record of what was ordered. It posts nothing; the bill or check for it does.
             </Text>
           )}
+          <DrawnFromNote txn={draft.base ?? form.saved} />
+          {selectPo}
         </Group>
         <div className={mobile ? undefined : classes.headerGrid}>
           {nameField('Vendor')}
@@ -704,8 +760,11 @@ export function PurchaseForm({ type, saved, initial }: { type: PurchaseType; sav
           items={itemsGrid}
         />
       )}
+      {form.saved && isOrderType(form.saved.txn_type) && <OrderProgressPanel order={form.saved} dirty={form.dirty} onDraw={(target, progress) => setDrawing({ order: form.saved!, progress, target })} />}
       <TxnFormActions form={form} hideVoid={isNonPosting(t)} />
       {form.chrome}
+      <CreateFromOrderModal order={drawing?.order ?? null} progress={drawing?.progress ?? null} target={drawing?.target ?? 'ItemReceipt'} onClose={() => setDrawing(null)} onCreate={onDrawn} />
+      <OrderPickerModal opened={pickPo} type="PurchaseOrder" entityId={draft.entity_id} multiple onClose={() => setPickPo(false)} onPick={addFromOrders} />
     </div>
   );
 }

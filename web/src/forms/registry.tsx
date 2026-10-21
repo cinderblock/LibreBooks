@@ -48,6 +48,9 @@ export const FORMS: Record<string, FormDef> = {
   'sales-receipt': sales('SalesReceipt', 'Enter Sales Receipts'),
   'credit-memo': sales('CreditMemo', 'Create Credit Memos/Refunds'),
   estimate: sales('Estimate', 'Create Estimates'),
+  'sales-order': sales('SalesOrder', 'Create Sales Orders'),
+  // A saved statement charge (QuickZoom from the A/R register) edits here; new ones are entered in Statement Charges.
+  'statement-charge': sales('StatementCharge', 'Statement Charge'),
   'receive-payment': { label: 'Receive Payments', types: ['ReceivePayment'], render: (saved, initial) => <PaymentForm type="ReceivePayment" saved={saved} initial={initial} /> },
   // Pay Bills writes bill payments; a saved one opens in the payment form.
   'pay-bills': {

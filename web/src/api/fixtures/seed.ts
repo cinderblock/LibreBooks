@@ -448,6 +448,26 @@ export function buildSeed(today: string): SeedBooks {
   ]);
   // Something for the estimate list (non-posting).
   txn('Estimate', today, { number: 'E-118', entity_id: E('Oak Street Library:Reading Tables') }, [itemLine('Design', '10', 'sell'), itemLine('Lumber:White Oak', '240', 'sell')]);
+  // An open sales order (non-posting), nothing invoiced from it yet.
+  txn('SalesOrder', day(4, 3), { number: 'SO-1001', entity_id: E('Acme Corp:Conference Table'), terms_id: terms[0]!.id, sales_tax_item_id: I('Juniper County Sales Tax').id, memo: 'Walnut conference table, 14 ft' }, [
+    itemLine('Design', '6', 'sell'),
+    itemLine('Lumber:Walnut', '120', 'sell'),
+    itemLine('Delivery', '1', 'sell'),
+  ]);
+  // A purchase order, partly received: 50 of the 80 walnut came in on an item
+  // receipt whose lines link back to the order's (`linked_txn_id` /
+  // `linked_line_id`), the only record the API keeps of what was received.
+  const po = txn('PurchaseOrder', day(4, 2), { number: 'PO-2041', entity_id: E('Hardwood Supply Co'), memo: 'Conference table stock' }, [
+    itemLine('Lumber:Walnut', '80', 'buy', { entity_id: E('Acme Corp:Conference Table') }),
+    itemLine('Lumber:White Oak', '150', 'buy'),
+  ]);
+  txn('ItemReceipt', day(4, 9), { number: 'HW-RCV-7', entity_id: E('Hardwood Supply Co'), memo: 'Partial: walnut only' }, [
+    itemLine('Lumber:Walnut', '50', 'buy', { entity_id: E('Acme Corp:Conference Table'), linked_txn_id: po.id, linked_line_id: po.lines[0]!.id }),
+  ]);
+  // A statement charge: a customer billed from the A/R register rather than by invoice.
+  txn('StatementCharge', day(4, 4), { entity_id: E('Nguyen, David'), number: '1', due_date: addDays(day(4, 4), 30), memo: 'Monthly maintenance' }, [
+    itemLine('Refinishing', '2', 'sell', { sales_tax_code_id: null }),
+  ]);
 
   const info: CompanyInfo = {
     name: 'Juniper Hill Woodworks',
@@ -471,8 +491,8 @@ export function buildSeed(today: string): SeedBooks {
       auto_number_journal_entries: true,
       inventory_enabled: false,
       estimates_enabled: true,
-      sales_orders_enabled: false,
-      progress_invoicing: false,
+      sales_orders_enabled: true,
+      progress_invoicing: true,
       sales_tax_enabled: true,
       sales_tax_on_cash_basis: false,
       reports_cash_basis: false,

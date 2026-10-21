@@ -183,6 +183,26 @@ test('a vendor editor at 375px: tabs, stacked fields, the sticky Save bar', asyn
   await expect(editor).toBeHidden();
 });
 
+test('statement charges and a sales order at 375px: stacked fields, cards, no sideways scrolling', async ({ page }) => {
+  await start(page, `${CO}/statement-charges`);
+  const win = page.getByTestId('statement-charges');
+  const customer = win.getByRole('combobox', { name: 'Customer:Job' });
+  await customer.tap();
+  await customer.pressSequentially('Nguyen');
+  await page.getByRole('option', { name: /Nguyen, David/ }).tap();
+  await expect(customer).toHaveValue('Nguyen, David');
+  await expect(win.getByTestId('ar-row').first()).toBeVisible();
+  await expect(win.getByTestId('charge-entry').getByRole('button', { name: 'Record' })).toBeVisible();
+  // The customer field still has the focus, so its QuickFill list is open: it must fit the phone too.
+  await expectNoSideways(page);
+  await page.screenshot({ path: test.info().outputPath('statement-charges-375.png'), fullPage: true });
+  await page.goto(`${CO}/forms/sales-order/new?fixtures=1&latency=0`);
+  const so = page.getByTestId('form-sales-order');
+  await expect(so.getByText('Non-posting')).toBeVisible();
+  await expect(so.getByText('Line 1')).toBeVisible();
+  await expectNoSideways(page);
+});
+
 test('a report scrolls sideways inside itself, not the page', async ({ page }) => {
   await start(page, `${CO}/reports/ProfitAndLoss`);
   await page.getByRole('combobox', { name: 'Dates' }).tap();
