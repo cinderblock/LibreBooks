@@ -72,6 +72,13 @@ is_void: boolean,
  */
 is_adjustment: boolean, 
 /**
+ * On a purchase order, sales order or estimate: closed by hand (QBD's
+ * "Closed" stamp), whatever has or hasn't been received or invoiced
+ * against it. An order is also closed once every line is closed or fully
+ * fulfilled; the store keeps its open balance at zero either way.
+ */
+is_manually_closed?: boolean, 
+/**
  * Home currency when `None`.
  */
 currency: string | null, exchange_rate: string | null, lines: Array<TxnLine>, applications: Array<Application>, 

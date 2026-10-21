@@ -98,6 +98,34 @@ impl TxnType {
         )
     }
 
+    /// An order: a non-posting form that later transactions fulfil line by line
+    /// (receipts and bills against a purchase order, invoices against a sales
+    /// order or an estimate). See [`TxnLine::linked_txn_id`].
+    pub const fn is_order(self) -> bool {
+        matches!(
+            self,
+            TxnType::PurchaseOrder | TxnType::SalesOrder | TxnType::Estimate
+        )
+    }
+
+    /// The transaction types a line of this type may link to through
+    /// [`TxnLine::linked_txn_id`], other than a deposit's payment. Empty for
+    /// forms whose lines never link.
+    pub const fn link_targets(self) -> &'static [TxnType] {
+        match self {
+            // Receiving against a purchase order, by receipt, bill, check or card.
+            TxnType::ItemReceipt | TxnType::Check | TxnType::CreditCardCharge => {
+                &[TxnType::PurchaseOrder]
+            }
+            // A bill receives against a PO, or bills items a receipt brought in.
+            TxnType::Bill => &[TxnType::PurchaseOrder, TxnType::ItemReceipt],
+            // Invoicing a sales order, or progress-invoicing an estimate.
+            TxnType::Invoice => &[TxnType::SalesOrder, TxnType::Estimate],
+            TxnType::SalesReceipt => &[TxnType::SalesOrder],
+            _ => &[],
+        }
+    }
+
     /// QBD's abbreviation, shown in registers' "Type" column.
     pub const fn register_code(self) -> &'static str {
         match self {
@@ -294,10 +322,33 @@ pub struct TxnLine {
     /// For deposits: the payment method and check number of what is deposited.
     pub payment_method_id: Option<PaymentMethodId>,
     pub check_number: Option<String>,
-    /// For deposit lines that move a payment out of Undeposited Funds; for item
-    /// lines received against a purchase order or billed from a receipt.
+    /// The transaction this line fulfils or draws on. Legal links, checked by
+    /// the store when saving (the names must match, a job rolling up to its
+    /// customer; an item line must link to a line with the same item):
+    ///
+    /// - a deposit line → the payment it moves out of Undeposited Funds;
+    /// - an item receipt, bill, check or credit card charge line → a purchase
+    ///   order line of the same vendor (receiving against the PO);
+    /// - a bill line → an item receipt line of the same vendor ("Enter Bill for
+    ///   Received Items"; the receipt, not the bill, counts toward the PO);
+    /// - an invoice or sales receipt line → a sales order line of the same
+    ///   customer:job;
+    /// - an invoice line → an estimate line (progress invoicing, by quantity or
+    ///   by amount / percent).
+    ///
+    /// See [`TxnType::link_targets`]. A link to a closed order or closed line is
+    /// refused; quantities are not capped (QBD allows over-receipt).
     pub linked_txn_id: Option<TxnId>,
+    /// The line on `linked_txn_id` this one fulfils. `None` on deposit lines,
+    /// and on links an import carried with only the transaction id (the store
+    /// then matches by item).
     pub linked_line_id: Option<LineId>,
+    /// On a purchase order, sales order or estimate line: closed by hand (QBD's
+    /// "Clsd" check), so nothing more is expected against it however much was
+    /// received or invoiced. Meaningless on other forms.
+    #[serde(default)]
+    #[ts(optional = nullable)]
+    pub is_closed: bool,
     pub service_date: Option<jiff::civil::Date>,
     pub other1: Option<String>,
     pub other2: Option<String>,
@@ -331,6 +382,7 @@ impl TxnLine {
             check_number: None,
             linked_txn_id: None,
             linked_line_id: None,
+            is_closed: false,
             service_date: None,
             other1: None,
             other2: None,
@@ -500,6 +552,13 @@ pub struct Txn {
     pub is_void: bool,
     /// Adjusting entry (journal entries).
     pub is_adjustment: bool,
+    /// On a purchase order, sales order or estimate: closed by hand (QBD's
+    /// "Closed" stamp), whatever has or hasn't been received or invoiced
+    /// against it. An order is also closed once every line is closed or fully
+    /// fulfilled; the store keeps its open balance at zero either way.
+    #[serde(default)]
+    #[ts(optional = nullable)]
+    pub is_manually_closed: bool,
     /// Home currency when `None`.
     pub currency: Option<String>,
     #[ts(type = "string | null")]
@@ -550,6 +609,7 @@ impl Txn {
             is_pending: false,
             is_void: false,
             is_adjustment: false,
+            is_manually_closed: false,
             currency: None,
             exchange_rate: None,
             lines: Vec::new(),
@@ -613,6 +673,70 @@ impl Posting {
             memo: None,
             quantity: None,
             cleared: ClearedStatus::Uncleared,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Files and clients from before order fulfilment carry neither closed
+    /// flag; they read as open.
+    #[test]
+    fn closed_flags_default_to_open_when_missing() {
+        let mut line = TxnLine::item(ItemId::new(), Decimal::from(3), Decimal::from(10));
+        line.is_closed = true;
+        let mut json = serde_json::to_value(&line).unwrap();
+        assert_eq!(json["is_closed"], serde_json::Value::Bool(true));
+        json.as_object_mut().unwrap().remove("is_closed");
+        let read: TxnLine = serde_json::from_value(json).unwrap();
+        assert!(!read.is_closed);
+        assert!(!TxnLine::new(LineKind::Item).is_closed);
+
+        let mut po = Txn::new(TxnType::PurchaseOrder, jiff::civil::date(2026, 10, 1));
+        po.is_manually_closed = true;
+        let mut json = serde_json::to_value(&po).unwrap();
+        assert_eq!(json["is_manually_closed"], serde_json::Value::Bool(true));
+        json.as_object_mut().unwrap().remove("is_manually_closed");
+        let read: Txn = serde_json::from_value(json).unwrap();
+        assert!(!read.is_manually_closed);
+        assert!(!Txn::new(TxnType::Invoice, read.date).is_manually_closed);
+    }
+
+    #[test]
+    fn orders_are_the_non_posting_forms_that_get_fulfilled() {
+        for t in TxnType::ALL {
+            if t.is_order() {
+                assert!(!t.is_posting(), "{t:?}");
+                assert_eq!(t.link_targets(), [], "{t:?} is a target, not a source");
+            }
+        }
+        assert!(TxnType::PurchaseOrder.is_order());
+        assert!(TxnType::SalesOrder.is_order());
+        assert!(TxnType::Estimate.is_order());
+        assert!(!TxnType::TimeTracking.is_order());
+        assert_eq!(
+            TxnType::ItemReceipt.link_targets(),
+            &[TxnType::PurchaseOrder]
+        );
+        assert_eq!(
+            TxnType::Bill.link_targets(),
+            &[TxnType::PurchaseOrder, TxnType::ItemReceipt]
+        );
+        assert_eq!(
+            TxnType::Invoice.link_targets(),
+            &[TxnType::SalesOrder, TxnType::Estimate]
+        );
+        assert_eq!(TxnType::Deposit.link_targets(), []);
+        // Every non-order target is a receipt (billed from); every other is an order.
+        for t in TxnType::ALL {
+            for target in t.link_targets() {
+                assert!(
+                    target.is_order() || *target == TxnType::ItemReceipt,
+                    "{t:?} → {target:?}"
+                );
+            }
         }
     }
 }

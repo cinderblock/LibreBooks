@@ -147,6 +147,24 @@ Each list has the same five routes. `:list` is one of `accounts`, `entities`,
 | `DELETE /txns/:id?edit_seq=N` | → 204 |
 | `GET /txns/next-number?type=Check&account_id=` | → `{ number: string \| null }` |
 | `GET /txns/:id/history` | → audit entries |
+| `GET /txns/:id/fulfilment` | → `Fulfilment { order_id, is_closed, remaining_amount, lines: LineFulfilment[] }` for a purchase order, sales order or estimate; 404 `not_found` for anything else. Each `LineFulfilment { line_id, item_id, ordered_quantity, fulfilled_quantity, ordered_amount, fulfilled_amount, is_closed, remaining_quantity, remaining_amount }` sums the linked lines of saved, non-void transactions (quantities are not capped: over-receipt shows). An estimate's progress is by amount. Text lines, subtotals and empty lines are left out. |
+
+**Orders.** A purchase order, sales order or estimate is non-posting; what makes
+it live is lines of later transactions linking back to its lines through
+`TxnLine.linked_txn_id` / `linked_line_id`: an item receipt, bill, check or
+credit card charge line → a PO line of the same vendor; a bill line → an item
+receipt line of the same vendor (billed from a receipt; it doesn't count toward
+the PO, the receipt did); an invoice or sales receipt line → a sales order line
+of the same customer:job (a job rolls up to its customer); an invoice line → an
+estimate line (progress invoicing). `POST`/`PUT /txns` refuses (400 `invalid`) a
+link whose target doesn't exist, is the wrong type, belongs to another name, is
+void, has no such line, is for a different item, or whose line or order is
+closed (an edit may keep links it already had). `TxnLine.is_closed` (QBD's
+"Clsd") and `Txn.is_manually_closed` (QBD's "Closed" stamp) round-trip through
+`POST`/`PUT /txns`; an order is closed when stamped or when every line is closed
+or fully fulfilled, and its `open_balance` is what remains (0 when closed), so
+`open_only=true` lists open orders. Deleting an order something was entered
+against is 400; voiding a receipt or invoice reopens what it fulfilled.
 
 ### Registers and balances
 
@@ -156,7 +174,7 @@ Each list has the same five routes. `:list` is one of `accounts`, `entities`,
 | `PUT /accounts/:id/register/:txn_id/cleared` | `{ status: ClearedStatus }` |
 | `GET /balances?from=&to=` | → `AccountBalance[]` (debit-positive) |
 | `GET /balances/names` | → `NameBalance[]`: every name with an open A/R or A/P item (`receivable`, `payable`, both positive = owed; credits and unapplied payments count against), with `*_total` rolling jobs up to their parent (the Customer/Vendor Centers' Balance and Balance Total) |
-| `GET /open?entity_id=&kind=receivable\|payable` | open invoices/bills/credits for a name (Receive Payments / Pay Bills) |
+| `GET /open?entity_id=&kind=receivable\|payable\|purchase_orders\|sales_orders\|estimates` | → `TxnSummary[]`: a name's (and its jobs') open invoices/credits or bills/credits (Receive Payments / Pay Bills), or its open orders with `open_balance` = what remains (Receive Items against a PO, Create Invoice from a sales order or estimate) |
 | `GET /undeposited` | payments waiting in Undeposited Funds (Make Deposits) |
 
 ### Reports

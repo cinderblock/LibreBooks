@@ -30,6 +30,7 @@ pub mod inventory;
 pub mod items;
 pub mod lists;
 pub mod merge;
+pub mod orders;
 pub mod reconcile;
 pub mod saved;
 pub mod schema;
@@ -37,6 +38,7 @@ pub mod txns;
 
 pub use balances::{AccountBalance, NameBalance, RegisterLine};
 pub use context::StoreContext;
+pub use orders::{Fulfilment, LineFulfilment};
 pub use txns::{SaveOutcome, TxnFilter, TxnSummary};
 
 /// What a change was, for live updates and caches.
@@ -187,7 +189,14 @@ impl Books {
 
     fn from_connection(mut conn: Connection, path: &Path) -> Result<Books> {
         configure(&conn)?;
-        migrate(&mut conn)?;
+        let from = migrate(&mut conn)?;
+        if from < schema::ORDER_FULFILMENT_VERSION {
+            // Orders in a file from before fulfilment had no open balance;
+            // the migration set a baseline, this makes it exact.
+            let tx = conn.transaction()?;
+            orders::refresh_all(&tx)?;
+            tx.commit()?;
+        }
         Ok(Books {
             inner: Arc::new(Inner {
                 conn: Mutex::new(conn),
@@ -316,7 +325,8 @@ fn configure(conn: &Connection) -> Result<()> {
 /// "LBks" — marks a SQLite file as a LibreBooks company file.
 pub const APPLICATION_ID: i32 = 0x4C42_6B73;
 
-fn migrate(conn: &mut Connection) -> Result<()> {
+/// Bring the file up to the current schema; returns the version it was at.
+fn migrate(conn: &mut Connection) -> Result<i64> {
     let current: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
     let known = schema::MIGRATIONS.len() as i64;
     if current > known {
@@ -331,7 +341,7 @@ fn migrate(conn: &mut Connection) -> Result<()> {
         tx.pragma_update(None, "user_version", i as i64 + 1)?;
         tx.commit()?;
     }
-    Ok(())
+    Ok(current)
 }
 
 /// Now, as stored: RFC 3339 UTC.

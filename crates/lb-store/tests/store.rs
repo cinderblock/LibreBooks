@@ -5,7 +5,8 @@ use jiff::civil::date;
 use lb_core::lists::{SalesTaxCode, Terms, TermsKind};
 use lb_core::*;
 use lb_store::{
-    Actor, Books, StoreError, accounts, audit, balances, company, entities, items, lists, txns,
+    Actor, Books, StoreError, accounts, audit, balances, company, entities, items, lists, orders,
+    txns,
 };
 use pretty_assertions::assert_eq;
 use rust_decimal::Decimal;
@@ -1109,4 +1110,437 @@ fn a_sales_tax_code_is_at_most_three_characters() {
         Err(StoreError::Invalid(_))
     ));
     assert!(b.write(&me(), |w| lists::save(w, code("  "))).is_err());
+}
+
+/// An inventory part with its own asset and COGS accounts.
+fn widget(b: &Books, s: &Setup) -> ItemId {
+    b.write(&me(), |w| {
+        let cogs = accounts::save(
+            w,
+            accounts::new_account("COGS", AccountType::CostOfGoodsSold),
+        )?
+        .id;
+        let asset = accounts::save(
+            w,
+            accounts::new_account("Inventory", AccountType::OtherCurrentAsset),
+        )?
+        .id;
+        let mut i = Item::blank(ItemType::Inventory, "Widget");
+        i.income_account_id = Some(s.income);
+        i.expense_account_id = Some(cogs);
+        i.asset_account_id = Some(asset);
+        Ok(items::save(w, i)?.id)
+    })
+    .unwrap()
+}
+
+/// The stored open balance of a transaction, as `open_only` sees it.
+fn open_balance(b: &Books, id: TxnId) -> Option<Money> {
+    b.read(|c| {
+        Ok(txns::query(
+            c,
+            &txns::TxnFilter {
+                include_void: true,
+                ..Default::default()
+            },
+        )?
+        .into_iter()
+        .find(|t| t.id == id)
+        .unwrap()
+        .open_balance)
+    })
+    .unwrap()
+}
+
+fn open_orders(b: &Books, t: TxnType, name: EntityId) -> Vec<TxnId> {
+    b.read(|c| {
+        Ok(txns::query(
+            c,
+            &txns::TxnFilter {
+                types: vec![t],
+                entity_id: Some(name),
+                include_jobs: true,
+                open_only: true,
+                ..Default::default()
+            },
+        )?
+        .into_iter()
+        .map(|t| t.id)
+        .collect())
+    })
+    .unwrap()
+}
+
+/// A transaction of `t` with one item line entered against `order`'s first line.
+fn against(
+    t: TxnType,
+    d: jiff::civil::Date,
+    order: &Txn,
+    item: ItemId,
+    qty: i64,
+    rate: i64,
+) -> Txn {
+    let mut txn = Txn::new(t, d);
+    txn.entity_id = order.entity_id;
+    let mut line = TxnLine::item(item, Decimal::from(qty), Decimal::from(rate));
+    line.linked_txn_id = Some(order.id);
+    line.linked_line_id = Some(order.lines[0].id);
+    txn.lines.push(line);
+    txn
+}
+
+#[test]
+fn a_purchase_order_is_received_in_parts_billed_from_the_receipt_and_closed() {
+    let b = books();
+    let s = setup(&b);
+    let part = widget(&b, &s);
+    let mut po = Txn::new(TxnType::PurchaseOrder, date(2026, 10, 1));
+    po.entity_id = Some(s.vendor);
+    po.number = Some("PO-1".into());
+    po.lines
+        .push(TxnLine::item(part, Decimal::from(10), Decimal::from(5)));
+    po.lines
+        .push(TxnLine::new(LineKind::Text).with_description("Deliver to the loading dock"));
+    let po = b.write(&me(), |w| txns::save(w, po)).unwrap().txn;
+    let line_id = po.lines[0].id;
+    assert_eq!(po.amount, Money(5_000), "a PO's total is its lines'");
+    assert_eq!(open_balance(&b, po.id), Some(Money(5_000)));
+    assert_eq!(
+        open_orders(&b, TxnType::PurchaseOrder, s.vendor),
+        vec![po.id]
+    );
+    let f = b.read(|c| orders::fulfilment(c, po.id)).unwrap();
+    assert!(!f.is_closed);
+    assert_eq!(f.remaining_amount, Money(5_000));
+    assert_eq!(f.lines.len(), 1, "the text line isn't fulfillable");
+    assert_eq!(f.lines[0].line_id, line_id);
+    assert_eq!(f.lines[0].ordered_quantity, Some(Decimal::from(10)));
+    assert_eq!(f.lines[0].remaining_quantity, Some(Decimal::from(10)));
+
+    // Receive 4 of the 10.
+    let rcpt = against(TxnType::ItemReceipt, date(2026, 10, 5), &po, part, 4, 5);
+    let rcpt = b.write(&me(), |w| txns::save(w, rcpt)).unwrap().txn;
+    assert_eq!(open_balance(&b, po.id), Some(Money(3_000)));
+    let f = b.read(|c| orders::fulfilment(c, po.id)).unwrap();
+    assert!(!f.is_closed);
+    assert_eq!(f.remaining_amount, Money(3_000));
+    assert_eq!(f.lines[0].fulfilled_quantity, Decimal::from(4));
+    assert_eq!(f.lines[0].fulfilled_amount, Money(2_000));
+    assert_eq!(f.lines[0].remaining_quantity, Some(Decimal::from(6)));
+    assert_eq!(f.lines[0].remaining_amount, Money(3_000));
+    assert!(!f.lines[0].is_closed);
+
+    // The bill for the received items links to the receipt, not the PO, and
+    // doesn't count twice.
+    let mut bill = Txn::new(TxnType::Bill, date(2026, 10, 7));
+    bill.entity_id = Some(s.vendor);
+    let mut l = TxnLine::item(part, Decimal::from(4), Decimal::from(5));
+    l.linked_txn_id = Some(rcpt.id);
+    l.linked_line_id = Some(rcpt.lines[0].id);
+    bill.lines.push(l);
+    let bill = b.write(&me(), |w| txns::save(w, bill)).unwrap().txn;
+    assert_eq!(open_balance(&b, po.id), Some(Money(3_000)));
+    assert_eq!(
+        open_balance(&b, bill.id),
+        Some(Money(2_000)),
+        "the bill is owed"
+    );
+    assert!(
+        b.read(|c| orders::fulfilment(c, rcpt.id)).is_err(),
+        "a receipt isn't an order"
+    );
+
+    // Closing the PO by hand takes it off the open list; reopening it puts it back.
+    let mut closed = b.read(|c| txns::get(c, po.id)).unwrap();
+    closed.is_manually_closed = true;
+    let closed = b.write(&me(), |w| txns::save(w, closed)).unwrap().txn;
+    assert_eq!(open_balance(&b, po.id), Some(Money::ZERO));
+    assert_eq!(open_orders(&b, TxnType::PurchaseOrder, s.vendor), []);
+    let f = b.read(|c| orders::fulfilment(c, po.id)).unwrap();
+    assert!(f.is_closed);
+    assert!(f.lines[0].is_closed);
+    assert_eq!(f.lines[0].remaining_quantity, Some(Decimal::ZERO));
+    assert_eq!(f.lines[0].remaining_amount, Money::ZERO);
+    assert_eq!(
+        f.lines[0].fulfilled_quantity,
+        Decimal::from(4),
+        "history stays"
+    );
+    // Nothing more can be received against a closed order.
+    assert!(matches!(
+        b.write(&me(), |w| txns::save(
+            w,
+            against(TxnType::ItemReceipt, date(2026, 10, 8), &po, part, 1, 5)
+        )),
+        Err(StoreError::Invalid(_))
+    ));
+    // The receipt that already links to it can still be edited.
+    let mut edit = b.read(|c| txns::get(c, rcpt.id)).unwrap();
+    edit.memo = Some("left at the dock".into());
+    b.write(&me(), |w| txns::save(w, edit)).unwrap();
+    let mut reopened = b.read(|c| txns::get(c, closed.id)).unwrap();
+    reopened.is_manually_closed = false;
+    b.write(&me(), |w| txns::save(w, reopened)).unwrap();
+    assert_eq!(open_balance(&b, po.id), Some(Money(3_000)));
+
+    // The last 6 close it on their own; a late over-receipt is allowed and shown.
+    let rest = against(TxnType::ItemReceipt, date(2026, 10, 9), &po, part, 6, 5);
+    let rest = b.write(&me(), |w| txns::save(w, rest)).unwrap().txn;
+    assert_eq!(open_balance(&b, po.id), Some(Money::ZERO));
+    assert!(b.read(|c| orders::fulfilment(c, po.id)).unwrap().is_closed);
+    let extra = against(TxnType::ItemReceipt, date(2026, 10, 10), &po, part, 2, 5);
+    b.write(&me(), |w| txns::save(w, extra)).unwrap();
+    let f = b.read(|c| orders::fulfilment(c, po.id)).unwrap();
+    assert_eq!(f.lines[0].fulfilled_quantity, Decimal::from(12));
+    assert_eq!(f.lines[0].remaining_quantity, Some(Decimal::ZERO));
+    assert!(f.is_closed);
+
+    // Voiding the receipt of 6 reopens the PO for 4 (12 − 6 = 6 received).
+    b.write(&me(), |w| txns::void(w, rest.id, rest.edit_seq))
+        .unwrap();
+    assert_eq!(open_balance(&b, po.id), Some(Money(2_000)));
+    assert_eq!(
+        open_orders(&b, TxnType::PurchaseOrder, s.vendor),
+        vec![po.id]
+    );
+
+    // The PO can't be deleted while receipts are entered against it.
+    let po_now = b.read(|c| txns::get(c, po.id)).unwrap();
+    assert!(matches!(
+        b.write(&me(), |w| txns::delete(w, po.id, po_now.edit_seq)),
+        Err(StoreError::Invalid(_))
+    ));
+    // Nor the receipt while the bill is made from it; once the bill goes,
+    // deleting the receipt gives its 4 back.
+    let rcpt_now = b.read(|c| txns::get(c, rcpt.id)).unwrap();
+    assert!(matches!(
+        b.write(&me(), |w| txns::delete(w, rcpt.id, rcpt_now.edit_seq)),
+        Err(StoreError::Invalid(_))
+    ));
+    b.write(&me(), |w| txns::delete(w, bill.id, bill.edit_seq))
+        .unwrap();
+    b.write(&me(), |w| txns::delete(w, rcpt.id, rcpt_now.edit_seq))
+        .unwrap();
+    assert_eq!(open_balance(&b, po.id), Some(Money(4_000)));
+    assert_eq!(b.check_integrity().unwrap(), Vec::<String>::new());
+}
+
+#[test]
+fn a_sales_order_is_invoiced_in_part_by_the_jobs_customer() {
+    let b = books();
+    let s = setup(&b);
+    let mut so = Txn::new(TxnType::SalesOrder, date(2026, 10, 1));
+    so.entity_id = Some(s.job);
+    so.lines.push(TxnLine::item(
+        s.labor,
+        Decimal::from(10),
+        Decimal::from(220),
+    ));
+    let so = b.write(&me(), |w| txns::save(w, so)).unwrap().txn;
+    assert_eq!(open_balance(&b, so.id), Some(Money(220_000)));
+    assert_eq!(
+        open_orders(&b, TxnType::SalesOrder, s.customer),
+        vec![so.id]
+    );
+
+    // The invoice is made out to the customer; the order was for its job.
+    let mut inv = against(TxnType::Invoice, date(2026, 10, 10), &so, s.labor, 4, 220);
+    inv.entity_id = Some(s.customer);
+    let inv = b.write(&me(), |w| txns::save(w, inv)).unwrap().txn;
+    assert_eq!(open_balance(&b, so.id), Some(Money(132_000)));
+    assert_eq!(
+        open_balance(&b, inv.id),
+        Some(Money(88_000)),
+        "the invoice is owed"
+    );
+    let f = b.read(|c| orders::fulfilment(c, so.id)).unwrap();
+    assert_eq!(f.lines[0].fulfilled_quantity, Decimal::from(4));
+    assert_eq!(f.lines[0].remaining_quantity, Some(Decimal::from(6)));
+    assert_eq!(f.remaining_amount, Money(132_000));
+    assert!(!f.is_closed);
+
+    // Closing the line by hand ("Clsd") closes the order with 6 never shipped.
+    let mut so2 = b.read(|c| txns::get(c, so.id)).unwrap();
+    so2.lines[0].is_closed = true;
+    b.write(&me(), |w| txns::save(w, so2)).unwrap();
+    let f = b.read(|c| orders::fulfilment(c, so.id)).unwrap();
+    assert!(f.is_closed);
+    assert_eq!(f.lines[0].fulfilled_quantity, Decimal::from(4));
+    assert_eq!(open_balance(&b, so.id), Some(Money::ZERO));
+    assert_eq!(open_orders(&b, TxnType::SalesOrder, s.customer), []);
+    assert!(matches!(
+        b.write(&me(), |w| txns::save(
+            w,
+            against(TxnType::Invoice, date(2026, 10, 12), &so, s.labor, 1, 220)
+        )),
+        Err(StoreError::Invalid(_))
+    ));
+    assert_eq!(b.check_integrity().unwrap(), Vec::<String>::new());
+}
+
+#[test]
+fn an_estimate_is_progress_invoiced_by_amount() {
+    let b = books();
+    let s = setup(&b);
+    let mut est = Txn::new(TxnType::Estimate, date(2026, 10, 1));
+    est.entity_id = Some(s.customer);
+    est.lines.push(TxnLine::item(
+        s.labor,
+        Decimal::from(10),
+        Decimal::from(100),
+    ));
+    let est = b.write(&me(), |w| txns::save(w, est)).unwrap().txn;
+    assert_eq!(open_balance(&b, est.id), Some(Money(100_000)));
+
+    // A 50% progress invoice: an amount, no quantity.
+    let mut inv = Txn::new(TxnType::Invoice, date(2026, 10, 10));
+    inv.entity_id = Some(s.customer);
+    let mut l = TxnLine::item_amount(s.labor, Money(50_000));
+    l.linked_txn_id = Some(est.id);
+    l.linked_line_id = Some(est.lines[0].id);
+    inv.lines.push(l);
+    b.write(&me(), |w| txns::save(w, inv)).unwrap();
+    let f = b.read(|c| orders::fulfilment(c, est.id)).unwrap();
+    assert_eq!(f.lines[0].fulfilled_amount, Money(50_000));
+    assert_eq!(f.lines[0].remaining_amount, Money(50_000));
+    assert_eq!(f.remaining_amount, Money(50_000));
+    assert!(!f.is_closed);
+    assert_eq!(open_balance(&b, est.id), Some(Money(50_000)));
+    assert_eq!(open_orders(&b, TxnType::Estimate, s.customer), vec![est.id]);
+
+    // The other half, as 5 @ 100, closes it; the quantity is along for the ride.
+    let inv2 = against(TxnType::Invoice, date(2026, 10, 20), &est, s.labor, 5, 100);
+    b.write(&me(), |w| txns::save(w, inv2)).unwrap();
+    let f = b.read(|c| orders::fulfilment(c, est.id)).unwrap();
+    assert!(f.is_closed);
+    assert_eq!(f.lines[0].fulfilled_amount, Money(100_000));
+    assert_eq!(f.lines[0].fulfilled_quantity, Decimal::from(5));
+    assert_eq!(open_balance(&b, est.id), Some(Money::ZERO));
+}
+
+#[test]
+fn links_to_orders_are_checked_on_save() {
+    let b = books();
+    let s = setup(&b);
+    let part = widget(&b, &s);
+    let (other_vendor, gadget) = b
+        .write(&me(), |w| {
+            let v = entities::save(w, Entity::blank(EntityKind::Vendor, "Other Supply"))?.id;
+            let mut g = Item::blank(ItemType::NonInventory, "Gadget");
+            g.income_account_id = Some(s.income);
+            Ok((v, items::save(w, g)?.id))
+        })
+        .unwrap();
+    let mut po = Txn::new(TxnType::PurchaseOrder, date(2026, 10, 1));
+    po.entity_id = Some(s.vendor);
+    po.lines
+        .push(TxnLine::item(part, Decimal::from(10), Decimal::from(5)));
+    let po = b.write(&me(), |w| txns::save(w, po)).unwrap().txn;
+    let refused = |txn: Txn| {
+        let err = b.write(&me(), |w| txns::save(w, txn)).unwrap_err();
+        assert!(matches!(err, StoreError::Invalid(_)), "{err:?}");
+        err.to_string()
+    };
+
+    // Another vendor's receipt.
+    let mut wrong_vendor = against(TxnType::ItemReceipt, date(2026, 10, 2), &po, part, 1, 5);
+    wrong_vendor.entity_id = Some(other_vendor);
+    assert!(refused(wrong_vendor).contains("another vendor"));
+    // A different item on the same line.
+    let wrong_item = against(TxnType::ItemReceipt, date(2026, 10, 2), &po, gadget, 1, 5);
+    assert!(refused(wrong_item).contains("different item"));
+    // A line the PO doesn't have.
+    let mut no_line = against(TxnType::ItemReceipt, date(2026, 10, 2), &po, part, 1, 5);
+    no_line.lines[0].linked_line_id = Some(LineId::new());
+    assert!(refused(no_line).contains("isn't on that"));
+    // An order the books don't have.
+    let mut no_order = against(TxnType::ItemReceipt, date(2026, 10, 2), &po, part, 1, 5);
+    no_order.lines[0].linked_txn_id = Some(TxnId::new());
+    assert!(refused(no_order).contains("doesn't exist"));
+    // The wrong kind of form: an invoice against a PO, a check against an invoice.
+    let mut inv = against(TxnType::Invoice, date(2026, 10, 2), &po, part, 1, 5);
+    inv.entity_id = Some(s.customer);
+    assert!(refused(inv).contains("can't be entered against"));
+    let mut je = Txn::new(TxnType::JournalEntry, date(2026, 10, 2));
+    let mut l = TxnLine::journal(s.rent, Money(100));
+    l.linked_txn_id = Some(po.id);
+    je.lines.push(l);
+    je.lines.push(TxnLine::journal(s.bank, Money(-100)));
+    assert!(refused(je).contains("can't be entered against"));
+    // Without a line id, the item finds its line; a check may receive against a PO.
+    let mut chk = Txn::new(TxnType::Check, date(2026, 10, 3));
+    chk.entity_id = Some(s.vendor);
+    chk.account_id = Some(s.bank);
+    let mut l = TxnLine::item(part, Decimal::from(3), Decimal::from(5));
+    l.linked_txn_id = Some(po.id);
+    chk.lines.push(l);
+    b.write(&me(), |w| txns::save(w, chk)).unwrap();
+    assert_eq!(open_balance(&b, po.id), Some(Money(3_500)));
+    let mut unknown_item = Txn::new(TxnType::ItemReceipt, date(2026, 10, 3));
+    unknown_item.entity_id = Some(s.vendor);
+    let mut l = TxnLine::item(gadget, Decimal::ONE, Decimal::from(5));
+    l.linked_txn_id = Some(po.id);
+    unknown_item.lines.push(l);
+    assert!(refused(unknown_item).contains("no line for this item"));
+    // A closed line takes nothing more.
+    let mut po2 = b.read(|c| txns::get(c, po.id)).unwrap();
+    po2.lines[0].is_closed = true;
+    b.write(&me(), |w| txns::save(w, po2)).unwrap();
+    assert!(
+        refused(against(
+            TxnType::ItemReceipt,
+            date(2026, 10, 4),
+            &po,
+            part,
+            1,
+            5
+        ))
+        .contains("is closed")
+    );
+    assert_eq!(b.check_integrity().unwrap(), Vec::<String>::new());
+}
+
+#[test]
+fn older_files_get_their_orders_open_balances_on_open() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("orders.lbdb");
+    let info = CompanyInfo {
+        name: "Older".into(),
+        ..CompanyInfo::default()
+    };
+    let (po, so) = {
+        let b = Books::create(&path, &info).unwrap();
+        let s = setup(&b);
+        let part = widget(&b, &s);
+        let mut po = Txn::new(TxnType::PurchaseOrder, date(2026, 10, 1));
+        po.entity_id = Some(s.vendor);
+        po.lines
+            .push(TxnLine::item(part, Decimal::from(10), Decimal::from(5)));
+        let po = b.write(&me(), |w| txns::save(w, po)).unwrap().txn;
+        let rcpt = against(TxnType::ItemReceipt, date(2026, 10, 5), &po, part, 4, 5);
+        b.write(&me(), |w| txns::save(w, rcpt)).unwrap();
+        let mut so = Txn::new(TxnType::SalesOrder, date(2026, 10, 1));
+        so.entity_id = Some(s.customer);
+        so.lines
+            .push(TxnLine::item(s.labor, Decimal::ONE, Decimal::from(100)));
+        let so = b.write(&me(), |w| txns::save(w, so)).unwrap().txn;
+        // Make the file look like one written before order fulfilment.
+        b.write(&Actor::system(), |w| {
+            w.tx.execute_batch(
+                "DROP TABLE txn_link;
+                 UPDATE txn SET open_balance = NULL
+                 WHERE txn_type IN ('PurchaseOrder', 'SalesOrder', 'Estimate');
+                 PRAGMA user_version = 3;",
+            )?;
+            Ok(())
+        })
+        .unwrap();
+        (po.id, so.id)
+    };
+    let b = Books::open(&path).unwrap();
+    assert_eq!(open_balance(&b, po), Some(Money(3_000)), "links backfilled");
+    assert_eq!(open_balance(&b, so), Some(Money(10_000)));
+    let f = b.read(|c| orders::fulfilment(c, po)).unwrap();
+    assert_eq!(f.lines[0].fulfilled_quantity, Decimal::from(4));
+    assert_eq!(b.check_integrity().unwrap(), Vec::<String>::new());
 }

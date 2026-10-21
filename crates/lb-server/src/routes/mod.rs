@@ -52,6 +52,7 @@ pub fn api() -> Router<AppState> {
         )
         .route("/txns/{id}/void", post(txns::void))
         .route("/txns/{id}/history", get(txns::history))
+        .route("/txns/{id}/fulfilment", get(txns::fulfilment))
         .route("/accounts/{id}/register", get(txns::register))
         .route(
             "/accounts/{id}/register/{txn}/cleared",
