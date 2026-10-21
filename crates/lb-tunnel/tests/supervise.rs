@@ -137,13 +137,21 @@ async fn dropping_the_tunnel_ends_cloudflared() {
         s.state == TunnelState::Connected { connections: 4 }
     })
     .await;
-    let alive = std::fs::read_to_string(&heartbeat).unwrap();
-    tokio::time::sleep(Duration::from_millis(300)).await;
-    assert_ne!(
-        std::fs::read_to_string(&heartbeat).unwrap(),
-        alive,
-        "it beats"
-    );
+    // Two distinct beats prove it is alive. A loaded machine (CI) may not have
+    // written the first one yet, so wait for them rather than assume a cadence.
+    async fn beat(path: &std::path::Path, after: &str) -> String {
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+        loop {
+            let now = std::fs::read_to_string(path).unwrap_or_default();
+            if !now.is_empty() && now != after {
+                return now;
+            }
+            assert!(tokio::time::Instant::now() < deadline, "no heartbeat");
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    }
+    let alive = beat(&heartbeat, "").await;
+    beat(&heartbeat, &alive).await;
 
     drop(t);
     tokio::time::sleep(Duration::from_millis(500)).await;
