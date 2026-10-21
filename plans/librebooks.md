@@ -224,8 +224,13 @@ Phases are ordered; each ends usable. **Current step is marked ▶.**
   export in XLSX and PDF on a shared render layout (`4b59149`; the Report
   Center still offers CSV only: UI follow-up). Merged the web follow-up
   (`54b7fbd`: one-request opening balances, generated company/manifest/
-  enrolment types; 246 web tests, 48 Playwright). ▶ Running: a web agent
-  adding XLSX/PDF to the Report Center's export. Next with the user: point
+  enrolment types; 246 web tests, 48 Playwright) and the Report Center's
+  Export menu with Excel/PDF (`f2c40f9`; 251 web tests, 50 Playwright).
+  ▶ Running: a web agent on the forms not yet built (statement charges, sales
+  orders, progress invoicing from an estimate, receiving against a purchase
+  order) and a server agent on order fulfilment (linked-line validation,
+  `GET /txns/:id/fulfilment`, open orders in `/open`, line/order close flags).
+  Next with the user: point
   QuickBooks' Web Connector on cad-3 at this server over HTTPS (steps in
   `plans/qbd-import.md`), run a sync, and see whether the 14 bridge gaps close.
 - Phase 1 — Ledger core
