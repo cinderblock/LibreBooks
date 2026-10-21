@@ -4,7 +4,7 @@ Side-issues found while working on something else, each just enough to seed a
 fresh thread. Claim one by marking it `in progress — <thread/branch>` and commit
 that first; remove it (or mark it fixed with the commit) when done.
 
-## QBD import doesn't carry a purchase order's closed marks
+## QBD import doesn't carry a purchase order's closed marks (in progress — master, main thread)
 
 **Seen:** `crates/lb-qbd/src/qbxml/txns.rs` `purchase_order` / `sales_lines`
 leave QBD's `IsManuallyClosed` (order and line), `IsFullyReceived` and
