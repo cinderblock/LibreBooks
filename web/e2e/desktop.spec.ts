@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { readFileSync } from 'node:fs';
 
 // Fixture mode with no simulated latency; the browser keymap (a plain browser).
 async function start(page: Page, path = '/') {
@@ -313,6 +314,11 @@ test('a report collapses and drills down to account detail, then a transaction',
   const report = page.getByTestId('report-window');
   await report.getByRole('combobox', { name: 'Dates' }).click();
   await page.getByRole('option', { name: 'This Fiscal Year-to-date' }).click();
+  // The month-to-date report stays on screen while the year-to-date one loads; wait for the new
+  // period, or the collapse below lands on rows that are about to be replaced (which resets it).
+  await expect(page).toHaveURL(/dates=ThisFiscalYearToDate/);
+  await expect(report).toHaveAttribute('aria-busy', 'false');
+  await expect(report.getByText(/^January 1 through /)).toBeVisible();
   const grid = report.getByTestId('report-grid');
   await expect(grid.getByText('Gross Profit')).toBeVisible();
   await grid.focus();
@@ -323,7 +329,6 @@ test('a report collapses and drills down to account detail, then a transaction',
   await expect(grid.getByText('Total Income')).toBeHidden();
   await grid.getByRole('button', { name: 'Expand Income' }).click();
   // Options: monthly columns add a TOTAL column; % of income adds percent columns.
-  await expect(page).toHaveURL(/dates=ThisFiscalYearToDate/);
   await report.getByRole('combobox', { name: 'Columns' }).click();
   await page.getByRole('option', { name: 'Month' }).click();
   await expect(grid.getByRole('columnheader', { name: 'TOTAL' })).toBeVisible();
@@ -356,6 +361,42 @@ test('the Report Center lists QBD categories; memorizing a report keeps it', asy
   await page.getByRole('tab', { name: 'Report Center' }).click();
   await expect(center.getByText('Memorized Reports')).toBeVisible();
   await expect(center.getByText('Month-end balance sheet')).toBeVisible();
+});
+
+test('a report exports: the menu offers Excel, PDF and CSV; the PDF comes on the chosen paper and Ctrl+E repeats it', async ({ page }) => {
+  await start(page, '/c/00000000-0000-4000-8000-00000000c0de/reports/BalanceSheet');
+  const report = page.getByTestId('report-window');
+  await expect(report.getByTestId('report-grid').getByText('TOTAL ASSETS')).toBeVisible();
+  await report.getByRole('button', { name: 'Export' }).click();
+  const menu = page.getByRole('menu');
+  for (const f of ['Excel workbook (.xlsx)', 'PDF (.pdf)', 'CSV (.csv)']) await expect(menu.getByRole('menuitem', { name: f })).toBeVisible();
+  // CSV is the default to begin with: Ctrl+E's hint sits on it.
+  await expect(menu.getByRole('menuitem', { name: 'CSV (.csv)' })).toContainText('Ctrl+E');
+  await menu.getByRole('menuitem', { name: 'A4' }).click(); // the paper choice keeps the menu open
+  await expect(menu).toBeVisible();
+  // Esc with the focus inside the menu closes the menu, not the window.
+  await page.keyboard.press('Escape');
+  await expect(menu).toBeHidden();
+  await expect(report).toBeVisible();
+  await report.getByRole('button', { name: 'Export' }).click();
+  const pdf = page.waitForEvent('download');
+  await menu.getByRole('menuitem', { name: 'PDF (.pdf)' }).click();
+  const download = await pdf;
+  expect(download.suggestedFilename()).toBe('Balance Sheet.pdf');
+  const bytes = readFileSync((await download.path())!, 'latin1');
+  expect(bytes.startsWith('%PDF-')).toBe(true);
+  expect(bytes).toContain('/MediaBox [0 0 595 842]'); // A4
+  // Ctrl+E repeats the last pick.
+  const again = page.waitForEvent('download');
+  await page.keyboard.press('Control+E');
+  expect((await again).suggestedFilename()).toBe('Balance Sheet.pdf');
+  await report.getByRole('button', { name: 'Export' }).click();
+  await expect(page.getByRole('menuitem', { name: 'PDF (.pdf)' })).toContainText('Ctrl+E');
+  await page.keyboard.press('Escape');
+  // Print's dropdown offers Save as PDF on the remembered paper.
+  await report.getByRole('button', { name: 'Print menu' }).click();
+  await expect(page.getByRole('menuitem', { name: 'Save as PDF (A4)' })).toBeVisible();
+  await page.keyboard.press('Escape');
 });
 
 test("someone else's save shows a banner, and saving over it asks", async ({ page }) => {
