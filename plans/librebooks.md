@@ -399,7 +399,10 @@ Phases are ordered; each ends usable. **Current step is marked ▶.**
       validated line links to POs / sales orders / estimates, `txn_link`
       (migration 4), `orders::fulfilment`, orders' `open_balance` = remaining,
       `GET /txns/:id/fulfilment`, `/open?kind=purchase_orders|sales_orders|
-      estimates`. UI and import mapping still to do.
+      estimates`, `GET /txns?linked_to=`. The QBD import maps the closed and
+      received marks and the SalesOrder entity (`3f79af9`). The web UI's
+      switch to the fulfilment route is the last piece (agent in flight,
+      2026-10-23).
 - [x] Phase 9: native QBW research (`plans/qbw-research.md`); five questions for
       the user there (legal review, upstream vs independent, a `.QBM` experiment,
       gap-closer priority).
