@@ -1,8 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 import { blankLine, blankTxn } from '~/api/blank';
-import type { Txn, TxnLine } from '~/api/types';
+import type { Fulfilment, LineFulfilment, Txn, TxnLine, TxnSummary } from '~/api/types';
 import { toPlainString } from './decimal';
-import { isManuallyClosed, linkedOrderIds, orderOpenAmount, orderProgress, withManuallyClosed } from './orders';
+import { linkedOrderIds, orderKind, progressFromFulfilment } from './orders';
 
 const today = '2026-10-19';
 
@@ -18,19 +18,24 @@ function salesOrder(): Txn {
   return so;
 }
 
-function invoiceDrawing(id: string, date: string, draws: Array<[lineId: string, quantity: string | null, amount: number]>, isVoid = false): Txn {
-  const inv = blankTxn('Invoice', date);
-  inv.id = id;
-  inv.is_void = isVoid;
-  inv.lines = draws.map(([lineId, quantity, amount], i) => item(`${id}-${i}`, quantity, '0', amount, { linked_txn_id: 'so-1', linked_line_id: lineId }));
-  return inv;
+/** A server `LineFulfilment`, as `GET /txns/:id/fulfilment` answers it. */
+function lf(line_id: string, f: Partial<LineFulfilment> & Pick<LineFulfilment, 'ordered_amount'>): LineFulfilment {
+  return { line_id, item_id: `item-${line_id}`, ordered_quantity: null, fulfilled_quantity: '0', fulfilled_amount: 0, is_closed: false, remaining_quantity: null, remaining_amount: f.ordered_amount, ...f };
 }
+
+const summary = (id: string, date: string): TxnSummary => ({ id, txn_type: 'Invoice', date, number: id, entity_id: 'c', entity_name: null, account_id: null, account_name: null, amount: 0, open_balance: 0, due_date: null, memo: null, is_void: false, is_pending: false, edit_seq: 1 });
 
 const plain = (d: { int: bigint; scale: number }) => toPlainString(d);
 
-describe('order progress', () => {
+describe('order progress from the server fulfilment', () => {
   test('nothing drawn: every line is fully remaining and the order is open', () => {
-    const p = orderProgress(salesOrder(), []);
+    const f: Fulfilment = {
+      order_id: 'so-1',
+      is_closed: false,
+      remaining_amount: 44_000,
+      lines: [lf('l1', { ordered_quantity: '10', ordered_amount: 18_500, remaining_quantity: '10' }), lf('l2', { ordered_quantity: '3', ordered_amount: 25_500, remaining_quantity: '3' })],
+    };
+    const p = progressFromFulfilment(salesOrder(), f);
     expect(p.lines.map((l) => [plain(l.ordered), plain(l.fulfilled), plain(l.remaining)])).toEqual([
       ['10', '0', '10'],
       ['3', '0', '3'],
@@ -41,85 +46,70 @@ describe('order progress', () => {
     expect(plain(p.percent)).toBe('0.00');
     expect(p.closed).toBe(false);
     expect(p.fullyFulfilled).toBe(false);
+    expect(p.manuallyClosed).toBe(false);
     expect(p.linked).toEqual([]);
   });
 
-  test('a partial invoice reduces the remaining quantities exactly; a void one counts for nothing', () => {
-    const part = invoiceDrawing('inv-1', '2026-10-20', [['l1', '4', 7_400], ['l2', '0.5', 4_250]]);
-    const voided = invoiceDrawing('inv-void', '2026-10-21', [['l1', '6', 11_100]], true);
-    const p = orderProgress(salesOrder(), [voided, part]);
-    expect(p.linked.map((t) => t.id)).toEqual(['inv-1']);
+  test('partly drawn: the figures are the server\'s, the linked documents come oldest first, a closed line is marked', () => {
+    const f: Fulfilment = {
+      order_id: 'so-1',
+      is_closed: false,
+      remaining_amount: 11_100,
+      lines: [
+        lf('l1', { ordered_quantity: '10', fulfilled_quantity: '4', ordered_amount: 18_500, fulfilled_amount: 7_400, remaining_quantity: '6', remaining_amount: 11_100 }),
+        lf('l2', { ordered_quantity: '3', fulfilled_quantity: '0.5', ordered_amount: 25_500, fulfilled_amount: 4_250, is_closed: true, remaining_quantity: '0', remaining_amount: 0 }),
+      ],
+    };
+    const p = progressFromFulfilment(salesOrder(), f, [summary('inv-2', '2026-10-22'), summary('inv-1', '2026-10-20')]);
+    expect(p.linked.map((t) => t.id)).toEqual(['inv-1', 'inv-2']);
     const [walnut, design] = p.lines;
-    expect([plain(walnut!.fulfilled), plain(walnut!.remaining)]).toEqual(['4', '6']);
-    expect([plain(design!.fulfilled), plain(design!.remaining)]).toEqual(['0.5', '2.5']);
-    expect(walnut!.amountFulfilled).toBe(7_400);
+    expect([plain(walnut!.fulfilled), plain(walnut!.remaining), walnut!.closed]).toEqual(['4', '6', false]);
+    expect([plain(design!.fulfilled), plain(design!.remaining), design!.closed]).toEqual(['0.5', '0', true]);
     expect(p.amountFulfilled).toBe(11_650);
+    expect(p.amountRemaining).toBe(11_100);
     expect(plain(p.percent)).toBe('26.48');
+    expect(p.byLineId.get('l2')!.amountRemaining).toBe(0);
     expect(p.closed).toBe(false);
   });
 
-  test('several invoices add up; over-drawing clamps at zero and closes the order', () => {
-    const a = invoiceDrawing('inv-1', '2026-10-20', [['l1', '4', 7_400], ['l2', '3', 25_500]]);
-    const b = invoiceDrawing('inv-2', '2026-10-22', [['l1', '7', 12_950]]);
-    const p = orderProgress(salesOrder(), [b, a]);
-    expect(p.linked.map((t) => t.id)).toEqual(['inv-1', 'inv-2']); // oldest first
-    expect(plain(p.byLineId.get('l1')!.fulfilled)).toBe('11');
-    expect(plain(p.byLineId.get('l1')!.remaining)).toBe('0');
-    expect(p.byLineId.get('l1')!.amountRemaining).toBe(0);
-    expect(p.fullyFulfilled).toBe(true);
-    expect(p.closed).toBe(true);
-    expect(orderOpenAmount(salesOrder(), [a, b])).toBe(0);
+  test('closed by its lines is "fully fulfilled"; closed by hand is "manually closed"; both are closed', () => {
+    const lines = [lf('l1', { ordered_quantity: '10', fulfilled_quantity: '11', ordered_amount: 18_500, fulfilled_amount: 20_350, is_closed: true, remaining_quantity: '0' , remaining_amount: 0 }), lf('l2', { ordered_quantity: '3', ordered_amount: 25_500, is_closed: true, remaining_quantity: '0', remaining_amount: 0 })];
+    const byLines = progressFromFulfilment(salesOrder(), { order_id: 'so-1', is_closed: true, remaining_amount: 0, lines });
+    expect(byLines.fullyFulfilled).toBe(true);
+    expect(byLines.manuallyClosed).toBe(false);
+    expect(byLines.closed).toBe(true);
+    expect(byLines.amountRemaining).toBe(0);
+    const stamped = progressFromFulfilment({ ...salesOrder(), is_manually_closed: true }, { order_id: 'so-1', is_closed: true, remaining_amount: 0, lines });
+    expect(stamped.fullyFulfilled).toBe(false);
+    expect(stamped.manuallyClosed).toBe(true);
+    expect(stamped.closed).toBe(true);
   });
 
-  test('a blank quantity counts as one, on the order and on what draws on it', () => {
+  test('a line without a quantity is one of something: its whole remains until drawn or closed', () => {
     const so = salesOrder();
     so.lines = [item('l1', null, '75', 7_500)];
-    expect(plain(orderProgress(so, []).lines[0]!.ordered)).toBe('1');
-    const inv = invoiceDrawing('inv-1', today, [['l1', null, 7_500]]);
-    const p = orderProgress(so, [inv]);
-    expect(plain(p.lines[0]!.remaining)).toBe('0');
-    expect(p.fullyFulfilled).toBe(true);
+    const open = progressFromFulfilment(so, { order_id: 'so-1', is_closed: false, remaining_amount: 7_500, lines: [lf('l1', { ordered_amount: 7_500 })] });
+    expect([plain(open.lines[0]!.ordered), plain(open.lines[0]!.remaining)]).toEqual(['1', '1']);
+    const half = progressFromFulfilment(so, { order_id: 'so-1', is_closed: false, remaining_amount: 3_750, lines: [lf('l1', { ordered_amount: 7_500, fulfilled_amount: 3_750, remaining_amount: 3_750 })] });
+    expect(plain(half.lines[0]!.remaining)).toBe('1');
+    expect(half.lines[0]!.amountRemaining).toBe(3_750);
+    const done = progressFromFulfilment(so, { order_id: 'so-1', is_closed: true, remaining_amount: 0, lines: [lf('l1', { ordered_amount: 7_500, fulfilled_amount: 7_500, is_closed: true, remaining_amount: 0 })] });
+    expect(plain(done.lines[0]!.remaining)).toBe('0');
+    expect(done.closed).toBe(true);
   });
 
-  test('an estimate is measured by amount: half the money is 50%, and only the full amount closes it', () => {
-    const est = { ...salesOrder(), txn_type: 'Estimate' as const };
-    const half = invoiceDrawing('inv-1', today, [['l1', '10', 9_250], ['l2', '3', 12_750]]);
-    const p = orderProgress(est, [half]);
-    expect(plain(p.percent)).toBe('50.00');
-    // By quantity both lines look fully drawn; by amount they are half done.
-    expect(plain(p.lines[0]!.remaining)).toBe('0');
-    expect(p.lines[0]!.amountRemaining).toBe(9_250);
-    expect(p.fullyFulfilled).toBe(false);
-    expect(p.closed).toBe(false);
-    const rest = invoiceDrawing('inv-2', today, [['l1', '10', 9_250], ['l2', '3', 12_750]]);
-    expect(orderProgress(est, [half, rest]).closed).toBe(true);
+  test('a figure for a line the order no longer has is dropped; the open kinds map to the API\'s', () => {
+    const p = progressFromFulfilment(salesOrder(), { order_id: 'so-1', is_closed: false, remaining_amount: 0, lines: [lf('gone', { ordered_amount: 100 })] });
+    expect(p.lines).toEqual([]);
+    expect(p.amount).toBe(0);
+    expect(plain(p.percent)).toBe('0');
+    expect([orderKind('PurchaseOrder'), orderKind('SalesOrder'), orderKind('Estimate')]).toEqual(['purchase_orders', 'sales_orders', 'estimates']);
   });
 
-  test('a manual close is kept in extra under QBD\'s tag and makes the order closed; reopening removes it', () => {
-    const so = salesOrder();
-    expect(isManuallyClosed(so)).toBe(false);
-    const closed = withManuallyClosed({ ...so, extra: { Other: 'kept' } as Record<string, unknown> }, true);
-    expect(closed.extra).toEqual({ Other: 'kept', IsManuallyClosed: true });
-    expect(isManuallyClosed(closed)).toBe(true);
-    expect(isManuallyClosed({ extra: { IsManuallyClosed: 'true' } })).toBe(true); // as an import would carry it
-    const p = orderProgress(closed, []);
-    expect(p.manuallyClosed).toBe(true);
-    expect(p.fullyFulfilled).toBe(false);
-    expect(p.closed).toBe(true);
-    expect(orderOpenAmount(closed, [])).toBe(0);
-    expect(withManuallyClosed(closed, false).extra).toEqual({ Other: 'kept' });
-    expect(withManuallyClosed(withManuallyClosed(so, true), false).extra).toBeNull();
-  });
-
-  test('lines linked to another order or without a line id do not count', () => {
-    const other = invoiceDrawing('inv-1', today, [['l1', '10', 18_500]]);
-    other.lines[0]!.linked_txn_id = 'so-2';
-    const whole = invoiceDrawing('inv-2', today, [['l1', '10', 18_500]]);
-    whole.lines[0]!.linked_line_id = null;
-    const p = orderProgress(salesOrder(), [other, whole]);
-    expect(p.linked.map((t) => t.id)).toEqual(['inv-2']);
-    expect(plain(p.lines[0]!.remaining)).toBe('10');
-    expect(linkedOrderIds(whole)).toEqual(['so-1']);
-    expect(linkedOrderIds(other)).toEqual(['so-2']);
+  test('the distinct transactions a document draws on, in line order', () => {
+    const inv = blankTxn('Invoice', today);
+    inv.lines = [item('a', '1', '1', 100, { linked_txn_id: 'so-2', linked_line_id: 'x' }), item('b', '1', '1', 100, { linked_txn_id: 'so-1', linked_line_id: 'y' }), item('c', '1', '1', 100, { linked_txn_id: 'so-2', linked_line_id: 'z' })];
+    expect(linkedOrderIds(inv)).toEqual(['so-2', 'so-1']);
+    expect(linkedOrderIds(blankTxn('Invoice', today))).toEqual([]);
   });
 });

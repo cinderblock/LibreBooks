@@ -32,9 +32,11 @@ export interface ItemRow {
   entity_id: string | null;
   billable: boolean;
   class_id: string | null;
-  /** The purchase-order line this line receives or bills (a receipt or bill made from a PO). */
+  /** The purchase-order line this line receives or bills (a receipt or bill made from a PO), or the receipt line a bill bills. */
   linked_txn_id: string | null;
   linked_line_id: string | null;
+  /** On a purchase order: closed by hand (QBD's "Clsd"), nothing more expected against it. */
+  is_closed: boolean;
 }
 
 export const blankExpense = (): ExpenseRow => ({
@@ -61,6 +63,7 @@ export const blankItemRow = (): ItemRow => ({
   class_id: null,
   linked_txn_id: null,
   linked_line_id: null,
+  is_closed: false,
 });
 
 export const isBlankExpense = (r: ExpenseRow) =>
@@ -149,6 +152,7 @@ export function toTxnLines(expenses: readonly ExpenseRow[], items: readonly Item
       class_id: r.class_id,
       linked_txn_id: r.linked_txn_id,
       linked_line_id: r.linked_line_id,
+      is_closed: r.is_closed,
     });
   }
   return out;
@@ -173,6 +177,7 @@ export function fromTxnLines(lines: readonly TxnLine[]): { expenses: ExpenseRow[
         class_id: l.class_id,
         linked_txn_id: l.linked_txn_id,
         linked_line_id: l.linked_line_id,
+        is_closed: !!l.is_closed,
       });
     } else if (l.kind === 'Account') {
       expenses.push({

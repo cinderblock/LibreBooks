@@ -282,16 +282,77 @@ describe('fixture books', () => {
     expect(after.open_balance).toBe(0);
     expect((await api.txns(co, { types: ['PurchaseOrder'], open_only: true })).some((t) => t.id === po!.id)).toBe(false);
     expect((await rejects(api.deleteTxn(co, full.id, full.edit_seq))).code).toBe('in_use');
-    // A sales order closed by hand (QBD's IsManuallyClosed, kept in `extra`) is off the list too; reopened, it is back.
+    // A sales order closed by hand (QBD's "Closed" stamp, `is_manually_closed`) is off the list too; reopened, it is back.
     const [so] = await api.txns(co, { types: ['SalesOrder'] });
     expect(so!.open_balance).toBe(so!.amount);
     const soFull = (await api.txn(co, so!.id)).txn;
-    const closed = await api.updateTxn(co, { ...soFull, extra: { IsManuallyClosed: true } });
+    const closed = await api.updateTxn(co, { ...soFull, is_manually_closed: true });
     expect((await api.txns(co, { types: ['SalesOrder'], open_only: true })).some((t) => t.id === so!.id)).toBe(false);
-    await api.updateTxn(co, { ...closed.txn, extra: null });
+    await api.updateTxn(co, { ...closed.txn, is_manually_closed: false });
     expect((await api.txns(co, { types: ['SalesOrder'], open_only: true })).some((t) => t.id === so!.id)).toBe(true);
     // Orders post nothing, whatever is drawn from them.
     expect((await api.txn(co, full.id)).postings).toEqual([]);
+  });
+
+  test("fulfilment is the server's shape; a link to a closed line, a closed order, another vendor's order or the wrong form is refused; linked_to and /open?kind= list what draws and what is open", async () => {
+    const api = make();
+    const vendor = api.find('entity', 'Hardwood Supply Co')!;
+    const [po] = await api.txns(co, { types: ['PurchaseOrder'], entity_id: vendor });
+    // 80 walnut at 12.75 of which 50 came in (30 × 12.75 remain); 150 white oak at 7.90 untouched.
+    const f = await api.fulfilment(co, po!.id);
+    expect(f).toMatchObject({ order_id: po!.id, is_closed: false, remaining_amount: 38_250 + 118_500 });
+    expect(f.lines.map((l) => [l.ordered_quantity, l.fulfilled_quantity, l.remaining_quantity, l.fulfilled_amount, l.remaining_amount, l.is_closed])).toEqual([
+      ['80', '50', '30', 63_750, 38_250, false],
+      ['150', '0', '150', 0, 118_500, false],
+    ]);
+    const [inv] = await api.txns(co, { types: ['Invoice'] });
+    expect((await rejects(api.fulfilment(co, inv!.id))).code).toBe('not_found');
+    // `linked_to`: the receipt that drew on it. `/open?kind=purchase_orders`: the order with what remains.
+    const linked = await api.txns(co, { linked_to: po!.id });
+    expect(linked.map((t) => t.txn_type)).toEqual(['ItemReceipt']);
+    expect((await api.openOrders(co, 'purchase_orders', vendor)).map((t) => [t.id, t.open_balance])).toEqual([[po!.id, 38_250 + 118_500]]);
+    expect(await api.openOrders(co, 'sales_orders', vendor)).toEqual([]);
+    // The white oak line closed by hand (QBD's "Clsd"): nothing remains on it, and a new receipt against it is refused.
+    const full = (await api.txn(co, po!.id)).txn;
+    const lineClosed = await api.updateTxn(co, { ...full, lines: full.lines.map((l, i) => (i === 1 ? { ...l, is_closed: true } : l)) });
+    const f2 = await api.fulfilment(co, po!.id);
+    expect(f2.lines[1]).toMatchObject({ is_closed: true, remaining_quantity: '0', remaining_amount: 0 });
+    expect(f2.remaining_amount).toBe(38_250);
+    const oak = blankTxn('ItemReceipt', today);
+    oak.entity_id = vendor;
+    oak.lines = [{ ...blankLine('Item'), item_id: full.lines[1]!.item_id, quantity: '10', rate: full.lines[1]!.rate, amount: 7_900, linked_txn_id: full.id, linked_line_id: full.lines[1]!.id }];
+    const refused = await rejects(api.createTxn(co, oak));
+    expect([refused.status, refused.code, refused.message]).toEqual([400, 'invalid', 'that line of the Purchase Order is closed']);
+    // Another vendor's receipt can't draw on it.
+    const other = blankTxn('ItemReceipt', today);
+    other.entity_id = api.find('entity', 'Rockler Hardware')!;
+    other.lines = [{ ...blankLine('Item'), item_id: full.lines[0]!.item_id, quantity: '1', rate: '1', amount: 100, linked_txn_id: full.id, linked_line_id: full.lines[0]!.id }];
+    expect((await rejects(api.createTxn(co, other))).message).toBe('that Purchase Order belongs to another vendor');
+    // Stamped closed as a whole: closed with nothing remaining, off the open list, a new link refused; the receipt that already draws on it still saves.
+    const stamped = await api.updateTxn(co, { ...lineClosed.txn, is_manually_closed: true });
+    expect(stamped.txn.is_manually_closed).toBe(true);
+    expect(await api.fulfilment(co, po!.id)).toMatchObject({ is_closed: true, remaining_amount: 0 });
+    expect(await api.openOrders(co, 'purchase_orders', vendor)).toEqual([]);
+    const walnut = blankTxn('ItemReceipt', today);
+    walnut.entity_id = vendor;
+    walnut.lines = [{ ...blankLine('Item'), item_id: full.lines[0]!.item_id, quantity: '10', rate: full.lines[0]!.rate, amount: 12_750, linked_txn_id: full.id, linked_line_id: full.lines[0]!.id }];
+    expect((await rejects(api.createTxn(co, walnut))).message).toBe('that Purchase Order is closed');
+    const receipt = (await api.txn(co, linked[0]!.id)).txn;
+    await api.updateTxn(co, { ...receipt, memo: 'still fine' });
+    // A bill for the receipt links to the receipt's line and does not count toward the PO again.
+    const bill = blankTxn('Bill', today);
+    bill.entity_id = vendor;
+    bill.lines = [{ ...blankLine('Item'), item_id: receipt.lines[0]!.item_id, quantity: receipt.lines[0]!.quantity, rate: receipt.lines[0]!.rate, amount: receipt.lines[0]!.amount, linked_txn_id: receipt.id, linked_line_id: receipt.lines[0]!.id }];
+    const savedBill = await api.createTxn(co, bill);
+    expect((await api.txns(co, { linked_to: receipt.id })).map((t) => t.id)).toEqual([savedBill.txn.id]);
+    expect((await api.fulfilment(co, po!.id)).lines[0]!.fulfilled_quantity).toBe('50');
+    // A sales order's lines can't link to anything (only an invoice draws on an estimate).
+    const [est] = await api.txns(co, { types: ['Estimate'] });
+    const estFull = (await api.txn(co, est!.id)).txn;
+    const so = blankTxn('SalesOrder', today);
+    so.entity_id = estFull.entity_id;
+    so.lines = [{ ...estFull.lines[0]!, id: 'so-line-1', linked_txn_id: estFull.id, linked_line_id: estFull.lines[0]!.id }];
+    expect((await rejects(api.createTxn(co, so))).message).toBe("lines on a Sales Order can't be entered against another transaction");
   });
 
   test('open items include unused credits; undeposited lists payments not yet deposited', async () => {

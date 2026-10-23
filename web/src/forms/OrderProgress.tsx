@@ -1,9 +1,10 @@
 // What has been drawn on a saved order, under its form: per line what was
 // ordered, what the linked invoices (or receipts and bills) took and what is
-// left; the documents themselves with a way into each; Open / Closed; Mark as
-// closed / Reopen (QBD's IsManuallyClosed, kept in `extra`); and the button
-// that makes the next invoice, receipt or bill from it. Everything shown is
-// derived on the client from the linked lines (`lib/orders.ts`).
+// left, which lines are closed; the documents themselves with a way into each;
+// Open / Closed; Mark as closed / Reopen (QBD's "Closed" stamp,
+// `Txn.is_manually_closed`); and the buttons that make the next invoice, sales
+// order, receipt or bill from it. The figures are the server's
+// (`GET /txns/:id/fulfilment`), presented by `lib/orders.ts`.
 
 import { Badge, Button, Group, Loader, Table, Text, Tooltip } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
@@ -13,7 +14,7 @@ import type { Txn, TxnType } from '~/api/types';
 import { formatDecimal } from '~/lib/decimal';
 import { formatDateShort } from '~/lib/dates';
 import { formatMoney } from '~/lib/money';
-import { isOrderType, linkedOrderIds, progressMeasure, withManuallyClosed, type OrderProgress } from '~/lib/orders';
+import { isOrderType, linkedOrderIds, progressMeasure, type OrderProgress } from '~/lib/orders';
 import { TXN_LABEL } from '~/lib/txnTypes';
 import { paths } from '~/windows/paths';
 import { useOpenWindow } from '~/windows/WindowsProvider';
@@ -25,7 +26,7 @@ export function drawnLabel(orderType: TxnType): string {
   return orderType === 'PurchaseOrder' ? 'Received' : 'Invoiced';
 }
 
-const CREATE_LABEL: Partial<Record<TxnType, string>> = { Invoice: 'Create Invoice', ItemReceipt: 'Create Item Receipt', Bill: 'Enter Bill' };
+const CREATE_LABEL: Partial<Record<TxnType, string>> = { Invoice: 'Create Invoice', SalesOrder: 'Create Sales Order', ItemReceipt: 'Create Item Receipt', Bill: 'Enter Bill' };
 
 export function createLabel(target: TxnType): string {
   return CREATE_LABEL[target] ?? `Create ${TXN_LABEL[target]}`;
@@ -39,7 +40,7 @@ export function orderStatus(p: OrderProgress, orderType: TxnType): { label: stri
   return { label: 'Open', color: 'teal' };
 }
 
-/** "From Sales Order 1001" on a document whose lines draw on an order, with a way into it. */
+/** "From Sales Order 1001" on a document whose lines draw on an order (or a receipt), with a way into it. */
 export function DrawnFromNote({ txn }: { txn: Txn | null }) {
   const ids = txn ? linkedOrderIds(txn) : [];
   const open = useOpenWindow();
@@ -49,7 +50,7 @@ export function DrawnFromNote({ txn }: { txn: Txn | null }) {
   const order = first.data?.txn;
   const label = order ? `${TXN_LABEL[order.txn_type]}${order.number ? ` ${order.number}` : ''}` : 'an order';
   return (
-    <Badge variant="light" color="blue" data-testid="drawn-from" style={{ cursor: 'pointer', textTransform: 'none' }} onClick={() => open(paths.txn(ids[0]!))} title="Open the order this draws on">
+    <Badge variant="light" color="blue" data-testid="drawn-from" style={{ cursor: 'pointer', textTransform: 'none' }} onClick={() => open(paths.txn(ids[0]!))} title="Open the transaction this draws on">
       From {label}
       {ids.length > 1 ? ` and ${ids.length - 1} more` : ''}
     </Badge>
@@ -79,13 +80,14 @@ export function OrderProgressPanel({ order, dirty, onDraw }: { order: Txn; dirty
   const canClose = type !== 'Estimate';
   const setClosed = async (closed: boolean) => {
     try {
-      await save.mutateAsync(withManuallyClosed(order, closed));
+      await save.mutateAsync({ ...order, is_manually_closed: closed });
       notifications.show({ message: closed ? `${TXN_LABEL[type]} marked as closed.` : `${TXN_LABEL[type]} reopened.`, color: 'teal' });
     } catch (e) {
       notifications.show({ message: describeError(e), color: 'red' });
     }
   };
   const blocked = dirty ? 'Save your changes first' : progress.closed ? `This ${TXN_LABEL[type].toLowerCase()} is closed` : order.is_void ? `This ${TXN_LABEL[type].toLowerCase()} is void` : null;
+  const verbing = drawn === 'Received' ? 'receiving' : 'invoicing';
   return (
     <div className={classes.progress} data-testid="order-progress">
       <Group justify="space-between" wrap="wrap" gap="xs">
@@ -107,7 +109,7 @@ export function OrderProgressPanel({ order, dirty, onDraw }: { order: Txn; dirty
               </Button>
             ) : (
               !progress.fullyFulfilled && (
-                <Tooltip label={dirty ? 'Save your changes first' : `Close the ${TXN_LABEL[type].toLowerCase()} without ${drawn.toLowerCase() === 'received' ? 'receiving' : 'invoicing'} the rest`} openDelay={600}>
+                <Tooltip label={dirty ? 'Save your changes first' : `Close the ${TXN_LABEL[type].toLowerCase()} without ${verbing} the rest`} openDelay={600}>
                   <Button size="xs" variant="default" onClick={() => void setClosed(true)} loading={save.isPending} disabled={dirty}>
                     Mark as closed
                   </Button>
@@ -142,11 +144,14 @@ export function OrderProgressPanel({ order, dirty, onDraw }: { order: Txn; dirty
                 <Table.Th ta="right">%</Table.Th>
               </>
             )}
+            <Table.Th ta="center" title="Closed: nothing more is expected on this line">
+              Clsd
+            </Table.Th>
           </Table.Tr>
         </Table.Thead>
         <Table.Tbody>
           {progress.lines.map((l) => (
-            <Table.Tr key={l.line.id}>
+            <Table.Tr key={l.line.id} data-closed={l.closed || undefined}>
               <Table.Td>{l.line.item_id ? (items.get(l.line.item_id)?.full_name ?? l.line.item_id) : ''}</Table.Td>
               <Table.Td>{l.line.description}</Table.Td>
               {measure === 'quantity' ? (
@@ -177,6 +182,9 @@ export function OrderProgressPanel({ order, dirty, onDraw }: { order: Txn; dirty
                   </Table.Td>
                 </>
               )}
+              <Table.Td ta="center" data-testid="line-closed" aria-label={l.closed ? 'Closed' : 'Open'}>
+                {l.closed ? '✓' : ''}
+              </Table.Td>
             </Table.Tr>
           ))}
         </Table.Tbody>

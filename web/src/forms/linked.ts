@@ -1,9 +1,10 @@
 // Drawing on an order: the lines and header a new invoice takes from a sales
-// order or an estimate, a new item receipt or bill from a purchase order. Each
-// drawn line carries `linked_txn_id` / `linked_line_id` back to the order line it
-// fulfils, which is all the server keeps; `lib/orders.ts` reads those back into
-// invoiced / received / remaining figures. Pure and unit-tested; the dialogs only
-// collect the choices.
+// order or an estimate, a new item receipt or bill from a purchase order, a new
+// bill from an item receipt. Each drawn line carries `linked_txn_id` /
+// `linked_line_id` back to the line it fulfils; the server sums those into the
+// order's fulfilment (`lib/orders.ts` presents it) and refuses a link to a
+// closed line or order. Pure and unit-tested; the dialogs only collect the
+// choices.
 
 import { blankLine, blankTxn, newId } from '~/api/blank';
 import type { Txn, TxnLine, TxnType } from '~/api/types';
@@ -35,6 +36,7 @@ export function drawRemaining(progress: OrderProgress): Draw {
 export function drawQuantities(progress: OrderProgress, quantities: ReadonlyMap<string, string>): Draw {
   const out = new Map<string, { quantity: Dec; amount: Cents }>();
   for (const l of progress.lines) {
+    if (l.closed) continue;
     const q = parseDecimal(quantities.get(l.line.id));
     if (!q || compare(q, ZERO) <= 0) continue;
     out.set(l.line.id, { quantity: trim(q), amount: amountForQuantity(l, q) });
@@ -63,6 +65,7 @@ export function drawPercent(progress: OrderProgress, percent: string): Draw {
   const p = parseDecimal(percent);
   if (!p || compare(p, ZERO) <= 0) return out;
   for (const l of progress.lines) {
+    if (l.closed) continue;
     const amount = percentOf(l.amount, percent) ?? 0;
     if (amount === 0) continue;
     out.set(l.line.id, { quantity: l.ordered, amount });
@@ -79,6 +82,7 @@ export function drawPercent(progress: OrderProgress, percent: string): Draw {
 export function drawAmounts(progress: OrderProgress, amounts: ReadonlyMap<string, Cents | null>): Draw {
   const out = new Map<string, { quantity: Dec; amount: Cents }>();
   for (const l of progress.lines) {
+    if (l.closed) continue;
     const amount = amounts.get(l.line.id);
     if (!amount) continue;
     out.set(l.line.id, { quantity: l.ordered, amount });
@@ -114,11 +118,12 @@ export function drawTotal(draw: Draw): Cents {
 
 /**
  * The lines a new document takes from an order: one per drawn order line, in
- * the order's sequence, each linked back to its source. Quantities are the drawn
- * ones; rate, description, item, class, tax code and the customer:job on a
- * purchase-order line ride along.
+ * the order's sequence, each linked back to its source (unless `link` is off:
+ * a sales order made from an estimate copies the lines, since only an invoice
+ * may link to an estimate). Quantities are the drawn ones; rate, description,
+ * item, class, tax code and the customer:job on a purchase-order line ride along.
  */
-export function drawnLines(order: Txn, progress: OrderProgress, draw: Draw): TxnLine[] {
+export function drawnLines(order: Txn, progress: OrderProgress, draw: Draw, link = true): TxnLine[] {
   const out: TxnLine[] = [];
   for (const l of progress.lines) {
     const d = draw.get(l.line.id);
@@ -139,11 +144,16 @@ export function drawnLines(order: Txn, progress: OrderProgress, draw: Draw): Txn
       billable: src.billable,
       sales_tax_code_id: src.sales_tax_code_id,
       service_date: src.service_date,
-      linked_txn_id: order.id,
-      linked_line_id: src.id,
+      linked_txn_id: link ? order.id : null,
+      linked_line_id: link ? src.id : null,
     });
   }
   return out;
+}
+
+/** Whether a document of `type` made from an order links its lines to it (the server's `TxnType::link_targets`). */
+export function linksTo(type: TxnType, orderType: TxnType): boolean {
+  return !(type === 'SalesOrder' && orderType === 'Estimate');
 }
 
 /** What a sales order or estimate becomes, and what a purchase order becomes. */
@@ -152,17 +162,18 @@ export function targetTypes(orderType: OrderType): readonly TxnType[] {
 }
 
 /**
- * A new, unsaved document drawing `draw` from `order`: an invoice from a sales
- * order or estimate (customer, class, terms, addresses, sales tax, P.O. number
- * and rep come along), an item receipt or bill from a purchase order (vendor,
- * class, memo). The caller hands it to the form through `windows/handoff.ts`.
+ * A new, unsaved document drawing `draw` from `order`: an invoice or sales order
+ * from a sales order or estimate (customer, class, terms, addresses, sales tax,
+ * P.O. number and rep come along), an item receipt or bill from a purchase order
+ * (vendor, class, memo). The caller hands it to the form through
+ * `windows/handoff.ts`.
  */
 export function documentFromOrder(order: Txn, progress: OrderProgress, draw: Draw, type: TxnType, date: string): Txn {
   const t = blankTxn(type, date);
   t.entity_id = order.entity_id;
   t.class_id = order.class_id;
   t.memo = order.memo;
-  t.lines = drawnLines(order, progress, draw);
+  t.lines = drawnLines(order, progress, draw, linksTo(type, order.txn_type));
   if (order.txn_type === 'SalesOrder' || order.txn_type === 'Estimate') {
     t.terms_id = order.terms_id;
     t.sales_rep_id = order.sales_rep_id;
@@ -173,6 +184,48 @@ export function documentFromOrder(order: Txn, progress: OrderProgress, draw: Dra
     t.customer_tax_code_id = order.customer_tax_code_id;
     t.message = order.message;
   }
+  t.amount = t.lines.reduce((s, l) => s + l.amount, 0);
+  return t;
+}
+
+/**
+ * Enter Bill for Received Items: the bill takes the receipt's lines whole (QBD
+ * turns the receipt into the bill; here the bill is its own transaction whose
+ * lines link to the receipt's, which the server accepts for a bill of the same
+ * vendor and which does not count toward the PO again: the receipt did).
+ */
+export function linesFromReceipt(receipt: Txn): TxnLine[] {
+  return receipt.lines
+    .filter((l) => l.kind === 'Item' || l.kind === 'Account')
+    .map((src) => ({
+      ...blankLine(src.kind),
+      id: newId(),
+      account_id: src.account_id,
+      item_id: src.item_id,
+      description: src.description,
+      quantity: src.quantity,
+      unit_of_measure: src.unit_of_measure,
+      rate: src.rate,
+      rate_is_percent: src.rate_is_percent,
+      amount: src.amount,
+      class_id: src.class_id,
+      entity_id: src.entity_id,
+      billable: src.billable,
+      sales_tax_code_id: src.sales_tax_code_id,
+      service_date: src.service_date,
+      linked_txn_id: receipt.id,
+      linked_line_id: src.id,
+    }));
+}
+
+/** A new, unsaved bill for one or more item receipts of the same vendor (the first receipt's class and memo). */
+export function billFromReceipts(receipts: readonly Txn[], date: string): Txn {
+  const t = blankTxn('Bill', date);
+  const first = receipts[0];
+  t.entity_id = first?.entity_id ?? null;
+  t.class_id = first?.class_id ?? null;
+  t.memo = first?.memo ?? null;
+  t.lines = receipts.flatMap(linesFromReceipt);
   t.amount = t.lines.reduce((s, l) => s + l.amount, 0);
   return t;
 }
