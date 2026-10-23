@@ -99,6 +99,8 @@ export type { Terms } from './generated/Terms';
 export type { TermsKind } from './generated/TermsKind';
 export type { Txn } from './generated/Txn';
 export type { TxnFilter } from './generated/TxnFilter';
+export type { Fulfilment } from './generated/Fulfilment';
+export type { LineFulfilment } from './generated/LineFulfilment';
 export type { TxnId } from './generated/TxnId';
 export type { TxnLine } from './generated/TxnLine';
 export type { TxnSummary } from './generated/TxnSummary';

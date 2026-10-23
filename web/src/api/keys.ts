@@ -23,6 +23,9 @@ export const qk = {
   nameBalances: (co: CompanyId) => ['c', co, 'balances', 'names'] as const,
   open: (co: CompanyId, entityId: string, kind: string) => ['c', co, 'open', entityId, kind] as const,
   openAll: (co: CompanyId) => ['c', co, 'open'] as const,
+  /** `GET /txns/:id/fulfilment`; the whole family goes stale on any transaction change (the event names only the changed id, not the order it draws on). */
+  fulfilmentAll: (co: CompanyId) => ['c', co, 'fulfilment'] as const,
+  fulfilment: (co: CompanyId, id: string) => ['c', co, 'fulfilment', id] as const,
   nextNumber: (co: CompanyId, type: string, accountId: string | null) => ['c', co, 'next-number', type, accountId] as const,
   undeposited: (co: CompanyId) => ['c', co, 'undeposited'] as const,
   reportCatalog: (co: CompanyId) => ['c', co, 'reports'] as const,
@@ -77,6 +80,7 @@ export function invalidateTxnDerived(qc: QueryClient, co: CompanyId, txnId?: str
   void qc.invalidateQueries({ queryKey: qk.registerAll(co) });
   void qc.invalidateQueries({ queryKey: qk.balancesAll(co) });
   void qc.invalidateQueries({ queryKey: qk.openAll(co) });
+  void qc.invalidateQueries({ queryKey: qk.fulfilmentAll(co) });
   void qc.invalidateQueries({ queryKey: qk.undeposited(co) });
   void qc.invalidateQueries({ queryKey: qk.reconcileAll(co) });
   void qc.invalidateQueries({ queryKey: qk.reportsAll(co) });

@@ -7,7 +7,7 @@
 
 import { blankCompanyInfo, blankLine, blankTxn } from '../blank';
 import { ApiError } from '../errors';
-import type { ApiClient, EventHandlers, EventSubscription, ExportPaper, FileDownload, TxnQuery } from '../client';
+import type { ApiClient, EventHandlers, EventSubscription, ExportPaper, FileDownload, OrderKind, TxnQuery } from '../client';
 import { clone } from '../json';
 import type {
   Account,
@@ -73,18 +73,19 @@ import type {
   TxnSummary,
   TxnType,
   TxnWithPostings,
+  Fulfilment,
 } from '../types';
 import { accountTypeOrder, isDebitNormal, naturalBalance } from '~/lib/accountTypes';
 import { addDays, addMonths, todayIso } from '~/lib/dates';
 import { div, isZero, parseDecimal, toApiString } from '~/lib/decimal';
 import { centsToDec } from '~/lib/money';
-import { isOrderType, orderOpenAmount } from '~/lib/orders';
 import { hierarchicalCompare } from '~/lib/tree';
 import { EXPORT_FORMAT_INFO, exportFileName, isExportFormat, isExportPaper } from '~/reports/export';
 import { reportToCsv } from '~/reports/rows';
 import { FixtureAdmin } from './admin';
 import { placeholderPdf, placeholderXlsx } from './exportFiles';
 import { FixtureFeeds } from './feeds';
+import { checkLinks, computeFulfilment, isOrder, type FulfilmentBooks, type LinkBooks } from './orders';
 import { fixturePost, type PostingBooks } from './post';
 import { FIXTURE_COMPANY_ID, buildSeed, stressNames } from './seed';
 import { fixtureCatalog, runFixtureReport } from './reports';
@@ -584,21 +585,72 @@ export class FixtureApiClient implements ApiClient {
     if (s.txn.is_void) return 0;
     // A payment's open balance is what it hasn't applied yet (an unapplied credit).
     if (PAYMENT_TYPES.includes(s.txn.txn_type)) return s.txn.amount - s.txn.applications.reduce((t, a) => t + a.amount + a.discount, 0);
-    // An order (sales order, purchase order, estimate) is open for what no
-    // invoice, receipt or bill has drawn from it yet, and not at all once it is
-    // fully drawn or closed by hand: what `open_only` then honours. The server
-    // keeps `open_balance` NULL for non-posting types (plans/web-ui.md, "For the
-    // server"); this is the behaviour the UI would want from it.
-    if (isOrderType(s.txn.txn_type)) return orderOpenAmount(s.txn, this.linkedDocs(s.txn.id));
+    // An order (sales order, purchase order, estimate): what remains on it, 0
+    // once closed, as the server keeps it (`orders::remaining`), so `open_only`
+    // and `/open?kind=…` list open orders.
+    if (isOrder(s.txn.txn_type)) return computeFulfilment(s.txn, this.fulfilmentBooks()).remaining_amount;
     if (![...AR_TYPES, ...AP_TYPES].includes(s.txn.txn_type)) return null;
     return s.total - (applied.get(s.txn.id) ?? 0);
   }
 
-  /** The documents with a line drawing on an order (invoices on a sales order or estimate; receipts and bills on a PO). */
-  private linkedDocs(orderId: string): Txn[] {
+  /** The transactions with a line linked to another (the server's `txn_link` table, `?linked_to=`). */
+  private linkedDocs(txnId: string): Txn[] {
     const out: Txn[] = [];
-    for (const s of this.txnStore.values()) if (s.txn.lines.some((l) => l.linked_txn_id === orderId)) out.push(s.txn);
+    for (const s of this.txnStore.values()) if (s.txn.lines.some((l) => l.linked_txn_id === txnId)) out.push(s.txn);
     return out;
+  }
+
+  private fulfilmentBooks(): FulfilmentBooks {
+    const items = new Map(this.lists.items.map((i) => [i.id, i.item_type]));
+    return {
+      linkedTo: (id) => this.linkedDocs(id),
+      isSubtotalOrGroup: (id) => {
+        const t = items.get(id);
+        return t === 'Subtotal' || t === 'Group';
+      },
+    };
+  }
+
+  /** The customer or vendor a job rolls up to (`entities::root_of`). */
+  private rootOf(entityId: string): string {
+    let id = entityId;
+    for (let i = 0; i < 20; i++) {
+      const e = this.lists.entities.find((x) => x.id === id);
+      if (!e?.parent_id) break;
+      id = e.parent_id;
+    }
+    return id;
+  }
+
+  private linkBooks(): LinkBooks {
+    return {
+      find: (id) => this.txnStore.get(id)?.txn,
+      rootOf: (id) => this.rootOf(id),
+      isCustomerForm: (t) => t === 'SalesOrder' || t === 'Estimate' || t === 'Invoice' || t === 'SalesReceipt' || t === 'CreditMemo' || t === 'StatementCharge' || t === 'ReceivePayment',
+    };
+  }
+
+  /** `GET /txns/:id/fulfilment`: 404 for anything but a purchase order, sales order or estimate. */
+  fulfilment(co: CompanyId, txnId: string): Promise<Fulfilment> {
+    this.checkCompany(co);
+    const s = this.txnStore.get(txnId);
+    if (!s || !isOrder(s.txn.txn_type)) return Promise.reject(new ApiError(404, 'not_found', 'No such order.'));
+    return this.delay(() => computeFulfilment(s.txn, this.fulfilmentBooks()));
+  }
+
+  /** `GET /open?kind=purchase_orders|sales_orders|estimates`: a name's open orders, `open_balance` what remains. */
+  openOrders(co: CompanyId, kind: OrderKind, entityId?: string | null): Promise<TxnSummary[]> {
+    this.checkCompany(co);
+    const type: TxnType = kind === 'purchase_orders' ? 'PurchaseOrder' : kind === 'sales_orders' ? 'SalesOrder' : 'Estimate';
+    const family = entityId ? this.entityFamily(entityId) : null;
+    const applied = this.appliedTo();
+    return this.delay(() =>
+      [...this.txnStore.values()]
+        .filter((s) => s.txn.txn_type === type && !s.txn.is_void && (!family || (s.txn.entity_id && family.has(s.txn.entity_id))))
+        .sort((a, b) => (a.txn.date < b.txn.date ? -1 : a.txn.date > b.txn.date ? 1 : a.seq - b.seq))
+        .map((s) => this.summaryOf(s, applied))
+        .filter((t) => (t.open_balance ?? 0) > 0),
+    );
   }
 
   private summaryOf(s: StoredTxn, applied: Map<string, number>): TxnSummary {
@@ -661,6 +713,7 @@ export class FixtureApiClient implements ApiClient {
       if (q.number && t.number !== q.number) return false;
       if (q.amount != null && Math.abs(s.total) !== Math.abs(q.amount)) return false;
       if (q.open_only && !((this.openBalance(s, applied) ?? 0) > 0)) return false;
+      if (q.linked_to && !t.lines.some((l) => l.linked_txn_id === q.linked_to)) return false;
       if (!q.include_void && t.is_void) return false;
       if (text) {
         const hay = [t.memo, t.number, t.entity_id ? names.get(t.entity_id) : null, ...t.lines.map((l) => l.description)]
@@ -725,6 +778,7 @@ export class FixtureApiClient implements ApiClient {
   private write(txn: Txn): () => SaveOutcome {
     this.validate(txn);
     this.checkClosed(txn.date);
+    checkLinks(txn, null, this.linkBooks());
     if (this.txnStore.has(txn.id)) throw new ApiError(409, 'conflict', 'That transaction already exists', { expected: 0, actual: 1 });
     const posted = this.post(txn);
     const now = new Date().toISOString();
@@ -749,6 +803,7 @@ export class FixtureApiClient implements ApiClient {
       // Moving a transaction into or out of the closed period is both locked.
       this.checkClosed(current.txn.date);
       this.checkClosed(txn.date);
+      checkLinks(txn, current.txn, this.linkBooks());
       const posted = this.post(txn);
       // Keep cleared marks on the accounts that still have a posting.
       const cleared = new Map(current.postings.map((p) => [p.account_id, p.cleared]));
@@ -787,7 +842,7 @@ export class FixtureApiClient implements ApiClient {
       return Promise.reject(new ApiError(409, 'conflict', 'Someone else changed this transaction', { expected: Number(editSeq), actual: Number(s.txn.edit_seq) }));
     }
     if ([...this.txnStore.values()].some((o) => o.txn.applications.some((a) => a.target_txn_id === id) || o.txn.lines.some((l) => l.linked_txn_id === id))) {
-      return Promise.reject(new ApiError(409, 'in_use', 'Payments are applied to it; delete those first.'));
+      return Promise.reject(new ApiError(409, 'in_use', isOrder(s.txn.txn_type) || s.txn.txn_type === 'ItemReceipt' ? 'Something was entered against it; void it instead, or delete those first.' : 'Payments are applied to it; delete those first.'));
     }
     try {
       this.checkClosed(s.txn.date);

@@ -1,6 +1,7 @@
-// "Create Invoice" from a sales order or estimate, "Create Item Receipt" /
-// "Enter Bill" from a purchase order: QBD's dialog asking how much of the
-// order to draw. Sales and purchase orders: everything that remains, or
+// "Create Invoice" from a sales order or estimate, "Create Sales Order" from an
+// estimate, "Create Item Receipt" / "Enter Bill" from a purchase order: QBD's
+// dialog asking how much of the order to draw. A closed line (ticked "Clsd",
+// or fully drawn) is shown but takes nothing: the server would refuse the link. Sales and purchase orders: everything that remains, or
 // selected items and quantities. Estimates: the entire estimate (100%), a
 // percentage of the whole, or selected items with an amount or percent per
 // line. The result is a new, unsaved document (`forms/linked.ts`) the caller
@@ -48,7 +49,7 @@ function Body({ order, progress, target, onClose, onCreate }: { order: Txn; prog
   const [choice, setChoice] = useState<ProgressChoice>('all');
   const [percent, setPercent] = useState('');
   // "Selected": the quantity (or amount) to take per line, starting from what remains.
-  const [quantities, setQuantities] = useState<Map<string, string>>(() => new Map(progress.lines.map((l) => [l.line.id, toApiString(l.remaining)])));
+  const [quantities, setQuantities] = useState<Map<string, string>>(() => new Map(progress.lines.map((l) => [l.line.id, l.closed ? '' : toApiString(l.remaining)])));
   const [amounts, setAmounts] = useState<Map<string, Cents | null>>(() => new Map(progress.lines.map((l) => [l.line.id, l.amountRemaining || null])));
 
   const draw = useMemo<Draw>(() => {
@@ -60,7 +61,7 @@ function Body({ order, progress, target, onClose, onCreate }: { order: Txn; prog
   const pct = drawPercentOfTotal(progress, draw);
   const percentError = choice === 'percent' && percent.trim() !== '' ? decimalTextError(percent) : undefined;
   const nothing = draw.size === 0;
-  const verb = target === 'Invoice' ? 'invoice' : 'receive';
+  const verb = target === 'Invoice' ? 'invoice' : target === 'SalesOrder' ? 'order' : 'receive';
 
   const create = () => {
     if (nothing) return;
@@ -132,7 +133,7 @@ function Body({ order, progress, target, onClose, onCreate }: { order: Txn; prog
             const d = draw.get(l.line.id);
             const n = i + 1;
             return (
-              <Table.Tr key={l.line.id} data-drawn={d ? true : undefined}>
+              <Table.Tr key={l.line.id} data-drawn={d ? true : undefined} data-closed={l.closed || undefined}>
                 <Table.Td>{itemName(l.line.item_id)}</Table.Td>
                 <Table.Td>{l.line.description}</Table.Td>
                 {measure === 'quantity' ? (
@@ -147,7 +148,11 @@ function Body({ order, progress, target, onClose, onCreate }: { order: Txn; prog
                       {formatDecimal(l.remaining)}
                     </Table.Td>
                     <Table.Td ta="right">
-                      {choice === 'selected' ? (
+                      {l.closed ? (
+                        <Text size="xs" c="dimmed">
+                          Closed
+                        </Text>
+                      ) : choice === 'selected' ? (
                         <TextInput
                           size="xs"
                           inputMode="decimal"
@@ -179,14 +184,18 @@ function Body({ order, progress, target, onClose, onCreate }: { order: Txn; prog
                       {l.amount ? '%' : ''}
                     </Table.Td>
                     <Table.Td ta="right">
-                      {choice === 'selected' ? (
+                      {l.closed ? (
+                        <Text size="xs" c="dimmed">
+                          Closed
+                        </Text>
+                      ) : choice === 'selected' ? (
                         <MoneyField size="xs" blankZero value={amounts.get(l.line.id) ?? null} onChange={(v) => setAmounts((m) => new Map(m).set(l.line.id, v))} aria-label={`Amount, line ${n}`} />
                       ) : (
                         <span className={classes.total}>{d ? formatMoney(d.amount) : ''}</span>
                       )}
                     </Table.Td>
                     <Table.Td ta="right">
-                      {choice === 'selected' ? (
+                      {l.closed ? null : choice === 'selected' ? (
                         <TextInput
                           size="xs"
                           inputMode="decimal"

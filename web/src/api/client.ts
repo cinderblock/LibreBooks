@@ -52,6 +52,7 @@ import type {
   FeedQuery,
   FeedRule,
   FeedTxn,
+  Fulfilment,
   IngestReport,
   MatchCandidate,
   SimpleFinClaim,
@@ -95,8 +96,15 @@ import type {
   User,
 } from './types';
 
-/** Every field optional: the server fills defaults. */
+/**
+ * Every field optional: the server fills defaults. `linked_to` lists the
+ * transactions with a line linked to that one (receipts and bills on a purchase
+ * order, invoices on a sales order or estimate, deposits of a payment).
+ */
 export type TxnQuery = Partial<TxnFilter>;
+
+/** The order kinds `GET /open?kind=` lists, with `open_balance` = what remains on each. */
+export type OrderKind = 'purchase_orders' | 'sales_orders' | 'estimates';
 
 export interface EventSubscription {
   close(): void;
@@ -179,6 +187,16 @@ export interface ApiClient {
    * unapplied payments (receivable), or bills and unused credits (payable).
    */
   open(co: CompanyId, entityId: string, kind: 'receivable' | 'payable'): Promise<TxnSummary[]>;
+  /**
+   * A name's (and its jobs') open orders of a kind, `open_balance` being what
+   * remains on each (0 and absent once closed). The server requires the name.
+   */
+  openOrders(co: CompanyId, kind: OrderKind, entityId?: string | null): Promise<TxnSummary[]>;
+  /**
+   * `GET /txns/:id/fulfilment`: how far a purchase order, sales order or estimate
+   * has been received or invoiced, line by line; 404 `not_found` for anything else.
+   */
+  fulfilment(co: CompanyId, txnId: string): Promise<Fulfilment>;
   /** Payments waiting in Undeposited Funds (Make Deposits). */
   undeposited(co: CompanyId): Promise<TxnSummary[]>;
 

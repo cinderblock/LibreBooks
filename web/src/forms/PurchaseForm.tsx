@@ -7,16 +7,18 @@
 import { Alert, Button, Checkbox, Group, SegmentedControl, Select, Stack, Tabs, Text, TextInput, Textarea } from '@mantine/core';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useApi, useCompanyId } from '~/api/context';
-import { useAccountIndex, useBalanceMap, useCompanyInfo, useEntityIndex, useItemIndex, useNextNumber, useOpenOrders, useTerms, type OpenOrder } from '~/api/hooks';
-import type { SaveOutcome, Txn, TxnType } from '~/api/types';
+import { useAccountIndex, useBalanceMap, useCompanyInfo, useEntityIndex, useItemIndex, useLoadOrder, useNextNumber, useOpenOrders, useTerms, useUnbilledReceipts } from '~/api/hooks';
+import { describeError } from '~/api/errors';
+import { notifications } from '@mantine/notifications';
+import type { SaveOutcome, Txn, TxnSummary, TxnType } from '~/api/types';
 import { withTrailingBlank } from '~/inputs/gridRows';
 import { isOrderType, type OrderProgress } from '~/lib/orders';
 import { stashTxn } from '~/windows/handoff';
 import { useOpenWindow } from '~/windows/WindowsProvider';
 import { CreateFromOrderModal } from './CreateFromOrder';
-import { drawRemaining, drawnLines } from './linked';
+import { drawRemaining, drawnLines, linesFromReceipt } from './linked';
 import { DrawnFromNote, OrderProgressPanel } from './OrderProgress';
-import { OrderPickerModal } from './OrderPicker';
+import { OrderPickerModal, ReceiptPickerModal } from './OrderPicker';
 import { DateField } from '~/inputs/DateField';
 import { LineGrid, type GridColumn } from '~/inputs/LineGrid';
 import { MoneyField } from '~/inputs/MoneyField';
@@ -137,6 +139,9 @@ export function PurchaseForm({ type, saved, initial }: { type: PurchaseType; sav
   const open = useOpenWindow();
   /** Receive Items / Enter Bills: the vendor's open purchase orders to draw on (Select PO). */
   const [pickPo, setPickPo] = useState(false);
+  /** Enter Bills: the vendor's item receipts not yet billed (Enter Bill for Received Items). */
+  const [pickReceipt, setPickReceipt] = useState(false);
+  const loadOrder = useLoadOrder();
   /** Create Item Receipt / Enter Bill from a saved purchase order. */
   const [drawing, setDrawing] = useState<{ order: Txn; progress: OrderProgress; target: TxnType } | null>(null);
 
@@ -180,19 +185,38 @@ export function PurchaseForm({ type, saved, initial }: { type: PurchaseType; sav
   const receives = t === 'ItemReceipt' || t === 'Bill';
   const openPos = useOpenOrders('PurchaseOrder', draft.entity_id, receives);
   const openPoCount = openPos.data?.length ?? 0;
+  const unbilled = useUnbilledReceipts(draft.entity_id, t === 'Bill' && !form.saved);
+  const unbilledCount = unbilled.data?.length ?? 0;
 
-  /** Select PO: the chosen orders' remaining lines join the Items tab, each linked to its PO line (quantities editable for a partial receipt). */
-  const addFromOrders = (orders: OpenOrder[]) => {
-    setPickPo(false);
-    const lines = orders.flatMap((o) => drawnLines(o.order, o.progress, drawRemaining(o.progress)));
+  /** Lines drawn from orders or receipts join the form: the vendor's prefilled expense line (its default account, no amount) gives way. */
+  const addLines = (lines: Txn['lines']) => {
     if (!lines.length) return;
-    const { items: rows } = fromTxnLines(lines);
+    const { items: rows, expenses } = fromTxnLines(lines);
     update((d) => ({
       ...d,
-      // The vendor's prefilled expense line (its default account, no amount) gives way to the order's items.
-      expenses: withTrailingBlank(d.expenses.filter((r) => !(r.account_id && r.amount === null && !r.memo.trim() && !r.entity_id)), isBlankExpense, blankExpense),
+      expenses: withTrailingBlank([...d.expenses.filter((r) => !(r.account_id && r.amount === null && !r.memo.trim() && !r.entity_id)), ...expenses.map((r) => ({ ...r, lineId: null }))], isBlankExpense, blankExpense),
       items: withTrailingBlank([...d.items.filter((r) => !isBlankItem(r)), ...rows.map((r) => ({ ...r, lineId: null }))], isBlankItem, blankItemRow),
     }));
+  };
+  /** Select PO: the chosen orders' remaining lines join the Items tab, each linked to its PO line (quantities editable for a partial receipt). */
+  const addFromOrders = async (picked: TxnSummary[]) => {
+    setPickPo(false);
+    try {
+      const orders = await Promise.all(picked.map((o) => loadOrder(o.id)));
+      addLines(orders.flatMap((o) => drawnLines(o.order, o.progress, drawRemaining(o.progress))));
+    } catch (e) {
+      notifications.show({ message: describeError(e), color: 'red' });
+    }
+  };
+  /** Select receipt: the chosen receipts' lines join the bill whole, each linked to its receipt line (QBD's Enter Bill for Received Items). */
+  const addFromReceipts = async (picked: TxnSummary[]) => {
+    setPickReceipt(false);
+    try {
+      const receipts = await Promise.all(picked.map((r) => api.txn(co, r.id)));
+      addLines(receipts.flatMap((r) => linesFromReceipt(r.txn)));
+    } catch (e) {
+      notifications.show({ message: describeError(e), color: 'red' });
+    }
   };
   /** A receipt or bill drawn from a saved PO opens in its own window. */
   const onDrawn = (doc: Txn) => {
@@ -485,8 +509,31 @@ export function PurchaseForm({ type, saved, initial }: { type: PurchaseType; sav
         ),
       },
     ];
+    if (t === 'PurchaseOrder') {
+      // QBD's "Clsd": the line is closed by hand, nothing more expected against it (`TxnLine.is_closed`).
+      cols.push({
+        key: 'closed',
+        header: 'Clsd',
+        width: 48,
+        align: 'center',
+        mobile: 'half',
+        render: (c) => (
+          <Checkbox
+            size="xs"
+            label={c.variant === 'default' ? 'Closed' : undefined}
+            styles={{ root: { display: 'flex', justifyContent: 'center' } }}
+            checked={c.row.is_closed}
+            onChange={(e) => {
+              const is_closed = e.currentTarget.checked;
+              c.update((r) => ({ ...r, is_closed }));
+            }}
+            {...c.cellProps}
+          />
+        ),
+      });
+    }
     return cols;
-  }, [draft.items, items, info]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [draft.items, items, info, t]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const onEnterSave = useCallback(() => void form.save('close'), []); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -541,6 +588,7 @@ export function PurchaseForm({ type, saved, initial }: { type: PurchaseType; sav
   );
 
   // QBD asks "open purchase orders exist for this vendor" on a receipt or bill; Select PO brings their lines in.
+  // On a bill, Select receipt bills the items a receipt brought in (Enter Bill for Received Items).
   const selectPo = receives && (
     <Group gap="xs" wrap="wrap" align="center">
       <Button size="xs" variant="default" onClick={() => setPickPo(true)} disabled={!draft.entity_id}>
@@ -550,6 +598,18 @@ export function PurchaseForm({ type, saved, initial }: { type: PurchaseType; sav
         <Alert color="blue" p={4} px="xs" data-testid="open-purchase-orders">
           <Text size="sm">
             {openPoCount} open purchase {openPoCount === 1 ? 'order' : 'orders'} for this vendor.
+          </Text>
+        </Alert>
+      )}
+      {t === 'Bill' && !form.saved && (
+        <Button size="xs" variant="default" onClick={() => setPickReceipt(true)} disabled={!draft.entity_id}>
+          Select receipt
+        </Button>
+      )}
+      {unbilledCount > 0 && (
+        <Alert color="blue" p={4} px="xs" data-testid="unbilled-receipts">
+          <Text size="sm">
+            {unbilledCount} item {unbilledCount === 1 ? 'receipt' : 'receipts'} not yet billed.
           </Text>
         </Alert>
       )}
@@ -764,7 +824,8 @@ export function PurchaseForm({ type, saved, initial }: { type: PurchaseType; sav
       <TxnFormActions form={form} hideVoid={isNonPosting(t)} />
       {form.chrome}
       <CreateFromOrderModal order={drawing?.order ?? null} progress={drawing?.progress ?? null} target={drawing?.target ?? 'ItemReceipt'} onClose={() => setDrawing(null)} onCreate={onDrawn} />
-      <OrderPickerModal opened={pickPo} type="PurchaseOrder" entityId={draft.entity_id} multiple onClose={() => setPickPo(false)} onPick={addFromOrders} />
+      <OrderPickerModal opened={pickPo} type="PurchaseOrder" entityId={draft.entity_id} multiple onClose={() => setPickPo(false)} onPick={(o) => void addFromOrders(o)} />
+      <ReceiptPickerModal opened={pickReceipt} entityId={draft.entity_id} onClose={() => setPickReceipt(false)} onPick={(r) => void addFromReceipts(r)} />
     </div>
   );
 }

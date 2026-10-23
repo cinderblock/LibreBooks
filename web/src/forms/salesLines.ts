@@ -25,6 +25,8 @@ export interface SaleRow {
   /** The sales order or estimate line this line draws on (an invoice made from one). */
   linked_txn_id: string | null;
   linked_line_id: string | null;
+  /** On a sales order: closed by hand (QBD's "Clsd"), nothing more to invoice on it. */
+  is_closed: boolean;
 }
 
 export const blankSaleRow = (): SaleRow => ({
@@ -40,6 +42,7 @@ export const blankSaleRow = (): SaleRow => ({
   class_id: null,
   linked_txn_id: null,
   linked_line_id: null,
+  is_closed: false,
 });
 
 export const isBlankSale = (r: SaleRow) => !r.item_id && !r.amount && !r.description.trim() && !r.quantity.trim() && !r.rate.trim();
@@ -182,6 +185,7 @@ export function toSaleLines(rows: readonly SaleRow[]): TxnLine[] {
       class_id: r.class_id,
       linked_txn_id: r.linked_txn_id,
       linked_line_id: r.linked_line_id,
+      is_closed: r.is_closed,
     }));
 }
 
@@ -201,6 +205,7 @@ export function fromSaleLines(lines: readonly TxnLine[]): SaleRow[] {
       class_id: l.class_id,
       linked_txn_id: l.linked_txn_id,
       linked_line_id: l.linked_line_id,
+      is_closed: !!l.is_closed,
     }));
 }
 

@@ -3,9 +3,9 @@
 
 import { useDebouncedValue } from '@mantine/hooks';
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useMemo } from 'react';
-import { LINK_TARGETS, isOrderType, orderProgress, type OrderProgress, type OrderType } from '~/lib/orders';
-import type { ApiClient, TxnQuery } from './client';
+import { useCallback, useMemo } from 'react';
+import { isOrderType, orderKind, progressFromFulfilment, type OrderProgress, type OrderType } from '~/lib/orders';
+import type { TxnQuery } from './client';
 import { useApi, useCompanyId } from './context';
 import { invalidateTxnDerived, qk, sk } from './keys';
 import type {
@@ -30,6 +30,7 @@ import type {
   SavedKind,
   StartReconcile,
   Txn,
+  TxnSummary,
   TxnType,
   TxnWithPostings,
 } from './types';
@@ -326,36 +327,34 @@ export function useReport(req: ReportRequest | null) {
   });
 }
 
-/**
- * The documents drawing on an order (invoices on a sales order or estimate;
- * item receipts and bills on a purchase order), whole. There is no
- * `linked_to` filter on `GET /txns` (plans/web-ui.md, "For the server"), so
- * this lists the name's candidate kinds and reads each transaction to find the
- * lines whose `linked_txn_id` is the order. Under `txnsAll`, so any
- * transaction change refreshes it.
- */
-export function useLinkedDocs(order: Txn | null) {
+/** `GET /txns/:id/fulfilment`: the server's figures for a saved order, line by line. */
+export function useFulfilment(orderId: string | null) {
   const api = useApi();
   const co = useCompanyId();
-  const types = order && isOrderType(order.txn_type) ? LINK_TARGETS[order.txn_type] : undefined;
   return useQuery({
-    queryKey: [...qk.txnsAll(co), 'linked', order?.id ?? '', order?.entity_id ?? ''],
-    queryFn: () => linkedDocs(api, co, order!, types!),
-    enabled: !!order && !!types && !!order.entity_id,
+    queryKey: qk.fulfilment(co, orderId ?? ''),
+    queryFn: () => api.fulfilment(co, orderId!),
+    enabled: !!orderId,
     staleTime: 30_000,
   });
 }
 
-async function linkedDocs(api: ApiClient, co: CompanyId, order: Txn, types: readonly TxnType[]): Promise<Txn[]> {
-  const summaries = await api.txns(co, { types: [...types], entity_id: order.entity_id!, include_jobs: true, include_void: false, from: order.date, limit: 500 });
-  const whole = await Promise.all(summaries.map((s) => api.txn(co, s.id)));
-  return whole.map((w) => w.txn).filter((t) => t.lines.some((l) => l.linked_txn_id === order.id));
+/**
+ * The documents with a line linked to a transaction (`GET /txns?linked_to=`):
+ * receipts and bills on a purchase order, invoices on a sales order or
+ * estimate, the bill entered for an item receipt. Under `txnsAll`, so any
+ * transaction change refreshes it.
+ */
+export function useLinkedDocs(txnId: string | null) {
+  return useTxns({ linked_to: txnId, include_void: false }, !!txnId);
 }
 
-/** What has been drawn on a saved order, derived from the documents linked to it; null until they load. */
+/** What has been drawn on a saved order, from the server's fulfilment and the documents linked to it; null until the figures load. */
 export function useOrderProgress(order: Txn | null): OrderProgress | null {
-  const linked = useLinkedDocs(order);
-  return useMemo(() => (order && linked.data ? orderProgress(order, linked.data) : null), [order, linked.data]);
+  const id = order && isOrderType(order.txn_type) && order.edit_seq > 0 ? order.id : null;
+  const f = useFulfilment(id);
+  const linked = useLinkedDocs(id);
+  return useMemo(() => (order && f.data ? progressFromFulfilment(order, f.data, linked.data ?? []) : null), [order, f.data, linked.data]);
 }
 
 export interface OpenOrder {
@@ -364,26 +363,60 @@ export interface OpenOrder {
 }
 
 /**
- * A name's open orders of a kind, with their progress (Select PO on a receipt
- * or bill; the sales orders an invoice may draw on): the orders and every
- * document that could draw on them, read whole, then those not yet closed.
+ * A name's (and its jobs') open orders of a kind (`GET /open?kind=`): Select
+ * PO on a receipt or bill, the sales orders an invoice may draw on. Each
+ * summary's `open_balance` is what remains on the order.
  */
 export function useOpenOrders(type: OrderType, entityId: string | null, enabled = true) {
   const api = useApi();
   const co = useCompanyId();
+  const kind = orderKind(type);
   return useQuery({
-    queryKey: [...qk.txnsAll(co), 'open-orders', type, entityId ?? ''],
-    queryFn: async (): Promise<OpenOrder[]> => {
-      const [orders, docs] = await Promise.all([
-        api.txns(co, { types: [type], entity_id: entityId!, include_jobs: true, include_void: false, limit: 200 }),
-        api.txns(co, { types: [...(LINK_TARGETS[type] ?? [])], entity_id: entityId!, include_jobs: true, include_void: false, limit: 500 }),
+    queryKey: qk.open(co, entityId ?? '', kind),
+    queryFn: () => api.openOrders(co, kind, entityId!),
+    enabled: enabled && !!entityId,
+    staleTime: 10_000,
+  });
+}
+
+/**
+ * An order whole with its fulfilment, for drawing on it once picked (the
+ * remaining lines of a Select PO pick, the sales order an invoice is made
+ * from). Fresh from the server, through the query cache.
+ */
+export function useLoadOrder() {
+  const api = useApi();
+  const co = useCompanyId();
+  const qc = useQueryClient();
+  return useCallback(
+    async (id: string): Promise<OpenOrder> => {
+      const [t, f] = await Promise.all([
+        qc.fetchQuery({ queryKey: qk.txn(co, id), queryFn: () => api.txn(co, id), staleTime: 0 }),
+        qc.fetchQuery({ queryKey: qk.fulfilment(co, id), queryFn: () => api.fulfilment(co, id), staleTime: 0 }),
       ]);
-      const [ordersWhole, docsWhole] = await Promise.all([Promise.all(orders.map((s) => api.txn(co, s.id))), Promise.all(docs.map((s) => api.txn(co, s.id)))]);
-      const candidates = docsWhole.map((w) => w.txn);
-      return ordersWhole.map((w) => ({ order: w.txn, progress: orderProgress(w.txn, candidates) })).filter((o) => !o.progress.closed);
+      return { order: t.txn, progress: progressFromFulfilment(t.txn, f) };
+    },
+    [api, co, qc],
+  );
+}
+
+/**
+ * A vendor's item receipts no bill has been entered for yet (Enter Bill for
+ * Received Items): its receipts, less those a non-void bill links to. Under
+ * `txnsAll`, so a saved bill takes its receipt off the list.
+ */
+export function useUnbilledReceipts(entityId: string | null, enabled = true) {
+  const api = useApi();
+  const co = useCompanyId();
+  return useQuery({
+    queryKey: [...qk.txnsAll(co), 'unbilled-receipts', entityId ?? ''],
+    queryFn: async (): Promise<TxnSummary[]> => {
+      const receipts = await api.txns(co, { types: ['ItemReceipt'], entity_id: entityId!, include_jobs: true, include_void: false, limit: 200 });
+      const billed = await Promise.all(receipts.map((r) => api.txns(co, { types: ['Bill'], linked_to: r.id, include_void: false, limit: 1 })));
+      return receipts.filter((_, i) => billed[i]!.length === 0);
     },
     enabled: enabled && !!entityId,
-    staleTime: 30_000,
+    staleTime: 10_000,
   });
 }
 

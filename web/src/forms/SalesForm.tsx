@@ -6,8 +6,10 @@
 
 import { Alert, Button, Checkbox, Collapse, Group, Select, Table, Text, TextInput, Textarea } from '@mantine/core';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useAccountIndex, useCompanyInfo, useEntityIndex, useIndex, useItemIndex, useItems, useNextNumber, useOpenOrders, usePaymentMethods, useSalesReps, useSalesTaxCodes, useTerms, useTxnPreview, useTxns } from '~/api/hooks';
-import type { Address, SalesTaxCode, SaveOutcome, Txn } from '~/api/types';
+import { useAccountIndex, useCompanyInfo, useEntityIndex, useIndex, useItemIndex, useItems, useLoadOrder, useNextNumber, useOpenOrders, usePaymentMethods, useSalesReps, useSalesTaxCodes, useTerms, useTxnPreview, useTxns } from '~/api/hooks';
+import { describeError } from '~/api/errors';
+import { notifications } from '@mantine/notifications';
+import type { Address, SalesTaxCode, SaveOutcome, Txn, TxnType } from '~/api/types';
 import { warningText } from '~/api/types';
 import { DateField } from '~/inputs/DateField';
 import { LineGrid, type GridColumn } from '~/inputs/LineGrid';
@@ -102,9 +104,10 @@ export function SalesForm({ type, saved, initial }: { type: SalesType; saved: Tx
   const firstField = useRef<HTMLInputElement>(null);
   const open = useOpenWindow();
   const [showPostings, setShowPostings] = useState(false);
-  /** The order being drawn on: Create Invoice on a saved order, or a sales order picked for a new invoice. */
-  const [drawing, setDrawing] = useState<{ order: Txn; progress: OrderProgress } | null>(null);
+  /** The order being drawn on: Create Invoice / Create Sales Order on a saved order, or a sales order picked for a new invoice. */
+  const [drawing, setDrawing] = useState<{ order: Txn; progress: OrderProgress; target: TxnType } | null>(null);
   const [pickOrder, setPickOrder] = useState(false);
+  const loadOrder = useLoadOrder();
 
   const taxItems = useMemo(() => itemList.filter((i) => (i.item_type === 'SalesTax' || i.item_type === 'SalesTaxGroup') && i.is_active), [itemList]);
   const defaults = useMemo<SalesDefaults>(
@@ -332,8 +335,31 @@ export function SalesForm({ type, saved, initial }: { type: SalesType; saved: Tx
         ),
       });
     }
+    if (t === 'SalesOrder') {
+      // QBD's "Clsd": the line is closed by hand, nothing more to invoice on it (`TxnLine.is_closed`).
+      cols.push({
+        key: 'closed',
+        header: 'Clsd',
+        width: 48,
+        align: 'center',
+        mobile: 'half',
+        render: (c) => (
+          <Checkbox
+            size="xs"
+            label={c.variant === 'default' ? 'Closed' : undefined}
+            styles={{ root: { display: 'flex', justifyContent: 'center' } }}
+            checked={c.row.is_closed}
+            onChange={(e) => {
+              const is_closed = e.currentTarget.checked;
+              c.update((r) => ({ ...r, is_closed }));
+            }}
+            {...c.cellProps}
+          />
+        ),
+      });
+    }
     return cols;
-  }, [items, codeList, defaults.taxCodeId, useClasses, salesTax, totals.subtotal]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [items, codeList, defaults.taxCodeId, useClasses, salesTax, totals.subtotal, t]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const onEnterSave = useCallback(() => void form.save('close'), []); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -347,7 +373,7 @@ export function SalesForm({ type, saved, initial }: { type: SalesType; saved: Tx
   /** A drawn document: from a saved order it opens in its own window; on a new invoice it fills this form. */
   const onDrawn = (doc: Txn) => {
     setDrawing(null);
-    if (saved) open(paths.form('invoice', stashTxn(doc)));
+    if (saved) open(paths.form(doc.txn_type === 'SalesOrder' ? 'sales-order' : 'invoice', stashTxn(doc)));
     else form.reset(salesDraftFromTxn(doc));
   };
 
@@ -607,13 +633,13 @@ export function SalesForm({ type, saved, initial }: { type: SalesType; saved: Tx
         minVisibleRows={5}
       />
       {totalsBox}
-      {saved && isOrderType(saved.txn_type) && <OrderProgressPanel order={saved} dirty={form.dirty} onDraw={(_target, progress) => setDrawing({ order: saved, progress })} />}
+      {saved && isOrderType(saved.txn_type) && <OrderProgressPanel order={saved} dirty={form.dirty} onDraw={(target, progress) => setDrawing({ order: saved, progress, target })} />}
       <Collapse expanded={showPostings}>
         <PostingsPanel postings={preview.data?.postings ?? []} accounts={accounts} error={preview.error ? String((preview.error as Error).message) : null} />
       </Collapse>
       <TxnFormActions form={form} hideVoid={nonPosting} />
       {form.chrome}
-      <CreateFromOrderModal order={drawing?.order ?? null} progress={drawing?.progress ?? null} target="Invoice" onClose={() => setDrawing(null)} onCreate={onDrawn} />
+      <CreateFromOrderModal order={drawing?.order ?? null} progress={drawing?.progress ?? null} target={drawing?.target ?? 'Invoice'} onClose={() => setDrawing(null)} onCreate={onDrawn} />
       <OrderPickerModal
         opened={pickOrder}
         type="SalesOrder"
@@ -622,7 +648,10 @@ export function SalesForm({ type, saved, initial }: { type: SalesType; saved: Tx
         onClose={() => setPickOrder(false)}
         onPick={([picked]) => {
           setPickOrder(false);
-          if (picked) setDrawing(picked);
+          if (!picked) return;
+          loadOrder(picked.id)
+            .then((o) => setDrawing({ ...o, target: 'Invoice' }))
+            .catch((e: unknown) => notifications.show({ message: describeError(e), color: 'red' }));
         }}
       />
     </div>

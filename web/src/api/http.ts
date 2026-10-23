@@ -8,7 +8,7 @@
 //   instead; pass it as `token`.
 // - Non-2xx answers become a typed `ApiError` from the error envelope.
 
-import { type ApiClient, type EventHandlers, type EventSubscription, type ExportPaper, type FileDownload, type TxnQuery, txnQueryParams } from './client';
+import { type ApiClient, type EventHandlers, type EventSubscription, type ExportPaper, type FileDownload, type OrderKind, type TxnQuery, txnQueryParams } from './client';
 import { ApiError, apiErrorFromBody } from './errors';
 import { parseApiJson, stringifyApiJson } from './json';
 import type {
@@ -62,6 +62,7 @@ import type {
   FeedQuery,
   FeedRule,
   FeedTxn,
+  Fulfilment,
   IngestReport,
   MatchCandidate,
   SimpleFinClaim,
@@ -316,6 +317,14 @@ export class HttpApiClient implements ApiClient {
     return this.request<TxnSummary[]>('GET', this.co(co, '/open'), {
       query: new URLSearchParams({ entity_id: entityId, kind }),
     });
+  }
+  openOrders(co: CompanyId, kind: OrderKind, entityId?: string | null) {
+    const p = new URLSearchParams({ kind });
+    if (entityId) p.set('entity_id', entityId);
+    return this.request<TxnSummary[]>('GET', this.co(co, '/open'), { query: p });
+  }
+  fulfilment(co: CompanyId, txnId: string) {
+    return this.request<Fulfilment>('GET', this.co(co, `/txns/${encodeURIComponent(txnId)}/fulfilment`));
   }
   undeposited(co: CompanyId) {
     return this.request<TxnSummary[]>('GET', this.co(co, '/undeposited'));
