@@ -226,17 +226,19 @@ Phases are ordered; each ends usable. **Current step is marked ▶.**
   (`54b7fbd`: one-request opening balances, generated company/manifest/
   enrolment types; 246 web tests, 48 Playwright) and the Report Center's
   Export menu with Excel/PDF (`f2c40f9`; 251 web tests, 50 Playwright).
-  ▶ Running: a web agent on the forms not yet built (statement charges, sales
-  orders, progress invoicing from an estimate, receiving against a purchase
-  order; resumed 2026-10-21 00:00 PT after a session limit). Merged order
+  Merged order
   fulfilment (`306c9f5`: `plans/orders.md`; `TxnLine.is_closed`,
   `Txn.is_manually_closed`, link rules, migration 4 `txn_link`,
   `GET /txns/:id/fulfilment`, open orders in `/open`), the import's closed
   marks for orders (`fdfd0e3`) and sales-order import. Merged web phase E
   (statement charges, sales orders, progress invoicing from an estimate,
   receiving against a PO with an order-progress panel; 269 web tests, 55
-  Playwright) — it derives order progress client-side; switching it to the
-  server's fulfilment route is the next web follow-up. Next with the user: point
+  Playwright). Merged web phase F 2026-10-23 (`54b1e19`: orders read the
+  server's fulfilment route and `/open?kind=`, a Clsd column that round-trips
+  `TxnLine.is_closed`, Enter Bill for Received Items, Create Sales Order from
+  an estimate with unlinked lines; 272 web tests, 58 Playwright). One server
+  ask left from it, in `plans/orders.md`: a sales order linked to the estimate
+  it came from. Next with the user: point
   QuickBooks' Web Connector on cad-3 at this server over HTTPS (steps in
   `plans/qbd-import.md`), run a sync, and see whether the 14 bridge gaps close.
 - Phase 1 — Ledger core
@@ -400,9 +402,9 @@ Phases are ordered; each ends usable. **Current step is marked ▶.**
       (migration 4), `orders::fulfilment`, orders' `open_balance` = remaining,
       `GET /txns/:id/fulfilment`, `/open?kind=purchase_orders|sales_orders|
       estimates`, `GET /txns?linked_to=`. The QBD import maps the closed and
-      received marks and the SalesOrder entity (`3f79af9`). The web UI's
-      switch to the fulfilment route is the last piece (agent in flight,
-      2026-10-23).
+      received marks and the SalesOrder entity (`3f79af9`); the web UI reads
+      the fulfilment route (`54b1e19`). Left: a sales order's link back to
+      its estimate (`plans/orders.md`, question 1).
 - [x] Phase 9: native QBW research (`plans/qbw-research.md`); five questions for
       the user there (legal review, upstream vs independent, a `.QBM` experiment,
       gap-closer priority).

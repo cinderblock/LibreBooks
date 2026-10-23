@@ -77,13 +77,14 @@ Done on the worktree branch; left for the merge and for other threads:
 - Merge the branch; `web/src/api/blank.ts` may then set `is_closed: false` /
   `is_manually_closed: false` explicitly (the fields are optional in TS, so
   nothing breaks without it).
-- Web UI: Receive Items against a PO, Create Invoice from a sales order or
+- [x] Web UI: Receive Items against a PO, Create Invoice from a sales order or
   estimate, the open-order lists and the "Clsd"/"Closed" marks (consumes
-  `Fulfilment`, `/open?kind=…`).
+  `Fulfilment`, `/open?kind=…`). Phase E derived progress client-side; phase F
+  (`54b1e19`, 2026-10-23) reads the server's route and `GET /txns?linked_to=`.
 - [x] Import: QBD's closed marks mapped (an order's `IsManuallyClosed` → the
   stamp, a line's → `is_closed`, a fully received/invoiced line or order →
-  closed lines; an inactive estimate → closed). Sales orders aren't imported
-  at all yet (`ISSUES.md`).
+  closed lines; an inactive estimate → closed). Sales orders are imported
+  too (`QbdEntity::SalesOrder`, `3f79af9`).
 
 ## Findings / gotchas
 
@@ -116,7 +117,19 @@ Done on the worktree branch; left for the merge and for other threads:
 
 ## Open questions for the user
 
-None yet.
+1. **Should a sales order created from an estimate link to it?** QBD's
+   "Create Sales Order" on an estimate copies the lines and records the link
+   (the estimate's history shows the sales order), and the estimate stays open
+   for invoicing. Here `TxnType::link_targets` gives `SalesOrder` no targets
+   (an order is a target, never a source: the `lb-core` invariant test says
+   so), so the web's Create Sales Order copies the lines unlinked and the
+   estimate's progress ignores the sales order. Recommendation: allow
+   `SalesOrder → Estimate` as a history-only link — recorded in `txn_link`,
+   refused for a closed estimate like any link, listed by `linked_to`, but
+   **not** counted in the estimate's fulfilment (an estimate's progress is what
+   was invoiced, as in QBD). That needs a "counts toward fulfilment" flag per
+   link pairing and the invariant test loosened. Low priority; nothing is
+   wrong without it.
 
 ## Things not to do
 
