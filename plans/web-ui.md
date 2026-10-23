@@ -1,4 +1,4 @@
-# LibreBooks web UI (phases A, B, C, D and E)
+# LibreBooks web UI (phases A, B, C, D, E and F)
 
 Living plan for the SPA under `web/`. Master plan: `plans/librebooks.md`
 (decisions 7 and 13). HTTP contract: `plans/api.md`. Auth library:
@@ -48,10 +48,19 @@ new-charge line), Sales Orders (non-posting, invoiced whole or in part),
 progress invoicing from an estimate (100%, a percentage, or per-line amounts)
 and Receive Items / Enter Bills against a purchase order (Select PO, partial
 receipts). Every drawn line carries `linked_txn_id` / `linked_line_id` back to
-the order line it fulfils, and the invoiced / received / remaining figures,
-the closing of an order and the open-order lists are all derived from those
-links on the client (`lib/orders.ts`), because the server keeps nothing else
-(see "For the server", phase E).
+the order line it fulfils. At first the invoiced / received / remaining
+figures, the closing of an order and the open-order lists were derived from
+those links on the client, because the server kept nothing else.
+
+Phase F (2026-10-21) moved the order features onto the server's order
+fulfilment (`plans/orders.md`): `GET /txns/:id/fulfilment` gives the figures,
+`GET /open?kind=purchase_orders|sales_orders|estimates` the open orders,
+`GET /txns?linked_to=` the documents drawing on one, `Txn.is_manually_closed`
+and `TxnLine.is_closed` are the real close marks (QBD's "Closed" stamp and
+"Clsd" column), and the server refuses a link to a closed line or order. The
+fixture mirrors all of it (`fixtures/orders.ts`). The phase E leftovers landed
+with it: Enter Bill for Received Items (Select receipt on the Bill form) and
+Create Sales Order from an estimate.
 
 User requirements this meets: mobile first class from day one; QuickBooks-quality
 input (QBD keyboard shortcuts, QuickFill, date keys, the amount calculator);
@@ -66,8 +75,9 @@ Ctrl+W/T/N/Tab can't be captured).
   session), phase C on `worktree-agent-a9571472f4dda8acb`, its import
   follow-up on `worktree-agent-ab9ab2d43381969c5`, phase D on
   `worktree-agent-ab9aa5ed8179d8f95`, the report export follow-up on
-  `worktree-agent-a3a9fec5729e41528`, and phase E on
-  `worktree-agent-a19a3c5986ee129af`. The parent merges `master` in; the
+  `worktree-agent-a3a9fec5729e41528`, phase E on
+  `worktree-agent-a19a3c5986ee129af`, and phase F on
+  `worktree-agent-adcfa6cee1449001f`. The parent merges `master` in; the
   worktree never does.
 - Vite 8, React 19 (StrictMode), Mantine 9.7 (has `Menubar`), React Router 8.5
   (v7-style API from `react-router`), TanStack Query 5, TanStack Virtual 3,
@@ -78,10 +88,10 @@ Ctrl+W/T/N/Tab can't be captured).
   1 slot for check/tests, 2 for `vite build` and for Playwright's 2 workers):
   - `bun run dev` → http://localhost:5740. Add `?fixtures=1` (or
     `?fixtures=stress`, `&latency=0`, `&keymap=desktop|browser`).
-  - `bun run check` = `tsc --noEmit && bun test src/` (269 unit tests, 25 files).
+  - `bun run check` = `tsc --noEmit && bun test src/` (272 unit tests, 25 files).
   - `bun run test:e2e` (Playwright; starts the dev server with `VITE_FIXTURES=1`;
-    one-time `bunx playwright install chromium`). 55 smoke tests: 38 desktop
-    (1366×860) and 17 at 375px; the suite takes ~2.5 min.
+    one-time `bunx playwright install chromium`). 58 smoke tests: 41 desktop
+    (1366×860) and 17 at 375px; the suite takes ~3 min.
   - `bun run build`.
 - Generated API types live in `web/src/api/generated/` (ts-rs). Never edit them.
 - Windows: the Write tool produces LF; before a commit, normalise changed files
@@ -134,17 +144,32 @@ Ctrl+W/T/N/Tab can't be captured).
   (`POST /companies/import`) is always a NEW company, like a restore; the
   picker refetches the session and opens it. In fixture mode such companies
   share the demo books and differ only in their information.
-- **Orders are derived, never stored** (phase E). What has been invoiced
-  from a sales order or estimate, or received against a purchase order, is
-  read back from the lines of the documents that link to it
-  (`TxnLine.linked_txn_id` / `linked_line_id`); remaining = ordered − Σ linked,
-  per line, in exact decimals (`lib/orders.ts`). An order is closed when every
-  line is fully drawn (sales and purchase orders by quantity, estimates by
-  amount) or when closed by hand, which is kept in `Txn.extra` under QBD's own
-  tag `IsManuallyClosed` (the server stores `extra` verbatim; an import that
-  carried the tag would land in the same place). Nothing else is invented on
-  the client: the UI reads no `open_balance` for an order, so it works the
-  same against the real server as against the fixture.
+- **An order's figures are the server's** (phase F; phase E derived them on
+  the client while the server kept nothing). What has been invoiced from a
+  sales order or estimate, or received against a purchase order, is
+  `GET /txns/:id/fulfilment` (`Fulfilment`: per line ordered / fulfilled /
+  remaining quantity and amount, `is_closed`; the order's `is_closed` and
+  `remaining_amount`), summed by the store from the lines of saved, non-void
+  documents that link to it (`TxnLine.linked_txn_id` / `linked_line_id`).
+  `lib/orders.ts` only presents it (`progressFromFulfilment`: the figures
+  joined to the order's own lines, in exact decimals for drawing). A manual
+  close is `Txn.is_manually_closed` (whole order, Mark as closed / Reopen) or
+  `TxnLine.is_closed` (QBD's "Clsd" checkbox on purchase- and sales-order
+  lines); the `extra.IsManuallyClosed` workaround is gone. Open orders are
+  `GET /open?kind=` (`open_balance` = what remains), and the documents drawing
+  on one are `GET /txns?linked_to=`. The server refuses (400 `invalid`) a new
+  link to a closed line or order, another name's order, or a form that may not
+  link; the form shows the message.
+- **A sales order made from an estimate copies the lines unlinked.** The
+  server's `TxnType::link_targets` lets only an invoice (and sales receipt)
+  draw on a sales order and only an invoice on an estimate, so the sales
+  order carries no `linked_txn_id`; the estimate's progress is untouched by it
+  (QBD links the two; see "For the server").
+- **Enter Bill for Received Items is a bill whose lines link to the receipt's**
+  (a transaction can't change type). The bill takes the receipt's lines whole
+  (items and expenses) through "Select receipt" on a new bill, which lists the
+  vendor's receipts no non-void bill links to; the server accepts the links
+  and does not count them toward the purchase order (the receipt did).
 - Statement charges are entered in a customer's A/R register (QBD's Enter
   Statement Charges), one item line per charge, no sales tax; a saved charge
   opens in the sales form as a `StatementCharge` for editing, voiding and
@@ -228,8 +253,8 @@ are invalidated without cancelling a long-poll in flight, and a sync's
 | `ClassEditor`, `TermsEditor`, `PaymentMethodEditor`, `SalesTaxCodeEditor` | Subclass of; standard (net days, discount % within days) or date-driven (day of month, cutoff, discount by day) terms; payment type; a ≤3-character code, taxable or not. |
 | `ListWindow` | Items, classes, terms, payment methods, sales tax codes, other names: Find, Include inactive, New / Edit / Delete, Ctrl+N / Ctrl+E (or Enter) / Ctrl+D (the server's `in_use` shown), Ctrl+Q where there's a QuickReport. The Chart of Accounts and the Centers open the same editors (Edit, New, Add job). |
 | `CompanyPicker` | `/` (one company opens by itself) and `/companies` (always the list; the user menu's "Open another company", the phone's More → Companies). Admins: New company (`CompanyInfoFields` → `POST /companies`) and Open a .lbk file (`POST /companies/import`, multipart file + name), each a NEW company opened at once after the session refetches. |
-| `PurchaseForm` | Write Checks, Enter Bills, Vendor Credits, Credit Card Charges/Credits, Item Receipts, Purchase Orders (non-posting, says so): Expenses/Items tabs, terms → due/discount dates, recall of the payee's last transaction. **Receive Items and Enter Bills against a PO** (phase E): a vendor with open purchase orders gets a notice and a **Select PO** button (an `OrderPicker` of the open ones with what remains on each); the chosen orders' remaining lines land on the Items tab linked to their PO lines, quantities editable for a partial receipt. A saved PO shows the `OrderProgress` panel (ordered / received / remaining per line, the receipts and bills drawing on it, Open / Closed, Mark as closed / Reopen, Create Item Receipt / Enter Bill). |
-| `SalesForm` | Invoices, Sales Receipts, Credit Memos, Estimates and **Sales Orders** (both non-posting), **Statement Charges** (a saved charge's editor): item lines with qty × rate, sales tax item and customer tax code, live server-confirmed totals (`PostingsPanel`) on the posting kinds. Phase E: a saved sales order or estimate shows `OrderProgress` (invoiced / remaining per line, the invoices drawing on it, progress to date in percent for an estimate) with **Create Invoice** → `CreateFromOrder`; a new invoice for a customer with open sales orders offers **Invoice from a sales order…**; an invoice made from an order says "From Sales Order N" with a link to it, and its lines carry `linked_txn_id` / `linked_line_id`. |
+| `PurchaseForm` | Write Checks, Enter Bills, Vendor Credits, Credit Card Charges/Credits, Item Receipts, Purchase Orders (non-posting, says so): Expenses/Items tabs, terms → due/discount dates, recall of the payee's last transaction. **Receive Items and Enter Bills against a PO** (phase E): a vendor with open purchase orders gets a notice and a **Select PO** button (an `OrderPicker` of `GET /open?kind=purchase_orders`, what remains on each); the chosen orders are loaded with their fulfilment and their remaining lines land on the Items tab linked to their PO lines, quantities editable for a partial receipt. **Enter Bill for Received Items** (phase F): a new bill for a vendor with unbilled item receipts gets a notice and **Select receipt**; the receipts' lines come in whole, linked to the receipt lines. A purchase order's line grid has QBD's **Clsd** checkbox (`TxnLine.is_closed`). A saved PO shows the `OrderProgress` panel (the server's fulfilment: ordered / received / remaining and Clsd per line, the receipts and bills drawing on it, Open / Closed, Mark as closed / Reopen, Create Item Receipt / Enter Bill). |
+| `SalesForm` | Invoices, Sales Receipts, Credit Memos, Estimates and **Sales Orders** (both non-posting), **Statement Charges** (a saved charge's editor): item lines with qty × rate, sales tax item and customer tax code, live server-confirmed totals (`PostingsPanel`) on the posting kinds. Phase E: a saved sales order or estimate shows `OrderProgress` (invoiced / remaining and Clsd per line, the invoices drawing on it, progress to date in percent for an estimate) with **Create Invoice** → `CreateFromOrder` (a closed line is shown but takes nothing); an estimate also offers **Create Sales Order** (phase F; the lines copied, unlinked); a new invoice for a customer with open sales orders offers **Invoice from a sales order…**; an invoice made from an order says "From Sales Order N" with a link to it, and its lines carry `linked_txn_id` / `linked_line_id`. A sales order's line grid has QBD's **Clsd** checkbox. |
 | `CreateFromOrder` | The dialog behind Create Invoice / Create Item Receipt / Enter Bill on an order. Sales and purchase orders: everything that remains, or selected items and quantities (Ordered, Invoiced or Received, Remaining, To invoice / To receive per line). Estimates, QBD's three: the entire estimate (100%), a percentage of the whole, or selected items with an amount or a percent per line (Est Amt, Prior Amt, Prior %, Amount, Curr %), the total and its percent of the estimate at the foot. Makes a new unsaved document (`forms/linked.ts: documentFromOrder`) and hands it to the form. |
 | `OrderProgress` | Under a saved order: status (Open, Closed: fully invoiced / received, Closed by hand), per-line Ordered / Invoiced or Received / Remaining (amounts and percent for an estimate), the linked documents with a way into each, Mark as closed / Reopen (sales and purchase orders; `IsManuallyClosed` in `extra`), and the Create… button. Disabled while the form has unsaved edits (save first). |
 | `OrderPicker` | A name's open orders of a kind (Select PO; Available Sales Orders): number, date, memo, amount and what remains; pick one or several. |
@@ -419,18 +444,22 @@ change events, and:
   and removes the duplicate.
 - The closing date refuses with 423 `closed_period` and `detail.closing_date`,
   as the server does.
-- **Orders** (phase E): the seed has an open sales order (SO-1001 for Acme
-  Corp:Conference Table), a purchase order (PO-2041 to Hardwood Supply Co) of
-  which 50 of 80 walnut came in on an item receipt whose lines link back to
-  the order's, and a statement charge for Nguyen, David; `sales_orders_enabled`
-  and `progress_invoicing` are on. `TxnSummary.open_balance` for a sales
-  order, purchase order or estimate is what no linked document has drawn yet
-  (`lib/orders.ts: orderOpenAmount`), 0 once fully drawn or closed by hand
-  (`extra.IsManuallyClosed`), so `open_only` honours closed orders: the
-  behaviour the UI would want from the server, which keeps `open_balance`
-  NULL for non-posting types (the UI derives the same figures itself and reads
-  no `open_balance` for orders). Deleting an order something draws on is
-  `in_use`. Orders post nothing whatever is drawn from them.
+- **Orders** (phases E and F): the seed has an open sales order (SO-1001 for
+  Acme Corp:Conference Table), a purchase order (PO-2041 to Hardwood Supply
+  Co) of which 50 of 80 walnut came in on an item receipt (HW-RCV-7, not yet
+  billed) whose lines link back to the order's, and a statement charge for
+  Nguyen, David; `sales_orders_enabled` and `progress_invoicing` are on.
+  `fixtures/orders.ts` mirrors the server's `orders.rs` line for line:
+  `GET /txns/:id/fulfilment` (`computeFulfilment`: fulfillable lines only,
+  quantities not capped, an estimate by amount, a closed line or stamped order
+  leaves nothing remaining, prorating at the order's own rate, half away from
+  zero), an order's `open_balance` = its remaining amount (0 when closed, so
+  `open_only` and `/open?kind=` list open orders), `?linked_to=` on
+  `GET /txns`, and `checkLinks` on every save with the server's refusals and
+  messages as 400 `invalid` (wrong form, missing or void target, another
+  name's, no such line, a different item, a closed line or order; an edit
+  keeps the links it already had). Deleting an order or receipt something
+  draws on is `in_use`. Orders post nothing whatever is drawn from them.
 - **Companies** (phase D): `POST /companies` (name required, month 1–12) and
   `POST /companies/import` (any non-empty file passes; the name comes from
   the request, else the file name; the manifest carries the file's size and
@@ -775,6 +804,52 @@ left" item 3 bar payroll):
       order). `bun run check` green (269 tests); Playwright 55/55.
 - [x] This document.
 
+Phase F (commits on `worktree-agent-adcfa6cee1449001f`, 2026-10-21; the
+order features onto the server's fulfilment API, and the phase E leftovers):
+
+Plan: (1) `ApiClient.fulfilment` / `openOrders` / `txns({ linked_to })`,
+the fixture mirroring `orders.rs` (`fixtures/orders.ts`: the same
+`Fulfilment`, the same link refusals as 400 `invalid`), `useOrderProgress`
+on the fulfilment route, `useOpenOrders` on `/open?kind=`, `lib/orders.ts`
+down to presentation; (2) `Txn.is_manually_closed` and `TxnLine.is_closed`
+(the Clsd column on PO/SO grids) in place of `extra.IsManuallyClosed`;
+(3) Enter Bill for Received Items (Select receipt on the Bill form) and
+Create Sales Order from an estimate; (4) tests and this document.
+
+- [x] API layer: `Fulfilment` / `LineFulfilment` exported from `api/types`;
+      `ApiClient.fulfilment` and `openOrders(co, kind, entityId?)`;
+      `TxnQuery.linked_to` (the generated `TxnFilter` carries it since
+      master's `ce26b92`, merged into this branch); `qk.fulfilment` under
+      `fulfilmentAll`, which every transaction change invalidates (the event
+      names only the changed id, not the order it draws on; the queries are
+      few and only active ones refetch). Hooks: `useFulfilment`,
+      `useLinkedDocs` (`linked_to`), `useOrderProgress` (both, presented),
+      `useOpenOrders` (`/open?kind=`, summaries), `useLoadOrder` (an order
+      whole with its fulfilment, for a pick), `useUnbilledReceipts`.
+- [x] Fixture: `fixtures/orders.ts` (above); `blank.ts` sets `is_closed` /
+      `is_manually_closed` false.
+- [x] `lib/orders.ts` down to presentation (`progressFromFulfilment`,
+      `LINK_TARGETS` as the Create buttons, `orderKind`); `forms/linked.ts`
+      skips closed lines and draws unlinked for a sales order from an
+      estimate; the panel saves `is_manually_closed` and shows Clsd per line;
+      the dialog shows "Closed" instead of a field; the picker lists
+      summaries (`open_balance` as Remaining) and the forms load a pick
+      through `useLoadOrder`; the Clsd checkbox column on PO and SO grids
+      (`ItemRow.is_closed` / `SaleRow.is_closed` round-trip).
+- [x] Enter Bill for Received Items (Select receipt, `ReceiptPickerModal`,
+      `linesFromReceipt` / `billFromReceipts`); Create Sales Order on an
+      estimate (opens a prefilled sales-order window).
+- [x] Tests: unit (the presentation from a server `Fulfilment`; drawing on
+      closed lines, the unlinked sales order, the bill from a receipt; the
+      fixture's fulfilment shape, `linked_to`, `/open?kind=`, every refusal);
+      Playwright: the three phase E scenarios unchanged and green on the
+      fixture's server-shaped fulfilment, plus Clsd (a line closed by hand,
+      the dialog skipping it, an invoice drafted against it refused with the
+      server's message), a bill for received items (the PO not counting it
+      twice, the receipt off the list), a sales order from an estimate.
+      `bun run check` green (272 tests); Playwright 58/58.
+- [x] This document.
+
 ## What's left (next phases)
 
 1. **Stand-ins without a generated twin** (see Findings) stay until the server
@@ -786,13 +861,12 @@ left" item 3 bar payroll):
    QBD's "Add/Edit Multiple List Entries" grid; a price level list (the API
    has a percent per customer, no list).
 3. **Forms not built**: Pay Employees (payroll; out of scope for now).
-   Statement Charges, Sales Orders, progress invoicing and Receive Items
-   against a PO landed in phase E; left from that family: Enter Bill for
-   Received Items (a bill drawing on an item receipt, QBD's `linked` receipt
-   lines), a sales order made from an estimate, per-line manual close
-   (QBD's "Clsd" column; only the whole order closes here), and the
-   Open Sales Orders / Open Purchase Orders reports (the fixture's `open_only`
-   lists them; the server's would need the open amount below).
+   Statement Charges, Sales Orders, progress invoicing, Receive Items and
+   Enter Bills against a PO (phase E), Enter Bill for Received Items, a sales
+   order from an estimate and the per-line Clsd (phase F) are all in; left
+   from that family: the Open Sales Orders / Open Purchase Orders reports
+   (`GET /txns?types=…&open_only=true` lists them now that an order's
+   `open_balance` is what remains; the report catalog has no entry).
 4. **Reports**: print styles beyond the basics (the browser's print of the
    on-screen grid; Save as PDF now covers paper output); cash basis in the
    fixture engine; the real catalog's per-report params beyond what the
@@ -888,41 +962,33 @@ Found in phase D:
   whether the server refuses such a `parent_id` is unverified (the fixture
   only checks the parent exists).
 
-Found in phase E (orders and what draws on them); none worked around twice,
-all derived on the client from `linked_txn_id` / `linked_line_id`. **A server
-pass is under way in parallel** (2026-10-21) adding order fulfilment on the
-Rust side: `TxnLine.is_closed`, `Txn.is_manually_closed`,
-`GET /txns/:id/fulfilment` and open orders in `GET /open`. When it lands and
-the generated types carry the fields, the switch is small and in one place
-each: `lib/orders.ts` reads `is_manually_closed` instead of
-`extra.IsManuallyClosed` (keep reading the tag for imported books until a
-migration moves it), `useOrderProgress` reads the fulfilment route instead of
-fanning out over the name's documents, `useOpenOrders` reads `/open` with an
-order kind, and `OrderProgress` gains the per-line close QBD's "Clsd" column
-shows. The fixture then mirrors those routes rather than the open-amount
-guess below.
+Found in phase E (orders and what draws on them), closed by the server's
+order fulfilment pass (`plans/orders.md`, merged `306c9f5`) and taken up in
+phase F: `TxnLine.is_closed` and `Txn.is_manually_closed` (the
+`extra.IsManuallyClosed` workaround is gone; the import maps QBD's marks to
+the fields); `GET /txns/:id/fulfilment` with per-line invoiced / received /
+remaining figures and the closed marks; an order's `open_balance` = what
+remains (0 when closed), so `open_only` and `GET /open?kind=purchase_orders|
+sales_orders|estimates` list open orders; links validated on save (target
+exists, right type, same name, same item, not void, not closed; 400
+`invalid`); `GET /txns?linked_to=<txn id>` (server `0d1b8d1`, generated
+`TxnFilter.linked_to` in `ce26b92`, both merged into this branch: the
+documents drawing on an order are one request, `useLinkedDocs`; the fixture
+mirrors the filter).
 
-- **No invoiced / received quantity, no "fully invoiced / received", no
-  "manually closed" on a sales order, purchase order or estimate.** QBD has
-  `IsFullyInvoiced` / `IsFullyReceived`, per-line `Invoiced` / `ReceivedQuantity`
-  and `IsManuallyClosed` (order and line). The UI derives the first two from
-  the linked documents (`lib/orders.ts`) and keeps the manual close in
-  `Txn.extra.IsManuallyClosed` (stored verbatim). Server fields for these,
-  maintained like `open_balance` is for A/R items, would make the figures
-  authoritative and let the store refuse over-drawing a line.
-- **`open_balance` is NULL for non-posting types**, so `GET /txns?open_only`
-  cannot list open orders and `GET /open` knows nothing of them. The UI lists
-  a name's open orders by fetching its orders and the documents that could
-  draw on them, whole. The fixture answers what the server could: an order's
-  `open_balance` = its remaining amount, 0 once closed.
-- **No `linked_to=<txn id>` filter on `GET /txns`** (nor a lines-included
-  summary), so the documents drawing on an order are found by listing the
-  name's candidate types and reading each transaction whole
-  (`useLinkedDocs`). One request would do with a filter.
-- **A line's link is not validated**: the server stores any
-  `linked_txn_id` / `linked_line_id` (only deposit lines are read). The forms
-  send ids they just read; a check that the target exists, belongs to the
-  same name and is of a kind the form may draw on would catch a stale pick.
+Still open from that family:
+
+- **A sales order can't link to the estimate it was made from.**
+  `TxnType::link_targets` gives `SalesOrder` no targets, so Create Sales Order
+  from an estimate copies the lines unlinked and the estimate shows no
+  progress from it. QBD links the two (`LinkedTxn` on the sales order) and
+  counts the sales order's later invoices toward the estimate. A
+  `SalesOrder → Estimate` link in `link_targets` (with fulfilment of an
+  estimate counting a sales order's amount, or the invoices made from it)
+  would let the UI link them and show "From Estimate N" on the sales order.
+- **`GET /open` requires `entity_id`.** An Open Purchase Orders / Open Sales
+  Orders report (every name) would list with `GET /txns?types=&open_only=true`
+  instead; fine, noted so nobody reaches for `/open` without a name.
 
 ## Open questions for the user
 
@@ -960,9 +1026,15 @@ guess below.
   fixture mirrors that, nobody else computes it.
 - Don't press Escape in a Playwright test expecting the window to stay open
   unless a dropdown is open (then Esc is the dropdown's).
-- Don't read `open_balance`, or invent an `is_closed`, for a sales order,
-  purchase order or estimate in the UI: derive it from the linked documents
-  (`lib/orders.ts`), the one place that knows, so the UI behaves the same
-  against the server (where `open_balance` is NULL for them) and the fixture.
+- Don't derive an order's invoiced / received / remaining figures, or whether
+  it is closed, on the client: read `GET /txns/:id/fulfilment` (the fixture
+  answers the same shape) and present it (`lib/orders.ts`). The one client
+  computation is the fixture's mirror of the server (`fixtures/orders.ts`),
+  which nothing in the UI imports.
+- Don't keep a manual close in `Txn.extra.IsManuallyClosed`: the fields are
+  `Txn.is_manually_closed` and `TxnLine.is_closed`.
 - Don't link a drawn line by `linked_txn_id` alone: the quantity roll-up is
-  per order line (`linked_line_id`); a line without it counts for nothing.
+  per order line (`linked_line_id`); the server attaches a line-less link to
+  the first line with the same item, which is right only for an import.
+- Don't link a sales order's lines to the estimate it was made from: the
+  server refuses (`link_targets`); copy them unlinked (`linksTo`).
