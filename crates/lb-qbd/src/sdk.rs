@@ -13,12 +13,19 @@
 //! **What QuickBooks asks the user.** The first time an application connects,
 //! QuickBooks (running, with the company open) shows its *Application with no
 //! certificate is requesting access* dialog naming the application
-//! (`app_name`, "LibreBooks"); the user picks *Yes, always* (and leaves
-//! *Allow this application to access personal data* unticked: the import never
-//! reads SSNs or the like). The choice is kept under *Edit › Preferences ›
-//! Integrated Applications*, where it can be revoked. The SDK has no
-//! read-only request at this level; LibreBooks' guarantee is that the documents
-//! it sends are queries only ([`crate::qbxml::request::check_read_only`]). A
+//! (`app_name`, "LibreBooks"); the user picks *Yes, always*. The choice is kept
+//! under *Edit › Preferences › Integrated Applications*, where it can be
+//! revoked.
+//!
+//! **Read-only, twice over.** Before the session opens, LibreBooks sets the
+//! request processor's `AuthPreferences`: `PutIsReadOnly(true)`, so the dialog
+//! offers read-only access and QuickBooks itself refuses any write, and
+//! `PutPersonalDataPref(pdpNotNeeded)`, since the import never reads SSNs or
+//! the like. Once the session is open, `WasAuthPreferencesObeyed` must say
+//! QuickBooks honoured them (it doesn't when the application was already
+//! authorised with more access); if not, the session is closed and nothing is
+//! sent. Independently, every document LibreBooks sends is a query
+//! ([`crate::qbxml::request::check_read_only`]). A
 //! headless service with no desktop can't answer the dialog: authorise once from
 //! an interactive session (the desktop app, or `librebooks import qbd
 //! --transport sdk` in a terminal) and the service inherits the approval for
@@ -188,13 +195,15 @@ mod com {
     use std::mem::ManuallyDrop;
     use std::sync::mpsc;
 
-    use windows::Win32::Foundation::DISP_E_EXCEPTION;
+    use windows::Win32::Foundation::{DISP_E_EXCEPTION, VARIANT_FALSE, VARIANT_TRUE};
     use windows::Win32::System::Com::{
         CLSCTX_ALL, CLSIDFromProgID, COINIT_APARTMENTTHREADED, CoCreateInstance, CoInitializeEx,
-        CoUninitialize, DISPATCH_METHOD, DISPPARAMS, EXCEPINFO, IDispatch,
+        CoUninitialize, DISPATCH_FLAGS, DISPATCH_METHOD, DISPATCH_PROPERTYGET, DISPPARAMS,
+        EXCEPINFO, IDispatch,
     };
     use windows::Win32::System::Variant::{
-        VARIANT, VARIANT_0, VARIANT_0_0, VARIANT_0_0_0, VT_BSTR, VT_I4, VariantClear,
+        VARIANT, VARIANT_0, VARIANT_0_0, VARIANT_0_0_0, VT_BOOL, VT_BSTR, VT_DISPATCH, VT_I4,
+        VariantClear,
     };
     use windows::core::{BSTR, GUID, PCWSTR, w};
 
@@ -205,6 +214,17 @@ mod com {
     const LOCALE_USER_DEFAULT: u32 = 0x0400;
     /// `QBXMLRPConnectionType.localQBD`.
     const LOCAL_QBD: i32 = 1;
+    /// `QBXMLRPPersonalDataPrefType.pdpNotNeeded` (`pdpRequired` is 1,
+    /// `pdpOptional` 2), from the type library in `QBXMLRP2.dll`.
+    const PDP_NOT_NEEDED: i32 = 3;
+
+    /// `IAuthPreferences` members, by the DISPIDs its type library declares
+    /// (a dual interface, so they're fixed). Called by id rather than by name:
+    /// name lookup on the preferences object answered `DISP_E_UNKNOWNNAME` to
+    /// PowerShell's late binding on a real install.
+    const WAS_AUTH_PREFERENCES_OBEYED: i32 = 0x1;
+    const PUT_IS_READ_ONLY: i32 = 0x3;
+    const PUT_PERSONAL_DATA_PREF: i32 = 0x7;
 
     fn file_mode(m: FileMode) -> i32 {
         // QBFileMode: qbFileOpenSingleUser = 0, qbFileOpenMultiUser = 1,
@@ -230,6 +250,22 @@ mod com {
                         wReserved3: 0,
                         Anonymous: VARIANT_0_0_0 {
                             bstrVal: ManuallyDrop::new(BSTR::from(s)),
+                        },
+                    }),
+                },
+            }
+        }
+
+        fn boolean(b: bool) -> VARIANT {
+            VARIANT {
+                Anonymous: VARIANT_0 {
+                    Anonymous: ManuallyDrop::new(VARIANT_0_0 {
+                        vt: VT_BOOL,
+                        wReserved1: 0,
+                        wReserved2: 0,
+                        wReserved3: 0,
+                        Anonymous: VARIANT_0_0_0 {
+                            boolVal: if b { VARIANT_TRUE } else { VARIANT_FALSE },
                         },
                     }),
                 },
@@ -281,6 +317,82 @@ mod com {
         }
     }
 
+    /// The boolean a method returned (`false` for non-boolean results), freeing
+    /// the VARIANT.
+    fn take_bool(mut v: VARIANT) -> bool {
+        // SAFETY: as in `take_string`; the discriminant says which field is live.
+        unsafe {
+            let inner = &*v.Anonymous.Anonymous;
+            let b = inner.vt == VT_BOOL && inner.Anonymous.boolVal != VARIANT_FALSE;
+            let _ = VariantClear(&raw mut v);
+            b
+        }
+    }
+
+    /// The object a property returned, freeing the VARIANT.
+    fn take_dispatch(mut v: VARIANT) -> Option<IDispatch> {
+        // SAFETY: as in `take_string`; the clone is an AddRef'd reference that
+        // outlives the VariantClear releasing the VARIANT's own.
+        unsafe {
+            let inner = &*v.Anonymous.Anonymous;
+            let d = if inner.vt == VT_DISPATCH {
+                (*inner.Anonymous.pdispVal).clone()
+            } else {
+                None
+            };
+            let _ = VariantClear(&raw mut v);
+            d
+        }
+    }
+
+    /// `IDispatch::Invoke` of member `dispid` (`what` names it in errors) with
+    /// `args` (in call order), as `flags` says (method or property get).
+    fn invoke(
+        disp: &IDispatch,
+        what: &str,
+        dispid: i32,
+        flags: DISPATCH_FLAGS,
+        args: Vec<VARIANT>,
+    ) -> Result<VARIANT, String> {
+        // IDispatch takes arguments in reverse order; `Args` frees them.
+        let mut args = Args(args.into_iter().rev().collect());
+        let params = DISPPARAMS {
+            rgvarg: args.0.as_mut_ptr(),
+            rgdispidNamedArgs: std::ptr::null_mut(),
+            cArgs: args.0.len() as u32,
+            cNamedArgs: 0,
+        };
+        let mut result = VARIANT::default();
+        let mut excep = EXCEPINFO::default();
+        // SAFETY: `params` points at `args.0`, which outlives the call and is
+        // freed exactly once when `args` drops.
+        let outcome = unsafe {
+            disp.Invoke(
+                dispid,
+                &GUID::zeroed(),
+                LOCALE_USER_DEFAULT,
+                flags,
+                &raw const params,
+                Some(&raw mut result),
+                Some(&raw mut excep),
+                None,
+            )
+        };
+        match outcome {
+            Ok(()) => Ok(result),
+            Err(e) => {
+                let message = describe(&e, &excep);
+                // SAFETY: the EXCEPINFO strings are ours to free now.
+                unsafe {
+                    ManuallyDrop::drop(&mut excep.bstrSource);
+                    ManuallyDrop::drop(&mut excep.bstrDescription);
+                    ManuallyDrop::drop(&mut excep.bstrHelpFile);
+                }
+                Err(format!("{what} failed: {message}"))
+            }
+        }
+    }
+
     fn describe(e: &windows::core::Error, excep: &EXCEPINFO) -> String {
         // `excep` was filled in by `Invoke` (or is zeroed); a zeroed BSTR is
         // null, which displays as "".
@@ -311,11 +423,9 @@ mod com {
             }
         }
 
-        /// `IDispatch::Invoke` of `method` with `args` (in call order).
-        fn call(&self, method: &str, args: Vec<VARIANT>) -> Result<String, String> {
-            // IDispatch takes arguments in reverse order; `Args` frees them.
-            let mut args = Args(args.into_iter().rev().collect());
-            let wide: Vec<u16> = method.encode_utf16().chain(std::iter::once(0)).collect();
+        /// The DISPID of the request processor's member `name`.
+        fn dispid(&self, name: &str) -> Result<i32, String> {
+            let wide: Vec<u16> = name.encode_utf16().chain(std::iter::once(0)).collect();
             let names = [PCWSTR(wide.as_ptr())];
             let mut dispid = 0i32;
             // SAFETY: `names` holds one valid, NUL-terminated wide string and
@@ -329,43 +439,66 @@ mod com {
                         LOCALE_USER_DEFAULT,
                         &raw mut dispid,
                     )
-                    .map_err(|e| format!("the request processor has no {method}: {e}"))?;
+                    .map_err(|e| format!("the request processor has no {name}: {e}"))?;
             }
-            let params = DISPPARAMS {
-                rgvarg: args.0.as_mut_ptr(),
-                rgdispidNamedArgs: std::ptr::null_mut(),
-                cArgs: args.0.len() as u32,
-                cNamedArgs: 0,
-            };
-            let mut result = VARIANT::default();
-            let mut excep = EXCEPINFO::default();
-            // SAFETY: `params` points at `args.0`, which outlives the call and
-            // is freed exactly once when `args` drops.
-            let outcome = unsafe {
-                self.disp.Invoke(
-                    dispid,
-                    &GUID::zeroed(),
-                    LOCALE_USER_DEFAULT,
-                    DISPATCH_METHOD,
-                    &raw const params,
-                    Some(&raw mut result),
-                    Some(&raw mut excep),
-                    None,
-                )
-            };
-            match outcome {
-                Ok(()) => Ok(take_string(result)),
-                Err(e) => {
-                    let message = describe(&e, &excep);
-                    // SAFETY: the EXCEPINFO strings are ours to free now.
-                    unsafe {
-                        ManuallyDrop::drop(&mut excep.bstrSource);
-                        ManuallyDrop::drop(&mut excep.bstrDescription);
-                        ManuallyDrop::drop(&mut excep.bstrHelpFile);
-                    }
-                    Err(format!("{method} failed: {message}"))
-                }
-            }
+            Ok(dispid)
+        }
+
+        /// Call the request processor's method `method` with `args` (in call
+        /// order).
+        fn call(&self, method: &str, args: Vec<VARIANT>) -> Result<String, String> {
+            let dispid = self.dispid(method)?;
+            invoke(&self.disp, method, dispid, DISPATCH_METHOD, args).map(take_string)
+        }
+
+        /// The request processor's `AuthPreferences` object.
+        fn auth_preferences(&self) -> Result<IDispatch, String> {
+            let dispid = self.dispid("AuthPreferences")?;
+            let v = invoke(
+                &self.disp,
+                "AuthPreferences",
+                dispid,
+                DISPATCH_PROPERTYGET,
+                vec![],
+            )?;
+            take_dispatch(v).ok_or_else(|| "AuthPreferences returned no object".to_owned())
+        }
+
+        /// Ask QuickBooks for read-only access with no personal data. Must
+        /// come after `OpenConnection2` and before `BeginSession`.
+        fn request_read_only(&self) -> Result<(), String> {
+            let prefs = self.auth_preferences()?;
+            invoke(
+                &prefs,
+                "PutIsReadOnly",
+                PUT_IS_READ_ONLY,
+                DISPATCH_METHOD,
+                vec![Args::boolean(true)],
+            )
+            .map(take_string)?;
+            invoke(
+                &prefs,
+                "PutPersonalDataPref",
+                PUT_PERSONAL_DATA_PREF,
+                DISPATCH_METHOD,
+                vec![Args::int(PDP_NOT_NEEDED)],
+            )
+            .map(take_string)?;
+            Ok(())
+        }
+
+        /// Whether QuickBooks honoured [`Processor::request_read_only`] for
+        /// the session `ticket`.
+        fn read_only_obeyed(&self, ticket: &str) -> Result<bool, String> {
+            let prefs = self.auth_preferences()?;
+            invoke(
+                &prefs,
+                "WasAuthPreferencesObeyed",
+                WAS_AUTH_PREFERENCES_OBEYED,
+                DISPATCH_METHOD,
+                vec![Args::string(ticket)],
+            )
+            .map(take_bool)
         }
     }
 
@@ -413,6 +546,12 @@ mod com {
             let _ = ready.send(Err(e.clone()));
             return Err(e);
         }
+        if let Err(e) = rp.request_read_only() {
+            let _ = rp.call("CloseConnection", vec![]);
+            let message = format!("couldn't ask QuickBooks for read-only access: {e}");
+            let _ = ready.send(Err(message.clone()));
+            return Err(message);
+        }
         let ticket = match rp.call(
             "BeginSession",
             vec![
@@ -430,6 +569,23 @@ mod com {
                 return Err(message);
             }
         };
+        match rp.read_only_obeyed(&ticket) {
+            Ok(true) => {}
+            outcome => {
+                let _ = rp.call("EndSession", vec![Args::string(&ticket)]);
+                let _ = rp.call("CloseConnection", vec![]);
+                let why = match outcome {
+                    Err(e) => e,
+                    Ok(_) => "QuickBooks didn't grant read-only access".to_owned(),
+                };
+                let message = format!(
+                    "{why}. LibreBooks only connects read-only: if \"{}\" was allowed more access before, remove it under Edit › Preferences › Integrated Applications (Company Preferences) and connect again",
+                    config.app_name
+                );
+                let _ = ready.send(Err(message.clone()));
+                return Err(message);
+            }
+        }
         let file = rp
             .call("GetCurrentCompanyFileName", vec![Args::string(&ticket)])
             .unwrap_or_default();
@@ -446,5 +602,29 @@ mod com {
         let _ = rp.call("EndSession", vec![Args::string(&ticket)]);
         let _ = rp.call("CloseConnection", vec![]);
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    /// The session asks for read-only access between connecting and opening
+    /// the session, and checks QuickBooks honoured it before the first request.
+    /// COM can't run here without QuickBooks, so pin the order in the source.
+    #[test]
+    fn session_requests_and_checks_read_only_before_any_request() {
+        let src = include_str!("sdk.rs");
+        let body = &src[src.find("    fn session(").expect("session fn")..];
+        let at = |needle: &str| {
+            body.find(needle)
+                .unwrap_or_else(|| panic!("{needle} missing from session()"))
+        };
+        let steps = [
+            at("\"OpenConnection2\""),
+            at("rp.request_read_only()"),
+            at("\"BeginSession\""),
+            at("rp.read_only_obeyed(&ticket)"),
+            at("\"ProcessRequest\""),
+        ];
+        assert!(steps.is_sorted(), "out of order: {steps:?}");
     }
 }

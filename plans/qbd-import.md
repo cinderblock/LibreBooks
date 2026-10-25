@@ -349,12 +349,22 @@ local mode, or `librebooks serve`/`import qbd` on cad-3):
 2. `PUT /c/:id/import/qbd` with `{ transport: "sdk" }`, then `POST …/sync`; or
    `librebooks import qbd --company <id> --transport sdk`.
 3. The first time, QuickBooks shows *An application without a certificate is
-   requesting access* for "LibreBooks": choose **Yes, always** (and leave
-   personal data unticked). The choice is kept under *Edit › Preferences ›
-   Integrated Applications*. The dialog needs a desktop session: authorise once
-   from the desktop app or a terminal; a service running under the same user
-   inherits it. The SDK has no read-only grant at this level; the guarantee is
-   LibreBooks' own (queries only, by construction).
+   requesting access* for "LibreBooks": choose **Yes, always**. The choice is
+   kept under *Edit › Preferences › Integrated Applications*. The dialog needs
+   a desktop session: authorise once from the desktop app or a terminal; a
+   service running under the same user inherits it.
+   **Read-only is enforced by QuickBooks too** (2026-10-25): before
+   `BeginSession` the session sets `AuthPreferences.PutIsReadOnly(true)` and
+   `PutPersonalDataPref(pdpNotNeeded = 3)`, so the dialog offers read-only
+   access only; after it, `WasAuthPreferencesObeyed(ticket)` must be true or
+   the session closes before any request (an app authorised earlier with more
+   access must be removed from Integrated Applications first). The members are
+   called by DISPID (1, 3, 7) from the type library in `QBXMLRP2.dll`, read on
+   cad-3; by name, PowerShell got `DISP_E_UNKNOWNNAME`. LibreBooks' own
+   queries-only check stays as the second lock.
+   **Run it from the desktop session**, not over SSH: the SDK reaches the
+   QuickBooks in the same Windows login session (the QB Bridge runs in session
+   2 for this reason); SSH lands in a different session.
 4. `sdk_available` in `GET …/import/qbd` says whether the build has it
    (Windows, feature `qbsdk`, on by default); elsewhere `POST …/sync` is
    501 `unsupported`.
