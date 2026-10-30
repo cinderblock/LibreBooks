@@ -1,4 +1,4 @@
-//! The QuickBooks SDK (`QBXMLRP2.RequestProcessor2`) over COM: a direct,
+//! The QuickBooks SDK (`QBXMLRP2.RequestProcessor`) over COM: a direct,
 //! in-process session with the QuickBooks on this same Windows machine. No
 //! bridge, no Web Connector; the desktop app or a server running beside
 //! QuickBooks imports straight from it.
@@ -205,7 +205,7 @@ mod com {
         VARIANT, VARIANT_0, VARIANT_0_0, VARIANT_0_0_0, VT_BOOL, VT_BSTR, VT_DISPATCH, VT_I4,
         VariantClear,
     };
-    use windows::core::{BSTR, GUID, PCWSTR, w};
+    use windows::core::{BSTR, GUID, Interface, PCWSTR, w};
 
     use super::{Job, SdkConfig};
     use crate::client::QbdError;
@@ -218,13 +218,11 @@ mod com {
     /// `pdpOptional` 2), from the type library in `QBXMLRP2.dll`.
     const PDP_NOT_NEEDED: i32 = 3;
 
-    /// `IAuthPreferences` members, by the DISPIDs its type library declares
-    /// (a dual interface, so they're fixed). Called by id rather than by name:
-    /// name lookup on the preferences object answered `DISP_E_UNKNOWNNAME` to
-    /// PowerShell's late binding on a real install.
-    const WAS_AUTH_PREFERENCES_OBEYED: i32 = 0x1;
-    const PUT_IS_READ_ONLY: i32 = 0x3;
-    const PUT_PERSONAL_DATA_PREF: i32 = 0x7;
+    /// `IAuthPreferences`, from the type library in `QBXMLRP2.dll`. The object
+    /// `AuthPreferences` returns has the request processor's COM identity, so
+    /// it must be asked for this interface: the processor's own `IDispatch`
+    /// knows none of these names, and its DISPID 3 is `CloseConnection`.
+    const IID_IAUTH_PREFERENCES: GUID = GUID::from_u128(0x4277578a_9687_4ebc_8586_1ca4759b17c3);
 
     fn file_mode(m: FileMode) -> i32 {
         // QBFileMode: qbFileOpenSingleUser = 0, qbFileOpenMultiUser = 1,
@@ -345,15 +343,29 @@ mod com {
         }
     }
 
-    /// `IDispatch::Invoke` of member `dispid` (`what` names it in errors) with
-    /// `args` (in call order), as `flags` says (method or property get).
+    /// `IDispatch::Invoke` of `disp`'s member `name` with `args` (in call
+    /// order), as `flags` says (method or property get).
     fn invoke(
         disp: &IDispatch,
-        what: &str,
-        dispid: i32,
+        name: &str,
         flags: DISPATCH_FLAGS,
         args: Vec<VARIANT>,
     ) -> Result<VARIANT, String> {
+        let wide: Vec<u16> = name.encode_utf16().chain(std::iter::once(0)).collect();
+        let names = [PCWSTR(wide.as_ptr())];
+        let mut dispid = 0i32;
+        // SAFETY: `names` holds one valid, NUL-terminated wide string and
+        // `dispid` receives one id.
+        unsafe {
+            disp.GetIDsOfNames(
+                &GUID::zeroed(),
+                names.as_ptr(),
+                1,
+                LOCALE_USER_DEFAULT,
+                &raw mut dispid,
+            )
+            .map_err(|e| format!("QuickBooks' SDK has no {name} here: {e}"))?;
+        }
         // IDispatch takes arguments in reverse order; `Args` frees them.
         let mut args = Args(args.into_iter().rev().collect());
         let params = DISPPARAMS {
@@ -388,7 +400,7 @@ mod com {
                     ManuallyDrop::drop(&mut excep.bstrDescription);
                     ManuallyDrop::drop(&mut excep.bstrHelpFile);
                 }
-                Err(format!("{what} failed: {message}"))
+                Err(format!("{name} failed: {message}"))
             }
         }
     }
@@ -412,9 +424,9 @@ mod com {
         fn create() -> Result<Processor, String> {
             // SAFETY: plain COM activation on a thread that called CoInitializeEx.
             unsafe {
-                let clsid = CLSIDFromProgID(w!("QBXMLRP2.RequestProcessor2")).map_err(|e| {
+                let clsid = CLSIDFromProgID(w!("QBXMLRP2.RequestProcessor")).map_err(|e| {
                     format!(
-                        "the QuickBooks SDK isn't installed on this machine (QBXMLRP2.RequestProcessor2: {e})"
+                        "the QuickBooks SDK isn't installed on this machine (QBXMLRP2.RequestProcessor: {e})"
                     )
                 })?;
                 let disp: IDispatch = CoCreateInstance(&raw const clsid, None, CLSCTX_ALL)
@@ -423,45 +435,28 @@ mod com {
             }
         }
 
-        /// The DISPID of the request processor's member `name`.
-        fn dispid(&self, name: &str) -> Result<i32, String> {
-            let wide: Vec<u16> = name.encode_utf16().chain(std::iter::once(0)).collect();
-            let names = [PCWSTR(wide.as_ptr())];
-            let mut dispid = 0i32;
-            // SAFETY: `names` holds one valid, NUL-terminated wide string and
-            // `dispid` receives one id.
-            unsafe {
-                self.disp
-                    .GetIDsOfNames(
-                        &GUID::zeroed(),
-                        names.as_ptr(),
-                        1,
-                        LOCALE_USER_DEFAULT,
-                        &raw mut dispid,
-                    )
-                    .map_err(|e| format!("the request processor has no {name}: {e}"))?;
-            }
-            Ok(dispid)
-        }
-
         /// Call the request processor's method `method` with `args` (in call
         /// order).
         fn call(&self, method: &str, args: Vec<VARIANT>) -> Result<String, String> {
-            let dispid = self.dispid(method)?;
-            invoke(&self.disp, method, dispid, DISPATCH_METHOD, args).map(take_string)
+            invoke(&self.disp, method, DISPATCH_METHOD, args).map(take_string)
         }
 
-        /// The request processor's `AuthPreferences` object.
+        /// The request processor's `AuthPreferences`, as `IAuthPreferences`.
         fn auth_preferences(&self) -> Result<IDispatch, String> {
-            let dispid = self.dispid("AuthPreferences")?;
-            let v = invoke(
-                &self.disp,
-                "AuthPreferences",
-                dispid,
-                DISPATCH_PROPERTYGET,
-                vec![],
-            )?;
-            take_dispatch(v).ok_or_else(|| "AuthPreferences returned no object".to_owned())
+            let v = invoke(&self.disp, "AuthPreferences", DISPATCH_PROPERTYGET, vec![])?;
+            let unknown =
+                take_dispatch(v).ok_or_else(|| "AuthPreferences returned no object".to_owned())?;
+            let mut raw = std::ptr::null_mut();
+            // SAFETY: `raw` receives an owned reference to the interface asked
+            // for, or stays null on failure. It's a dual interface, so its
+            // vtable starts with IDispatch's.
+            unsafe {
+                unknown
+                    .query(&IID_IAUTH_PREFERENCES, &raw mut raw)
+                    .ok()
+                    .map_err(|e| format!("QuickBooks' SDK has no IAuthPreferences: {e}"))?;
+                Ok(IDispatch::from_raw(raw))
+            }
         }
 
         /// Ask QuickBooks for read-only access with no personal data. Must
@@ -471,7 +466,6 @@ mod com {
             invoke(
                 &prefs,
                 "PutIsReadOnly",
-                PUT_IS_READ_ONLY,
                 DISPATCH_METHOD,
                 vec![Args::boolean(true)],
             )
@@ -479,7 +473,6 @@ mod com {
             invoke(
                 &prefs,
                 "PutPersonalDataPref",
-                PUT_PERSONAL_DATA_PREF,
                 DISPATCH_METHOD,
                 vec![Args::int(PDP_NOT_NEEDED)],
             )
@@ -494,7 +487,6 @@ mod com {
             invoke(
                 &prefs,
                 "WasAuthPreferencesObeyed",
-                WAS_AUTH_PREFERENCES_OBEYED,
                 DISPATCH_METHOD,
                 vec![Args::string(ticket)],
             )

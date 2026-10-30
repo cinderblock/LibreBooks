@@ -358,10 +358,20 @@ local mode, or `librebooks serve`/`import qbd` on cad-3):
    `PutPersonalDataPref(pdpNotNeeded = 3)`, so the dialog offers read-only
    access only; after it, `WasAuthPreferencesObeyed(ticket)` must be true or
    the session closes before any request (an app authorised earlier with more
-   access must be removed from Integrated Applications first). The members are
-   called by DISPID (1, 3, 7) from the type library in `QBXMLRP2.dll`, read on
-   cad-3; by name, PowerShell got `DISP_E_UNKNOWNNAME`. LibreBooks' own
+   access must be removed from Integrated Applications first). LibreBooks' own
    queries-only check stays as the second lock.
+   **`AuthPreferences` is the request processor's own object** (same COM
+   identity, seen on cad-3): query it for `IAuthPreferences`
+   (`4277578a-9687-4ebc-8586-1ca4759b17c3`) and resolve names on that interface.
+   Without the query, the processor's `IDispatch` doesn't know the names
+   (`DISP_E_UNKNOWNNAME`), and never call by bare DISPID: the processor's 3 is
+   `CloseConnection`. On the interface, `PutIsReadOnly` resolves and
+   `BeginSession` doesn't, which proves the query works.
+   **The ProgID is `QBXMLRP2.RequestProcessor`** (also `.2`), mapping to the
+   coclass `RequestProcessor3`. `QBXMLRP2.RequestProcessor2` doesn't exist:
+   the first live run died on it with `Invalid class string (0x800401F3)`
+   (2026-10-28 4:40 PM PDT, 23:40Z). A 64-bit `QBXMLRP2.dll` is registered
+   beside the 32-bit one, so the 64-bit build can create it.
    **Run it from the desktop session**, not over SSH: the SDK reaches the
    QuickBooks in the same Windows login session (the QB Bridge runs in session
    2 for this reason); SSH lands in a different session.
