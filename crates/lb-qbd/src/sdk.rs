@@ -1,50 +1,49 @@
-//! The QuickBooks SDK (`QBXMLRP2.RequestProcessor`) over COM: a direct,
-//! in-process session with the QuickBooks on this same Windows machine. No
-//! bridge, no Web Connector; the desktop app or a server running beside
-//! QuickBooks imports straight from it.
+//! The QuickBooks SDK on this same Windows machine: no bridge, no Web Connector;
+//! the desktop app or a server running beside QuickBooks imports straight from
+//! it. The COM session and its read-only guarantees are in [`lb_qbsdk`]; this
+//! is the route to it and the bridge to the async [`QbxmlTransport`].
 //!
-//! COM late binding (`IDispatch`), so nothing links against the SDK at build
-//! time: `CLSIDFromProgID` finds the request processor QuickBooks installs,
-//! `OpenConnection2` / `BeginSession` open the company, `ProcessRequest` sends
-//! each qbXML document, `EndSession` / `CloseConnection` tidy up. The request
-//! processor is apartment-threaded, so it lives on one dedicated thread fed by a
-//! channel; [`SdkSession`] bridges that to the async [`QbxmlTransport`].
+//! **Two routes.** The session is tried directly, in this process. If that can't
+//! reach QuickBooks at all and this is a 64-bit build, which is what QuickBooks
+//! 2021 and older answer (see [`lb_qbsdk`]), it's tried again through
+//! `librebooks-qbsdk.exe`, the 32-bit helper beside this binary. A refusal is not
+//! retried: QuickBooks would say the same to the helper. Either way a session
+//! lives on one dedicated thread fed by a channel, which is what
+//! [`SdkSession`] holds.
 //!
 //! **What QuickBooks asks the user.** The first time an application connects,
 //! QuickBooks (running, with the company open) shows its *Application with no
 //! certificate is requesting access* dialog naming the application
 //! (`app_name`, "LibreBooks"); the user picks *Yes, always*. The choice is kept
 //! under *Edit › Preferences › Integrated Applications*, where it can be
-//! revoked.
-//!
-//! **Read-only, twice over.** Before the session opens, LibreBooks sets the
-//! request processor's `AuthPreferences`: `PutIsReadOnly(true)`, so the dialog
-//! offers read-only access and QuickBooks itself refuses any write, and
-//! `PutPersonalDataPref(pdpNotNeeded)`, since the import never reads SSNs or
-//! the like. Once the session is open, `WasAuthPreferencesObeyed` must say
-//! QuickBooks honoured them (it doesn't when the application was already
-//! authorised with more access); if not, the session is closed and nothing is
-//! sent. Independently, every document LibreBooks sends is a query
-//! ([`crate::qbxml::request::check_read_only`]). A
-//! headless service with no desktop can't answer the dialog: authorise once from
-//! an interactive session (the desktop app, or `librebooks import qbd
-//! --transport sdk` in a terminal) and the service inherits the approval for
-//! the same application name.
+//! revoked. A headless service with no desktop can't answer the dialog:
+//! authorise once from an interactive session (the desktop app, or `librebooks
+//! import qbd --transport sdk` in a terminal) and the service inherits the
+//! approval for the same application name.
 //!
 //! Only compiled on Windows with the `qbsdk` feature (on by default); the
 //! settings type ([`crate::config::QbdTransport::Sdk`]) exists everywhere so a
 //! Linux server can still show "not available here".
 
+use std::io::{Read, Write};
+use std::os::windows::process::CommandExt;
+use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
 use std::sync::Mutex;
 use std::sync::mpsc;
 use std::thread::JoinHandle;
 
+use lb_qbsdk::{OpenError, wire};
 use tokio::sync::oneshot;
 
 use crate::client::QbdError;
 use crate::config::FileMode;
 use crate::qbxml::request::Request;
 use crate::source::{QbxmlSource, QbxmlTransport};
+
+/// `CREATE_NO_WINDOW`: the helper is a console program, and the desktop app
+/// has no console to share.
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 /// How to open the SDK session.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -69,23 +68,40 @@ impl Default for SdkConfig {
     }
 }
 
+impl From<&SdkConfig> for lb_qbsdk::Config {
+    fn from(c: &SdkConfig) -> Self {
+        lb_qbsdk::Config {
+            app_id: c.app_id.clone(),
+            app_name: c.app_name.clone(),
+            company_file: c.company_file.clone(),
+            file_mode: match c.file_mode {
+                FileMode::DontCare => lb_qbsdk::FileMode::DontCare,
+                FileMode::SingleUser => lb_qbsdk::FileMode::SingleUser,
+                FileMode::MultiUser => lb_qbsdk::FileMode::MultiUser,
+            },
+        }
+    }
+}
+
 struct Job {
     xml: String,
     reply: oneshot::Sender<Result<String, QbdError>>,
 }
 
-/// An open SDK session on its own COM thread. Dropping it ends the session.
+/// An open SDK session on its own thread. Dropping it ends the session.
 pub struct SdkSession {
     jobs: Mutex<Option<mpsc::Sender<Job>>>,
     thread: Mutex<Option<JoinHandle<()>>>,
     /// The company file QuickBooks reported open, once known.
     company_file: String,
+    through_helper: bool,
 }
 
 impl std::fmt::Debug for SdkSession {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("SdkSession")
             .field("company_file", &self.company_file)
+            .field("through_helper", &self.through_helper)
             .finish_non_exhaustive()
     }
 }
@@ -104,27 +120,77 @@ fn session_error(message: impl Into<String>) -> QbdError {
     }
 }
 
+/// Where to reach QuickBooks from.
+enum Route {
+    Direct,
+    Helper(PathBuf),
+}
+
+/// Whether a failed direct attempt is worth repeating through the 32-bit helper.
+fn helper_could_help(direct: &OpenError) -> bool {
+    direct.unreachable && cfg!(target_pointer_width = "64")
+}
+
+/// The helper beside `exe`.
+fn helper_beside(exe: &Path) -> PathBuf {
+    exe.with_file_name(wire::HELPER_EXE)
+}
+
 impl SdkSession {
-    /// Start the COM thread, connect and begin the session. Blocks until
-    /// QuickBooks has accepted (or refused) the connection, which includes the
-    /// time the user takes on the authorisation dialog the first time.
+    /// Reach QuickBooks directly or, failing that, through the helper. Blocks
+    /// until QuickBooks has accepted (or refused) the connection, which includes
+    /// the time the user takes on the authorisation dialog the first time.
     pub fn open(config: &SdkConfig) -> Result<SdkSession, QbdError> {
+        let direct = match SdkSession::start(config, Route::Direct) {
+            Ok(session) => return Ok(session),
+            Err(e) => e,
+        };
+        if !helper_could_help(&direct) {
+            return Err(session_error(direct.message));
+        }
+        let exe = std::env::current_exe()
+            .map_err(|e| session_error(format!("{}; {e}", direct.message)))?;
+        let helper = helper_beside(&exe);
+        if !helper.is_file() {
+            return Err(session_error(format!(
+                "{} QuickBooks 2021 and older need the 32-bit helper, and {} isn't there.",
+                direct.message,
+                helper.display()
+            )));
+        }
+        tracing::info!(
+            direct = %direct.message,
+            "QuickBooks isn't reachable from this process; trying the 32-bit helper"
+        );
+        SdkSession::start(config, Route::Helper(helper)).map_err(|e| {
+            session_error(format!(
+                "{} Through the 32-bit helper: {}",
+                direct.message, e.message
+            ))
+        })
+    }
+
+    fn start(config: &SdkConfig, route: Route) -> Result<SdkSession, OpenError> {
         let (jobs_tx, jobs_rx) = mpsc::channel::<Job>();
-        let (ready_tx, ready_rx) = mpsc::channel::<Result<String, String>>();
-        let config = config.clone();
+        let (ready_tx, ready_rx) = mpsc::channel::<Result<String, OpenError>>();
+        let config = lb_qbsdk::Config::from(config);
+        let through_helper = matches!(route, Route::Helper(_));
         let thread = std::thread::Builder::new()
             .name("quickbooks-sdk".into())
-            .spawn(move || com::run(&config, &ready_tx, &jobs_rx))
-            .map_err(|e| session_error(format!("couldn't start the SDK thread: {e}")))?;
+            .spawn(move || match route {
+                Route::Direct => direct(&config, &ready_tx, &jobs_rx),
+                Route::Helper(path) => helper(&path, &config, &ready_tx, &jobs_rx),
+            })
+            .map_err(|e| OpenError::new(format!("couldn't start the SDK thread: {e}")))?;
         let company_file = match ready_rx.recv() {
             Ok(Ok(file)) => file,
-            Ok(Err(message)) => {
+            Ok(Err(e)) => {
                 let _ = thread.join();
-                return Err(session_error(message));
+                return Err(e);
             }
             Err(_) => {
                 let _ = thread.join();
-                return Err(session_error(
+                return Err(OpenError::new(
                     "the SDK thread ended before the session opened",
                 ));
             }
@@ -133,6 +199,7 @@ impl SdkSession {
             jobs: Mutex::new(Some(jobs_tx)),
             thread: Mutex::new(Some(thread)),
             company_file,
+            through_helper,
         })
     }
 
@@ -141,7 +208,12 @@ impl SdkSession {
         &self.company_file
     }
 
-    /// End the session and wait for the COM thread.
+    /// Whether this session runs through the 32-bit helper.
+    pub fn through_helper(&self) -> bool {
+        self.through_helper
+    }
+
+    /// End the session and wait for its thread.
     pub fn close(&self) {
         self.jobs
             .lock()
@@ -187,436 +259,221 @@ impl QbxmlTransport for SdkSession {
     }
 }
 
-/// The COM layer. `unsafe` is confined to this module: every call is a
-/// documented `IDispatch` invocation on an object this thread created.
-mod com {
-    #![allow(unsafe_code)]
-
-    use std::mem::ManuallyDrop;
-    use std::sync::mpsc;
-
-    use windows::Win32::Foundation::{DISP_E_EXCEPTION, VARIANT_FALSE, VARIANT_TRUE};
-    use windows::Win32::System::Com::{
-        CLSCTX_ALL, CLSIDFromProgID, COINIT_APARTMENTTHREADED, CoCreateInstance, CoInitializeEx,
-        CoUninitialize, DISPATCH_FLAGS, DISPATCH_METHOD, DISPATCH_PROPERTYGET, DISPPARAMS,
-        EXCEPINFO, IDispatch,
-    };
-    use windows::Win32::System::Variant::{
-        VARIANT, VARIANT_0, VARIANT_0_0, VARIANT_0_0_0, VT_BOOL, VT_BSTR, VT_DISPATCH, VT_I4,
-        VariantClear,
-    };
-    use windows::core::{BSTR, GUID, Interface, PCWSTR, w};
-
-    use super::{Job, SdkConfig};
-    use crate::client::QbdError;
-    use crate::config::FileMode;
-
-    const LOCALE_USER_DEFAULT: u32 = 0x0400;
-    /// `QBXMLRPConnectionType.localQBD`.
-    const LOCAL_QBD: i32 = 1;
-    /// `QBXMLRPPersonalDataPrefType.pdpNotNeeded` (`pdpRequired` is 1,
-    /// `pdpOptional` 2), from the type library in `QBXMLRP2.dll`.
-    const PDP_NOT_NEEDED: i32 = 3;
-
-    /// `IAuthPreferences`, from the type library in `QBXMLRP2.dll`. The object
-    /// `AuthPreferences` returns has the request processor's COM identity, so
-    /// it must be asked for this interface: the processor's own `IDispatch`
-    /// knows none of these names, and its DISPID 3 is `CloseConnection`.
-    const IID_IAUTH_PREFERENCES: GUID = GUID::from_u128(0x4277578a_9687_4ebc_8586_1ca4759b17c3);
-
-    fn file_mode(m: FileMode) -> i32 {
-        // QBFileMode: qbFileOpenSingleUser = 0, qbFileOpenMultiUser = 1,
-        // qbFileOpenDoNotCare = 2.
-        match m {
-            FileMode::SingleUser => 0,
-            FileMode::MultiUser => 1,
-            FileMode::DontCare => 2,
+/// The session in this process: answer jobs until the channel closes.
+fn direct(
+    config: &lb_qbsdk::Config,
+    ready: &mpsc::Sender<Result<String, OpenError>>,
+    jobs: &mpsc::Receiver<Job>,
+) {
+    lb_qbsdk::session::run(config, |opened| match opened {
+        Err(e) => {
+            tracing::warn!(error = %e, "QuickBooks SDK session didn't open");
+            let _ = ready.send(Err(e));
         }
-    }
-
-    /// Method arguments, as the `VARIANT`s COM wants, freed after the call.
-    struct Args(Vec<VARIANT>);
-
-    impl Args {
-        fn string(s: &str) -> VARIANT {
-            VARIANT {
-                Anonymous: VARIANT_0 {
-                    Anonymous: ManuallyDrop::new(VARIANT_0_0 {
-                        vt: VT_BSTR,
-                        wReserved1: 0,
-                        wReserved2: 0,
-                        wReserved3: 0,
-                        Anonymous: VARIANT_0_0_0 {
-                            bstrVal: ManuallyDrop::new(BSTR::from(s)),
-                        },
-                    }),
-                },
+        Ok(session) => {
+            let _ = ready.send(Ok(session.company_file().to_owned()));
+            while let Ok(job) = jobs.recv() {
+                let answer = session
+                    .exchange(&job.xml)
+                    .map_err(|message| QbdError::Session { message });
+                let _ = job.reply.send(answer);
             }
         }
+    });
+}
 
-        fn boolean(b: bool) -> VARIANT {
-            VARIANT {
-                Anonymous: VARIANT_0 {
-                    Anonymous: ManuallyDrop::new(VARIANT_0_0 {
-                        vt: VT_BOOL,
-                        wReserved1: 0,
-                        wReserved2: 0,
-                        wReserved3: 0,
-                        Anonymous: VARIANT_0_0_0 {
-                            boolVal: if b { VARIANT_TRUE } else { VARIANT_FALSE },
-                        },
-                    }),
-                },
-            }
-        }
-
-        fn int(n: i32) -> VARIANT {
-            VARIANT {
-                Anonymous: VARIANT_0 {
-                    Anonymous: ManuallyDrop::new(VARIANT_0_0 {
-                        vt: VT_I4,
-                        wReserved1: 0,
-                        wReserved2: 0,
-                        wReserved3: 0,
-                        Anonymous: VARIANT_0_0_0 { lVal: n },
-                    }),
-                },
-            }
-        }
-    }
-
-    impl Drop for Args {
-        fn drop(&mut self) {
-            for v in &mut self.0 {
-                // SAFETY: every element was built by `Args::string`/`Args::int`
-                // and is a valid VARIANT owning its BSTR; VariantClear frees it
-                // once.
-                unsafe {
-                    let _ = VariantClear(&raw mut *v);
-                }
-            }
-        }
-    }
-
-    /// The string a method returned (empty for non-string results), freeing the
-    /// VARIANT.
-    fn take_string(mut v: VARIANT) -> String {
-        // SAFETY: `v` was filled in by `IDispatch::Invoke` as `pvarresult`; the
-        // discriminant says which union field is live.
-        unsafe {
-            let inner = &*v.Anonymous.Anonymous;
-            let s = if inner.vt == VT_BSTR {
-                (*inner.Anonymous.bstrVal).to_string()
-            } else {
-                String::new()
-            };
-            let _ = VariantClear(&raw mut v);
-            s
-        }
-    }
-
-    /// The boolean a method returned (`false` for non-boolean results), freeing
-    /// the VARIANT.
-    fn take_bool(mut v: VARIANT) -> bool {
-        // SAFETY: as in `take_string`; the discriminant says which field is live.
-        unsafe {
-            let inner = &*v.Anonymous.Anonymous;
-            let b = inner.vt == VT_BOOL && inner.Anonymous.boolVal != VARIANT_FALSE;
-            let _ = VariantClear(&raw mut v);
-            b
-        }
-    }
-
-    /// The object a property returned, freeing the VARIANT.
-    fn take_dispatch(mut v: VARIANT) -> Option<IDispatch> {
-        // SAFETY: as in `take_string`; the clone is an AddRef'd reference that
-        // outlives the VariantClear releasing the VARIANT's own.
-        unsafe {
-            let inner = &*v.Anonymous.Anonymous;
-            let d = if inner.vt == VT_DISPATCH {
-                (*inner.Anonymous.pdispVal).clone()
-            } else {
-                None
-            };
-            let _ = VariantClear(&raw mut v);
-            d
-        }
-    }
-
-    /// `IDispatch::Invoke` of `disp`'s member `name` with `args` (in call
-    /// order), as `flags` says (method or property get).
-    fn invoke(
-        disp: &IDispatch,
-        name: &str,
-        flags: DISPATCH_FLAGS,
-        args: Vec<VARIANT>,
-    ) -> Result<VARIANT, String> {
-        let wide: Vec<u16> = name.encode_utf16().chain(std::iter::once(0)).collect();
-        let names = [PCWSTR(wide.as_ptr())];
-        let mut dispid = 0i32;
-        // SAFETY: `names` holds one valid, NUL-terminated wide string and
-        // `dispid` receives one id.
-        unsafe {
-            disp.GetIDsOfNames(
-                &GUID::zeroed(),
-                names.as_ptr(),
-                1,
-                LOCALE_USER_DEFAULT,
-                &raw mut dispid,
-            )
-            .map_err(|e| format!("QuickBooks' SDK has no {name} here: {e}"))?;
-        }
-        // IDispatch takes arguments in reverse order; `Args` frees them.
-        let mut args = Args(args.into_iter().rev().collect());
-        let params = DISPPARAMS {
-            rgvarg: args.0.as_mut_ptr(),
-            rgdispidNamedArgs: std::ptr::null_mut(),
-            cArgs: args.0.len() as u32,
-            cNamedArgs: 0,
-        };
-        let mut result = VARIANT::default();
-        let mut excep = EXCEPINFO::default();
-        // SAFETY: `params` points at `args.0`, which outlives the call and is
-        // freed exactly once when `args` drops.
-        let outcome = unsafe {
-            disp.Invoke(
-                dispid,
-                &GUID::zeroed(),
-                LOCALE_USER_DEFAULT,
-                flags,
-                &raw const params,
-                Some(&raw mut result),
-                Some(&raw mut excep),
-                None,
-            )
-        };
-        match outcome {
-            Ok(()) => Ok(result),
-            Err(e) => {
-                let message = describe(&e, &excep);
-                // SAFETY: the EXCEPINFO strings are ours to free now.
-                unsafe {
-                    ManuallyDrop::drop(&mut excep.bstrSource);
-                    ManuallyDrop::drop(&mut excep.bstrDescription);
-                    ManuallyDrop::drop(&mut excep.bstrHelpFile);
-                }
-                Err(format!("{name} failed: {message}"))
-            }
-        }
-    }
-
-    fn describe(e: &windows::core::Error, excep: &EXCEPINFO) -> String {
-        // `excep` was filled in by `Invoke` (or is zeroed); a zeroed BSTR is
-        // null, which displays as "".
-        let description = (*excep.bstrDescription).to_string();
-        if e.code() == DISP_E_EXCEPTION && !description.is_empty() {
-            format!("{description} (0x{:08X})", excep.scode as u32)
-        } else {
-            e.to_string()
-        }
-    }
-
-    struct Processor {
-        disp: IDispatch,
-    }
-
-    impl Processor {
-        fn create() -> Result<Processor, String> {
-            // SAFETY: plain COM activation on a thread that called CoInitializeEx.
-            unsafe {
-                let clsid = CLSIDFromProgID(w!("QBXMLRP2.RequestProcessor")).map_err(|e| {
-                    format!(
-                        "the QuickBooks SDK isn't installed on this machine (QBXMLRP2.RequestProcessor: {e})"
-                    )
-                })?;
-                let disp: IDispatch = CoCreateInstance(&raw const clsid, None, CLSCTX_ALL)
-                    .map_err(|e| format!("couldn't start the QuickBooks request processor: {e}"))?;
-                Ok(Processor { disp })
-            }
-        }
-
-        /// Call the request processor's method `method` with `args` (in call
-        /// order).
-        fn call(&self, method: &str, args: Vec<VARIANT>) -> Result<String, String> {
-            invoke(&self.disp, method, DISPATCH_METHOD, args).map(take_string)
-        }
-
-        /// The request processor's `AuthPreferences`, as `IAuthPreferences`.
-        fn auth_preferences(&self) -> Result<IDispatch, String> {
-            let v = invoke(&self.disp, "AuthPreferences", DISPATCH_PROPERTYGET, vec![])?;
-            let unknown =
-                take_dispatch(v).ok_or_else(|| "AuthPreferences returned no object".to_owned())?;
-            let mut raw = std::ptr::null_mut();
-            // SAFETY: `raw` receives an owned reference to the interface asked
-            // for, or stays null on failure. It's a dual interface, so its
-            // vtable starts with IDispatch's.
-            unsafe {
-                unknown
-                    .query(&IID_IAUTH_PREFERENCES, &raw mut raw)
-                    .ok()
-                    .map_err(|e| format!("QuickBooks' SDK has no IAuthPreferences: {e}"))?;
-                Ok(IDispatch::from_raw(raw))
-            }
-        }
-
-        /// Ask QuickBooks for read-only access with no personal data. Must
-        /// come after `OpenConnection2` and before `BeginSession`.
-        fn request_read_only(&self) -> Result<(), String> {
-            let prefs = self.auth_preferences()?;
-            invoke(
-                &prefs,
-                "PutIsReadOnly",
-                DISPATCH_METHOD,
-                vec![Args::boolean(true)],
-            )
-            .map(take_string)?;
-            invoke(
-                &prefs,
-                "PutPersonalDataPref",
-                DISPATCH_METHOD,
-                vec![Args::int(PDP_NOT_NEEDED)],
-            )
-            .map(take_string)?;
-            Ok(())
-        }
-
-        /// Whether QuickBooks honoured [`Processor::request_read_only`] for
-        /// the session `ticket`.
-        fn read_only_obeyed(&self, ticket: &str) -> Result<bool, String> {
-            let prefs = self.auth_preferences()?;
-            invoke(
-                &prefs,
-                "WasAuthPreferencesObeyed",
-                DISPATCH_METHOD,
-                vec![Args::string(ticket)],
-            )
-            .map(take_bool)
-        }
-    }
-
-    /// The COM thread: connect, open the session, answer jobs until the channel
-    /// closes, then end the session.
-    pub(super) fn run(
-        config: &SdkConfig,
-        ready: &mpsc::Sender<Result<String, String>>,
-        jobs: &mpsc::Receiver<Job>,
-    ) {
-        // SAFETY: once per thread, paired with CoUninitialize below.
-        let hr = unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED) };
-        if hr.is_err() {
-            let _ = ready.send(Err(format!("COM couldn't be initialised: {hr}")));
+/// The session in the helper: start it and relay jobs to it.
+fn helper(
+    path: &Path,
+    config: &lb_qbsdk::Config,
+    ready: &mpsc::Sender<Result<String, OpenError>>,
+    jobs: &mpsc::Receiver<Job>,
+) {
+    let spawned = Command::new(path)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .creation_flags(CREATE_NO_WINDOW)
+        .spawn();
+    let mut child = match spawned {
+        Ok(child) => child,
+        Err(e) => {
+            let _ = ready.send(Err(OpenError::new(format!(
+                "couldn't start {}: {e}",
+                path.display()
+            ))));
             return;
         }
-        let outcome = session(config, ready, jobs);
-        if let Err(e) = outcome {
-            tracing::warn!(error = %e, "QuickBooks SDK session ended with an error");
-        }
-        // SAFETY: balances the CoInitializeEx above; every COM object is dropped.
-        unsafe { CoUninitialize() };
-    }
+    };
+    let (Some(to_helper), Some(from_helper)) = (child.stdin.take(), child.stdout.take()) else {
+        let _ = ready.send(Err(OpenError::new("the helper has no pipes")));
+        let _ = child.kill();
+        let _ = child.wait();
+        return;
+    };
+    relay(to_helper, from_helper, config, ready, jobs);
+    // `relay` dropped the helper's stdin, which ends its session.
+    let _ = child.wait();
+}
 
-    fn session(
-        config: &SdkConfig,
-        ready: &mpsc::Sender<Result<String, String>>,
-        jobs: &mpsc::Receiver<Job>,
-    ) -> Result<(), String> {
-        let rp = match Processor::create() {
-            Ok(rp) => rp,
-            Err(e) => {
-                let _ = ready.send(Err(e.clone()));
-                return Err(e);
-            }
+/// Say hello, then pass jobs to the helper and its replies back, until the
+/// channel closes or the helper goes. Dropping `to` tells it to finish.
+fn relay(
+    mut to: impl Write,
+    mut from: impl Read,
+    config: &lb_qbsdk::Config,
+    ready: &mpsc::Sender<Result<String, OpenError>>,
+    jobs: &mpsc::Receiver<Job>,
+) {
+    let opened = wire::write_frame(&mut to, &wire::hello(config))
+        .map_err(|e| e.to_string())
+        .and_then(|()| wire::read_reply(&mut from).map_err(|e| e.to_string()));
+    match opened {
+        Ok(Some(Ok(file))) => {
+            let _ = ready.send(Ok(file));
+        }
+        Ok(Some(Err(message))) => {
+            let _ = ready.send(Err(OpenError::new(message)));
+            return;
+        }
+        Ok(None) => {
+            let _ = ready.send(Err(OpenError::new("the helper ended without answering")));
+            return;
+        }
+        Err(e) => {
+            let _ = ready.send(Err(OpenError::new(format!(
+                "couldn't talk to the helper: {e}"
+            ))));
+            return;
+        }
+    }
+    while let Ok(job) = jobs.recv() {
+        let answer = wire::write_frame(&mut to, job.xml.as_bytes())
+            .and_then(|()| wire::read_reply(&mut from));
+        let (answer, gone) = match answer {
+            Ok(Some(reply)) => (
+                reply.map_err(|message| QbdError::Session { message }),
+                false,
+            ),
+            Ok(None) => (Err(session_error("the helper has ended")), true),
+            Err(e) => (
+                Err(session_error(format!("couldn't talk to the helper: {e}"))),
+                true,
+            ),
         };
-        if let Err(e) = rp.call(
-            "OpenConnection2",
-            vec![
-                Args::string(&config.app_id),
-                Args::string(&config.app_name),
-                Args::int(LOCAL_QBD),
-            ],
-        ) {
-            let _ = ready.send(Err(e.clone()));
-            return Err(e);
+        let _ = job.reply.send(answer);
+        if gone {
+            return;
         }
-        if let Err(e) = rp.request_read_only() {
-            let _ = rp.call("CloseConnection", vec![]);
-            let message = format!("couldn't ask QuickBooks for read-only access: {e}");
-            let _ = ready.send(Err(message.clone()));
-            return Err(message);
-        }
-        let ticket = match rp.call(
-            "BeginSession",
-            vec![
-                Args::string(&config.company_file),
-                Args::int(file_mode(config.file_mode)),
-            ],
-        ) {
-            Ok(t) => t,
-            Err(e) => {
-                let _ = rp.call("CloseConnection", vec![]);
-                let message = format!(
-                    "{e}. Is QuickBooks running with the company open, and has it been allowed to talk to LibreBooks?"
-                );
-                let _ = ready.send(Err(message.clone()));
-                return Err(message);
-            }
-        };
-        match rp.read_only_obeyed(&ticket) {
-            Ok(true) => {}
-            outcome => {
-                let _ = rp.call("EndSession", vec![Args::string(&ticket)]);
-                let _ = rp.call("CloseConnection", vec![]);
-                let why = match outcome {
-                    Err(e) => e,
-                    Ok(_) => "QuickBooks didn't grant read-only access".to_owned(),
-                };
-                let message = format!(
-                    "{why}. LibreBooks only connects read-only: if \"{}\" was allowed more access before, remove it under Edit › Preferences › Integrated Applications (Company Preferences) and connect again",
-                    config.app_name
-                );
-                let _ = ready.send(Err(message.clone()));
-                return Err(message);
-            }
-        }
-        let file = rp
-            .call("GetCurrentCompanyFileName", vec![Args::string(&ticket)])
-            .unwrap_or_default();
-        let _ = ready.send(Ok(file));
-        while let Ok(job) = jobs.recv() {
-            let answer = rp
-                .call(
-                    "ProcessRequest",
-                    vec![Args::string(&ticket), Args::string(&job.xml)],
-                )
-                .map_err(|message| QbdError::Session { message });
-            let _ = job.reply.send(answer);
-        }
-        let _ = rp.call("EndSession", vec![Args::string(&ticket)]);
-        let _ = rp.call("CloseConnection", vec![]);
-        Ok(())
     }
 }
 
 #[cfg(test)]
 mod tests {
-    /// The session asks for read-only access between connecting and opening
-    /// the session, and checks QuickBooks honoured it before the first request.
-    /// COM can't run here without QuickBooks, so pin the order in the source.
+    use super::*;
+
+    fn config() -> lb_qbsdk::Config {
+        (&SdkConfig::default()).into()
+    }
+
     #[test]
-    fn session_requests_and_checks_read_only_before_any_request() {
-        let src = include_str!("sdk.rs");
-        let body = &src[src.find("    fn session(").expect("session fn")..];
-        let at = |needle: &str| {
-            body.find(needle)
-                .unwrap_or_else(|| panic!("{needle} missing from session()"))
-        };
-        let steps = [
-            at("\"OpenConnection2\""),
-            at("rp.request_read_only()"),
-            at("\"BeginSession\""),
-            at("rp.read_only_obeyed(&ticket)"),
-            at("\"ProcessRequest\""),
-        ];
-        assert!(steps.is_sorted(), "out of order: {steps:?}");
+    fn only_an_unreachable_quickbooks_is_tried_again() {
+        let mut e = OpenError::new("Could not start QuickBooks.");
+        assert!(!helper_could_help(&e), "a refusal isn't retried");
+        e.unreachable = true;
+        assert_eq!(helper_could_help(&e), cfg!(target_pointer_width = "64"));
+    }
+
+    #[test]
+    fn the_helper_lives_beside_the_binary() {
+        assert_eq!(
+            helper_beside(Path::new(r"C:\Program Files\LibreBooks\librebooks.exe")),
+            Path::new(r"C:\Program Files\LibreBooks\librebooks-qbsdk.exe")
+        );
+    }
+
+    /// A pretend helper on the far end of two real pipes; `script` plays it.
+    fn with_helper(
+        script: impl FnOnce(&mut std::io::PipeReader, &mut std::io::PipeWriter) + Send + 'static,
+        f: impl FnOnce(&mpsc::Receiver<Result<String, OpenError>>, mpsc::Sender<Job>),
+    ) {
+        let (mut from_app, to_helper) = std::io::pipe().unwrap();
+        let (from_helper, mut to_app) = std::io::pipe().unwrap();
+        let far = std::thread::spawn(move || script(&mut from_app, &mut to_app));
+        let (ready_tx, ready_rx) = mpsc::channel();
+        let (jobs_tx, jobs_rx) = mpsc::channel();
+        let near = std::thread::spawn(move || {
+            relay(to_helper, from_helper, &config(), &ready_tx, &jobs_rx);
+        });
+        f(&ready_rx, jobs_tx);
+        near.join().unwrap();
+        far.join().unwrap();
+    }
+
+    fn ask(jobs: &mpsc::Sender<Job>, xml: &str) -> Result<String, QbdError> {
+        let (reply, answer) = oneshot::channel();
+        jobs.send(Job {
+            xml: xml.into(),
+            reply,
+        })
+        .unwrap();
+        answer.blocking_recv().unwrap()
+    }
+
+    #[test]
+    fn a_session_through_the_helper_relays_and_ends_when_the_app_is_done() {
+        with_helper(
+            |from_app, to_app| {
+                let hello = wire::read_frame(from_app).unwrap().unwrap();
+                let got = wire::parse_hello(&hello).unwrap();
+                assert_eq!(got.app_name, "LibreBooks");
+                wire::write_reply(to_app, Ok(r"C:\Books\Acme.QBW")).unwrap();
+                let doc = wire::read_frame(from_app).unwrap().unwrap();
+                assert_eq!(doc, b"<one/>");
+                wire::write_reply(to_app, Ok("<answer/>")).unwrap();
+                let doc = wire::read_frame(from_app).unwrap().unwrap();
+                assert_eq!(doc, b"<two/>");
+                wire::write_reply(to_app, Err("refused")).unwrap();
+                // The app closing its end is how a session ends.
+                assert_eq!(wire::read_frame(from_app).unwrap(), None);
+            },
+            |ready, jobs| {
+                assert_eq!(ready.recv().unwrap().unwrap(), r"C:\Books\Acme.QBW");
+                assert_eq!(ask(&jobs, "<one/>").unwrap(), "<answer/>");
+                let e = ask(&jobs, "<two/>").unwrap_err();
+                assert!(e.to_string().contains("refused"), "{e}");
+            },
+        );
+    }
+
+    #[test]
+    fn a_helper_that_cant_open_says_why() {
+        with_helper(
+            |from_app, to_app| {
+                wire::read_frame(from_app).unwrap().unwrap();
+                wire::write_reply(to_app, Err("QuickBooks didn't grant read-only access")).unwrap();
+            },
+            |ready, _jobs| {
+                let e = ready.recv().unwrap().unwrap_err();
+                assert!(e.message.contains("read-only"), "{e}");
+                assert!(!e.unreachable, "there's no third route to try");
+            },
+        );
+    }
+
+    #[test]
+    fn a_helper_that_dies_fails_the_request_rather_than_hanging() {
+        with_helper(
+            |from_app, to_app| {
+                wire::read_frame(from_app).unwrap().unwrap();
+                wire::write_reply(to_app, Ok("file")).unwrap();
+                wire::read_frame(from_app).unwrap().unwrap();
+            },
+            |ready, jobs| {
+                ready.recv().unwrap().unwrap();
+                let e = ask(&jobs, "<one/>").unwrap_err();
+                assert!(e.to_string().contains("ended"), "{e}");
+            },
+        );
     }
 }

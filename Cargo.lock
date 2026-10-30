@@ -3557,6 +3557,7 @@ dependencies = [
  "axum",
  "jiff",
  "lb-core",
+ "lb-qbsdk",
  "lb-store",
  "pretty_assertions",
  "quick-xml",
@@ -3571,6 +3572,13 @@ dependencies = [
  "ts-rs",
  "url",
  "uuid",
+]
+
+[[package]]
+name = "lb-qbsdk"
+version = "0.1.0"
+dependencies = [
+ "quick-xml",
  "windows",
 ]
 

@@ -23,7 +23,6 @@ use quick_xml::escape::escape;
 
 use crate::client::{ListQuery, QbdError, ReportQuery};
 use crate::entity::QbdEntity;
-use crate::qbxml::xml;
 
 /// The qbXML version every document asks for. 13.0 is what current QuickBooks
 /// Desktop editions speak; everything the import uses exists since 7.0.
@@ -452,39 +451,10 @@ pub fn report(slug: &str, query: &ReportQuery, request_id: u64) -> Result<Reques
 
 /// Refuse any document that isn't made only of `…QueryRq` messages. Every
 /// qbXML transport runs its documents through this before sending; LibreBooks
-/// must never write to the user's QuickBooks.
+/// must never write to the user's QuickBooks. The SDK session repeats the same
+/// check itself, on the far side of the 32-bit helper too.
 pub fn check_read_only(xml_doc: &str) -> Result<(), QbdError> {
-    let root = xml::parse_tree(xml_doc).map_err(|e| QbdError::Unsupported(e.to_string()))?;
-    if root.name != "QBXML" {
-        return Err(QbdError::Unsupported(format!(
-            "refusing to send a document whose root is {:?}, not QBXML",
-            root.name
-        )));
-    }
-    let mut messages = 0;
-    for msgs in &root.children {
-        if msgs.name != "QBXMLMsgsRq" {
-            return Err(QbdError::Unsupported(format!(
-                "refusing to send {:?}: only QBXMLMsgsRq is allowed",
-                msgs.name
-            )));
-        }
-        for rq in &msgs.children {
-            messages += 1;
-            if !rq.name.ends_with("QueryRq") {
-                return Err(QbdError::Unsupported(format!(
-                    "refusing to send {:?} to QuickBooks: LibreBooks only ever queries",
-                    rq.name
-                )));
-            }
-        }
-    }
-    if messages == 0 {
-        return Err(QbdError::Unsupported(
-            "refusing to send an empty qbXML document".into(),
-        ));
-    }
-    Ok(())
+    lb_qbsdk::read_only::check(xml_doc).map_err(QbdError::Unsupported)
 }
 
 /// A qbXML `DATETIMETYPE` for a civil date (midnight, QuickBooks' own local

@@ -56,6 +56,7 @@ keyboard-first data entry, with no subscription. MIT licensed.
 | `crates/lb-reports` | Reports. |
 | `crates/lb-auth` | Passkeys, enrolment tokens, device keys, sessions. |
 | `crates/lb-qbd` | QuickBooks Desktop import (read-only). |
+| `crates/lb-qbsdk` | The read-only QuickBooks SDK session, and `librebooks-qbsdk.exe`, the 32-bit helper that runs it when a 64-bit LibreBooks can't reach QuickBooks 2021 or older. |
 | `crates/lb-feeds` | Bank and card feeds. |
 | `crates/lb-backup` | Backups. |
 | `crates/lb-update` | Self-update. |

@@ -111,6 +111,11 @@ jobs:
         run: sudo apt-get update -qq && sudo apt-get install -y -qq musl-tools cmake
       - name: Build
         run: cargo build --release --locked --target ${{ matrix.target }} -p librebooks
+      - name: Build the 32-bit QuickBooks SDK helper
+        if: contains(matrix.target, 'windows')
+        run: |
+          rustup target add i686-pc-windows-msvc
+          cargo build --release --locked --target i686-pc-windows-msvc -p lb-qbsdk
       - name: The binary reports the tag
         shell: bash
         run: |
@@ -125,6 +130,7 @@ jobs:
           exe=librebooks
           if [[ "${{ matrix.target }}" == *windows* ]]; then exe=librebooks.exe; fi
           cp "target/${{ matrix.target }}/release/$exe" LICENSE README.md "dist/$name/"
+          if [[ "${{ matrix.target }}" == *windows* ]]; then cp target/i686-pc-windows-msvc/release/librebooks-qbsdk.exe "dist/$name/"; fi
           cd dist
           if [ "${{ matrix.archive }}" = zip ]; then 7z a -tzip "$name.zip" "$name" > /dev/null; else tar czf "$name.tar.gz" "$name"; fi
           rm -r "$name"
@@ -171,6 +177,14 @@ jobs:
           key: release-desktop-${{ matrix.os }}
       - name: Tauri CLI
         run: cargo install tauri-cli --version "^2" --locked
+      - name: Build the 32-bit QuickBooks SDK helper
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          rustup target add i686-pc-windows-msvc
+          cargo build --release --locked --target i686-pc-windows-msvc -p lb-qbsdk
+          mkdir -p desktop/src-tauri/binaries
+          cp target/i686-pc-windows-msvc/release/librebooks-qbsdk.exe desktop/src-tauri/binaries/librebooks-qbsdk-x86_64-pc-windows-msvc.exe
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ github.token }}
@@ -181,6 +195,7 @@ jobs:
           releaseId: ${{ needs.draft.outputs.release_id }}
           includeUpdaterJson: true
           tauriScript: cargo tauri
+          args: ${{ runner.os == 'Windows' && '--config tauri.qbsdk.conf.json' || '' }}
 
   container:
     name: Container image

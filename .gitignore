@@ -6,6 +6,8 @@
 node_modules/
 /web/dist/
 /desktop/dist/
+# The 32-bit SDK helper, copied in by the release build.
+/desktop/src-tauri/binaries/
 *.tsbuildinfo
 /test-results/
 /playwright-report/

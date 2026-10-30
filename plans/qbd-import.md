@@ -396,6 +396,16 @@ local mode, or `librebooks serve`/`import qbd` on cad-3):
    32-bit (`QBW32.EXE`). The QB Bridge works because its Python is 32-bit. When the SDK
    fails, that log is the first place to look: the error QuickBooks returns
    (`Could not start QuickBooks`) says nothing of this.
+   **Two routes, direct first** (built 2026-10-30, `crates/lb-qbsdk`). The COM
+   session lives in that small crate, which both routes run, so the read-only
+   request, the `WasAuthPreferencesObeyed` check and the queries-only check
+   can't differ between them. `SdkSession::open` tries it in-process; only if
+   that can't reach QuickBooks (`0x80040408` or `0x80040154`) and the build is
+   64-bit does it start `librebooks-qbsdk.exe` from beside the binary and relay
+   over its stdin/stdout (`lb_qbsdk::wire`). A refusal isn't retried. Closing
+   stdin ends the helper's session, so it can't outlive the app. The crate
+   stays free of `lb-store` and TLS: on `i686-pc-windows-msvc` the full app
+   needs NASM for `aws-lc-sys` (`NASM command not found`), the helper doesn't.
    **Run it from the desktop session**, not over SSH: the SDK reaches the
    QuickBooks in the same Windows login session (the QB Bridge runs in session
    2 for this reason); SSH lands in a different session.
@@ -543,8 +553,12 @@ describes the protocol:
 - [ ] Live: add the `.qwc` on cad-3 and run a limited sync over the Web
       Connector; confirm the capability table; then a full sync and parity,
       which should close the bridge gaps (card charges, transfers…).
-- [ ] Live: the SDK transport from the desktop app on cad-3 (one-time
-      authorisation dialog; note what QuickBooks actually shows).
+- [x] 32-bit helper, direct first (2026-10-30): `crates/lb-qbsdk`; CI builds it
+      for i686 on Windows; releases ship it beside `librebooks.exe` and in the
+      desktop installer (`tauri.qbsdk.conf.json`; the release path hasn't run).
+- [ ] Live: the SDK transport on cad-3 through the helper (one-time
+      authorisation dialog; note what QuickBooks actually shows, and that it
+      offers read-only).
 
 ## Open questions for the user
 
@@ -553,12 +567,10 @@ describes the protocol:
    syncs much lighter on QuickBooks.) Same for the missing transaction types,
    which are what will keep parity off.
 2. ~~How should the Windows app reach the 32-bit SDK?~~ Answered 2026-10-30:
-   a small 32-bit helper, `librebooks-qbsdk.exe`, shipped beside the 64-bit app.
-   It holds the COM session and runs the queries-only check itself; the app
-   talks to it over stdin/stdout. Rejected: a whole 32-bit Windows build (caps
-   memory for everyone to serve one transport), and a registry DCOM surrogate
-   (`dllhost` is the same helper, but needs a machine change per install). Not
-   started: first the 32-bit trial has to prove the path end to end.
+   direct first, and a small 32-bit helper only if that can't reach QuickBooks
+   (see the SDK steps). Rejected: a whole 32-bit Windows build (caps memory for
+   everyone to serve one transport) and a registry DCOM surrogate (`dllhost` is
+   the same helper, but needs a machine change per install).
 3. **Run the first full import during off-hours?** Each request touches the
    QuickBooks the user is working in; at the default 100 ms pause it's about 45
    minutes of light, steady load.

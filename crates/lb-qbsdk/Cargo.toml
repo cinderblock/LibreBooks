@@ -1,0 +1,35 @@
+[package]
+name = "lb-qbsdk"
+description = "LibreBooks' read-only session with the QuickBooks SDK over COM, and the 32-bit helper that runs it for a 64-bit app."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+# Deliberately small: the helper is built for 32-bit Windows, and this crate must
+# stay free of the database and TLS stack (which on that target would need NASM).
+[dependencies]
+quick-xml.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.62", optional = true, features = [
+    "Win32_Foundation",
+    "Win32_System_Com",
+    "Win32_System_Ole",
+    "Win32_System_Variant",
+] }
+
+[features]
+default = ["com"]
+# The COM session itself; without it only the wire format and the read-only
+# check are here.
+com = ["dep:windows"]
+
+[[bin]]
+name = "librebooks-qbsdk"
+path = "src/main.rs"
+
+[lints]
+workspace = true

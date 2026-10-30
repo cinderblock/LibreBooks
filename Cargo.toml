@@ -5,6 +5,7 @@ members = [
     "crates/lb-store",
     "crates/lb-reports",
     "crates/lb-auth",
+    "crates/lb-qbsdk",
     "crates/lb-qbd",
     "crates/lb-feeds",
     "crates/lb-backup",
@@ -21,6 +22,7 @@ default-members = [
     "crates/lb-store",
     "crates/lb-reports",
     "crates/lb-auth",
+    "crates/lb-qbsdk",
     "crates/lb-qbd",
     "crates/lb-feeds",
     "crates/lb-backup",
@@ -44,6 +46,7 @@ lb-core = { path = "crates/lb-core" }
 lb-store = { path = "crates/lb-store" }
 lb-reports = { path = "crates/lb-reports" }
 lb-auth = { path = "crates/lb-auth" }
+lb-qbsdk = { path = "crates/lb-qbsdk", default-features = false }
 lb-qbd = { path = "crates/lb-qbd" }
 lb-feeds = { path = "crates/lb-feeds" }
 lb-backup = { path = "crates/lb-backup" }

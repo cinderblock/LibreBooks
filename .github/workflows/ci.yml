@@ -47,6 +47,13 @@ jobs:
       - name: Test
         run: cargo test --locked
 
+      # QuickBooks 2021 and older can only be reached from a 32-bit process.
+      - name: The 32-bit QuickBooks SDK helper builds
+        if: runner.os == 'Windows'
+        run: |
+          rustup target add i686-pc-windows-msvc
+          cargo build --locked --target i686-pc-windows-msvc -p lb-qbsdk
+
       - name: Generated TypeScript types are current
         if: runner.os == 'Linux'
         run: |
