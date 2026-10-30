@@ -382,7 +382,13 @@ local mode, or `librebooks serve`/`import qbd` on cad-3):
    InstanceFinder hr = 80040154`, with integrity level 2000, so elevation
    wasn't it. `QBInstanceFinder` classes create from a 32-bit process and fail
    from a 64-bit one (`{D20F1B09-…}` and `{1B3FC869-…}`, same machine, same
-   minute). The QB Bridge works because its Python is 32-bit. When the SDK
+   minute). The 64-bit failure is `0x800700C1`, not a valid Win32 application:
+   Intuit's 64-bit folder (`C:\Program Files\Common Files\Intuit\QuickBooks`,
+   2026-02-25) holds a real x64 `QBXMLRP2.dll` v32.13 and x64 `QBFC16/17.dll`,
+   but its `QBInstanceFinder.dll` v17.0D R5 is **x86**. Whether that's an
+   installer fault or those pieces are meant for a newer QuickBooks is unknown;
+   a native 64-bit path may exist on other installs. QuickBooks 2021 itself is
+   32-bit (`QBW32.EXE`). The QB Bridge works because its Python is 32-bit. When the SDK
    fails, that log is the first place to look: the error QuickBooks returns
    (`Could not start QuickBooks`) says nothing of this.
    **Run it from the desktop session**, not over SSH: the SDK reaches the
@@ -541,13 +547,13 @@ describes the protocol:
    it turns the full import from ~8,100 requests into ~20 and makes routine
    syncs much lighter on QuickBooks.) Same for the missing transaction types,
    which are what will keep parity off.
-2. **How should the Windows app reach the 32-bit SDK?** (Found 2026-10-30;
-   see the SDK steps.) Recommendation: a small 32-bit helper,
-   `librebooks-qbsdk.exe`, shipped beside the 64-bit app: it holds the COM
-   session and runs the queries-only check itself, and the app talks to it over
-   stdin/stdout. The alternatives are a whole 32-bit Windows build (simple, but
-   caps a company file's memory for everyone to serve one transport) or a
-   registry-based DCOM surrogate (changes the machine, per install).
+2. ~~How should the Windows app reach the 32-bit SDK?~~ Answered 2026-10-30:
+   a small 32-bit helper, `librebooks-qbsdk.exe`, shipped beside the 64-bit app.
+   It holds the COM session and runs the queries-only check itself; the app
+   talks to it over stdin/stdout. Rejected: a whole 32-bit Windows build (caps
+   memory for everyone to serve one transport), and a registry DCOM surrogate
+   (`dllhost` is the same helper, but needs a machine change per install). Not
+   started: first the 32-bit trial has to prove the path end to end.
 3. **Run the first full import during off-hours?** Each request touches the
    QuickBooks the user is working in; at the default 100 ms pause it's about 45
    minutes of light, steady load.
