@@ -371,7 +371,20 @@ local mode, or `librebooks serve`/`import qbd` on cad-3):
    coclass `RequestProcessor3`. `QBXMLRP2.RequestProcessor2` doesn't exist:
    the first live run died on it with `Invalid class string (0x800401F3)`
    (2026-10-28 4:40 PM PDT, 23:40Z). A 64-bit `QBXMLRP2.dll` is registered
-   beside the 32-bit one, so the 64-bit build can create it.
+   beside the 32-bit one, so a 64-bit build can create the processor, **but it
+   can't reach QuickBooks**: see the next note.
+   **The SDK only works from a 32-bit process** (found 2026-10-30, QuickBooks
+   2021 on cad-3). The 64-bit build passed `OpenConnection2` and the
+   `AuthPreferences` calls, then `BeginSession` failed with
+   `Could not start QuickBooks (0x80040408)`. QuickBooks' own log
+   (`C:\ProgramData\Intuit\QuickBooks\qbsdklog.txt`, 1:26 PM PDT, 20:26Z) gives
+   the cause: `Could not find or create an instance of QuickBooks using
+   InstanceFinder hr = 80040154`, with integrity level 2000, so elevation
+   wasn't it. `QBInstanceFinder` classes create from a 32-bit process and fail
+   from a 64-bit one (`{D20F1B09-…}` and `{1B3FC869-…}`, same machine, same
+   minute). The QB Bridge works because its Python is 32-bit. When the SDK
+   fails, that log is the first place to look: the error QuickBooks returns
+   (`Could not start QuickBooks`) says nothing of this.
    **Run it from the desktop session**, not over SSH: the SDK reaches the
    QuickBooks in the same Windows login session (the QB Bridge runs in session
    2 for this reason); SSH lands in a different session.
@@ -528,7 +541,14 @@ describes the protocol:
    it turns the full import from ~8,100 requests into ~20 and makes routine
    syncs much lighter on QuickBooks.) Same for the missing transaction types,
    which are what will keep parity off.
-2. **Run the first full import during off-hours?** Each request touches the
+2. **How should the Windows app reach the 32-bit SDK?** (Found 2026-10-30;
+   see the SDK steps.) Recommendation: a small 32-bit helper,
+   `librebooks-qbsdk.exe`, shipped beside the 64-bit app: it holds the COM
+   session and runs the queries-only check itself, and the app talks to it over
+   stdin/stdout. The alternatives are a whole 32-bit Windows build (simple, but
+   caps a company file's memory for everyone to serve one transport) or a
+   registry-based DCOM surrogate (changes the machine, per install).
+3. **Run the first full import during off-hours?** Each request touches the
    QuickBooks the user is working in; at the default 100 ms pause it's about 45
    minutes of light, steady load.
 
