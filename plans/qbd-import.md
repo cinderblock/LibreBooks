@@ -385,9 +385,14 @@ local mode, or `librebooks serve`/`import qbd` on cad-3):
    minute). The 64-bit failure is `0x800700C1`, not a valid Win32 application:
    Intuit's 64-bit folder (`C:\Program Files\Common Files\Intuit\QuickBooks`,
    2026-02-25) holds a real x64 `QBXMLRP2.dll` v32.13 and x64 `QBFC16/17.dll`,
-   but its `QBInstanceFinder.dll` v17.0D R5 is **x86**. Whether that's an
-   installer fault or those pieces are meant for a newer QuickBooks is unknown;
-   a native 64-bit path may exist on other installs. QuickBooks 2021 itself is
+   but its `QBInstanceFinder.dll` v17.0D R5 is **x86**. That fits Intuit's
+   docs (read 2026-10-30): QuickBooks went 64-bit with 2022, and the docs say
+   the 64-bit SDK is for 2022 and above. Intuit's forum has a developer
+   reporting the same failure against anything older than 2022, though one
+   Intuit reply there claimed 2002 and later; the live result here settles it
+   for 2021. The other way round is supported: Intuit says existing 32-bit SDK
+   apps keep working with QuickBooks 2022, so the 32-bit helper should cover
+   every version (not yet tried against 2022 or later). QuickBooks 2021 itself is
    32-bit (`QBW32.EXE`). The QB Bridge works because its Python is 32-bit. When the SDK
    fails, that log is the first place to look: the error QuickBooks returns
    (`Could not start QuickBooks`) says nothing of this.
