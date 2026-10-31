@@ -178,6 +178,31 @@ ItemSalesTax/ItemSalesTaxGroup lists, SalesTaxCode list, customer/vendor/job typ
 lists, price levels, TxnDeleted. This company has two credit card accounts, so
 their balances will be off by exactly the missing charges/credits/payments.
 
+## Beyond the bridge (qbXML transports)
+
+Checked against Intuit's own schema, `qbxml130.xsd` and `qbxmlops130.xsd`, in
+`C:\Program Files\Intuit\IDN\Common	oolsalidator` on cad-3 (not ours to commit).
+
+| qbXML | LibreBooks | Query carries |
+| --- | --- | --- |
+| `CreditCardCharge`, `CreditCardCredit` | same | `IncludeLineItems`, `OwnerID` |
+| `BillPaymentCreditCard` | same | `IncludeLineItems`, `OwnerID` |
+| `VendorCredit`, `ItemReceipt` | same | adds `IncludeLinkedTxns` |
+| `SalesTaxPaymentCheck`, `InventoryAdjustment` | same | `IncludeLineItems`, `OwnerID` |
+| `Transfer` | same | no lines, no `EntityFilter`, no `OwnerID` |
+| `Charge` | `StatementCharge` | `IncludeLinkedTxns`, `OwnerID` only |
+| `BuildAssembly` | same | `IncludeComponentLineItems`, `OwnerID` |
+| `Paycheck`, `PayrollLiabilityCheck` | no query exists | only `TransactionQueryRq` rows |
+| `ARRefundCreditCard` | no LibreBooks type yet | |
+
+`ModifiedDateRangeFilter` and `TxnDateRangeFilter` are a **choice** in the schema:
+sending both is a parse error, so a dated run sends only the date range.
+
+**Census.** `TransactionQueryRq` (`SummaryOnly`, returning `TxnType` and `TxnID`)
+counts every transaction by type in one paged query. Gaps then report what this
+company really has, not a blanket list. Paychecks wait for those counts: their
+rows are account/amount pairs whose signs must be seen on real data first.
+
 ## Asks for the bridge (or the user)
 
 1. `include_line_items=true` (and `include_linked_txns=true`) on list endpoints:
@@ -556,9 +581,18 @@ describes the protocol:
 - [x] 32-bit helper, direct first (2026-10-30): `crates/lb-qbsdk`; CI builds it
       for i686 on Windows; releases ship it beside `librebooks.exe` and in the
       desktop installer (`tauri.qbsdk.conf.json`; the release path hasn't run).
-- [ ] Live: the SDK transport on cad-3 through the helper (one-time
-      authorisation dialog; note what QuickBooks actually shows, and that it
-      offers read-only).
+- [x] Live: the SDK transport on cad-3 through the helper, 2026-10-31 12:53 PM PDT
+      (19:53Z), `--limit 5`: 26 requests in 6 s, 0 failed, every list complete
+      (160 accounts, 370 vendors, 95 customers, 30 items). All 8 mismatches and 8
+      of the 10 issues are the sample's own (payments of invoices outside the 5).
+      `0x80040527` "feature not enabled" lines in `qbsdklog.txt` on employees,
+      items, journals and invoice lines are QuickBooks' own: every request still
+      answered OK and no total or tax differed, so nothing we read was lost.
+- [ ] **Current:** import the types the bridge never had. The live run showed the
+      SDK transport was asking only the bridge's 13 transaction types, so the 14
+      gaps would not have closed. See "Beyond the bridge" below.
+- [ ] Live: repeat the limited run; read the census; then a full import and
+      parity.
 
 ## Open questions for the user
 
