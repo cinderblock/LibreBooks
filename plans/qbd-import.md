@@ -593,11 +593,20 @@ describes the protocol:
       gaps would not have closed. Nine types added, plus the census, and the
       bridge skips what it can't serve. See "Beyond the bridge". Built against
       Intuit's schema and the fake QuickBooks; **not yet seen live**.
-- [ ] **Current:** Live: repeat the limited run; read the census; then a full
-      import and parity.
-- [ ] Paychecks and liability checks, if the census finds any (`TransactionQueryRq`
-      rows). `BuildAssembly` waits for inventory reposting: its record has no
-      amounts. `ARRefundCreditCard` needs a LibreBooks type.
+- [x] Live: limited run with the new types, 2026-10-31 4:01 PM PDT (23:01Z): 44
+      requests in 18 s, 0 failed. Census: Check 6174, CreditCardCharge 37,
+      CreditCardCredit 1, CreditMemo 22, Deposit 605, Invoice 617, JournalEntry
+      186, ReceivePayment 501. **No paychecks, liability checks, transfers,
+      bills, builds or card refunds**, so nothing this company holds is out of
+      reach and the payroll work isn't needed for it. Found two things, fixed:
+      `SalesTaxPaymentCheckQueryRq` answers 3250 "feature not enabled" with sales
+      tax off (now means "none"), and the CLI made a new company on every run
+      (now it carries on with the one bound to that QuickBooks).
+- [ ] **Current:** Live: a full import into `01a19431-de35-718f-947d-4938c2f81ec2`,
+      then parity. Company `01a19385-...` on cad-3 is the earlier 5-of-each trial.
+- [ ] For other companies: paychecks and liability checks (`TransactionQueryRq`
+      rows), `BuildAssembly` (its record has no amounts; waits for inventory
+      reposting), `ARRefundCreditCard` (needs a LibreBooks type).
 
 ## Open questions for the user
 

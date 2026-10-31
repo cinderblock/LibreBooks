@@ -394,6 +394,16 @@ impl<S: QbdSource> Run<'_, S> {
                 self.consecutive_bridge_failures = 0;
                 rows
             }
+            Err(e) if e.is_feature_off() => {
+                self.issue(
+                    Severity::Info,
+                    entity,
+                    None,
+                    format!("{} list", entity.name()),
+                    "this company has that QuickBooks feature turned off, so it has none".into(),
+                );
+                return Ok(());
+            }
             Err(e) => {
                 let aborted = e.is_transient();
                 self.issue(
@@ -914,6 +924,7 @@ impl<S: QbdSource> Run<'_, S> {
             } else {
                 match self.source.list(entity, &ListQuery::default()).await {
                     Ok(rows) => rows.iter().filter_map(Meta::of).map(|m| m.id).collect(),
+                    Err(e) if e.is_feature_off() => continue,
                     Err(e) => {
                         self.issue(
                             Severity::Error,

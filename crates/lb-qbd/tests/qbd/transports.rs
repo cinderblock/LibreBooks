@@ -572,3 +572,26 @@ async fn the_bridge_never_asks_for_what_it_lacks() {
         assert_eq!(gap.map(|g| g.count), Some(None), "{t}");
     }
 }
+
+#[tokio::test]
+async fn a_feature_quickbooks_has_off_means_there_are_none() {
+    let src = qbxml_source(50);
+    src.transport().fail(
+        "SalesTaxPaymentCheckQueryRq",
+        QbdError::QBXML_FEATURE_OFF,
+        "This feature is not enabled or not available in this version of QuickBooks.",
+    );
+    let options = SyncOptions {
+        sweep: true,
+        ..SyncOptions::default()
+    };
+    let report = run_clean(&books(), &src, &options).await;
+    let note = report
+        .issues
+        .iter()
+        .find(|i| i.entity == QbdEntity::SalesTaxPaymentCheck)
+        .unwrap();
+    assert_eq!(note.severity, Severity::Info);
+    assert_eq!(report.aborted, None);
+    assert!(report.entity(QbdEntity::Deposit).unwrap().created > 0);
+}

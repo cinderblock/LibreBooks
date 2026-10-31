@@ -301,6 +301,9 @@ fn code_suffix(code: Option<&str>) -> String {
 impl QbdError {
     /// qbXML's "object not found" status.
     pub const QBXML_NOT_FOUND: i64 = 3120;
+    /// qbXML's "this feature is not enabled or not available in this version of
+    /// QuickBooks": a sales tax payment query in a company with sales tax off.
+    pub const QBXML_FEATURE_OFF: i64 = 3250;
     /// qbXML's "QuickBooks is busy / another application is modal" statuses,
     /// worth retrying.
     const QBXML_BUSY: [i64; 2] = [0x8004_0408, 0x8004_041A];
@@ -328,6 +331,11 @@ impl QbdError {
         }
     }
 
+    /// QuickBooks has this kind of record switched off, so there are none.
+    pub fn is_feature_off(&self) -> bool {
+        matches!(self, QbdError::Qbxml { code, .. } if *code == Self::QBXML_FEATURE_OFF)
+    }
+
     pub fn is_not_found(&self) -> bool {
         match self {
             QbdError::Refused { status, .. } => *status == 404,
@@ -337,14 +345,14 @@ impl QbdError {
     }
 }
 
+/// Transactions by qbXML `TxnType`.
+pub type Census = std::collections::BTreeMap<String, u32>;
+
 /// Where QuickBooks records come from. [`BridgeClient`] reads through the QB
 /// Bridge; [`crate::source::QbxmlSource`] speaks qbXML through the Web Connector
 /// queue ([`crate::qbwc`]) or the SDK ([`crate::sdk`], Windows); tests use
 /// fixtures ([`crate::testing::FixtureSource`]). The sync engine and parity check
 /// take any of them.
-/// Transactions by qbXML `TxnType`.
-pub type Census = std::collections::BTreeMap<String, u32>;
-
 pub trait QbdSource: Send + Sync {
     /// Every record of `entity` matching `query`, all pages. Transactions come
     /// without their lines (as the bridge's lists do); use [`QbdSource::get`].

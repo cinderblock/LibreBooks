@@ -297,6 +297,30 @@ fn open_source(
     }
 }
 
+/// The company already holding this QuickBooks company, so running the import
+/// again carries on with it instead of starting another.
+fn company_holding(state: &AppState, record: &Value) -> Result<Option<CompanyId>> {
+    let Some(source_id) = lb_qbd::sync::derive_source_id(record) else {
+        return Ok(None);
+    };
+    let bound = server_import::companies_bound_to(state, &source_id)
+        .map_err(|e| anyhow::anyhow!(e.message))?;
+    match bound.as_slice() {
+        [] => Ok(None),
+        [id] => {
+            eprintln!("carrying on with company {id}");
+            Ok(Some(*id))
+        }
+        many => {
+            let ids: Vec<String> = many.iter().map(ToString::to_string).collect();
+            bail!(
+                "these companies all hold this QuickBooks company; choose one with --company: {}",
+                ids.join(", ")
+            )
+        }
+    }
+}
+
 fn books_of(state: &AppState, id: CompanyId) -> Result<lb_store::Books> {
     state
         .companies
@@ -331,7 +355,13 @@ pub fn run(data_dir: &Path, secret_key: Option<PathBuf>, command: ImportCommand)
             let settings = transport.settings(saved_settings(&state, company)?);
             let delay = delay_ms.map(Duration::from_millis);
             let source = open_source(&state, company, &settings, &transport, delay)?;
-            let id = if let Some(id) = company {
+            let existing = if company.is_some() {
+                company
+            } else {
+                let record = rt.block_on(source.company())?;
+                company_holding(&state, &record)?
+            };
+            let id = if let Some(id) = existing {
                 id
             } else {
                 let info = CompanyInfo {
@@ -346,7 +376,7 @@ pub fn run(data_dir: &Path, secret_key: Option<PathBuf>, command: ImportCommand)
                 id
             };
             let books = books_of(&state, id)?;
-            if save || company.is_none() {
+            if save || existing.is_none() {
                 let mut to_save = settings.clone();
                 if let Some(key) = transport.given_key()? {
                     let name = server_import::bridge_key_name(id);

@@ -97,6 +97,23 @@ pub fn save_settings(books: &Books, settings: &ImportSettings) -> ApiResult<()> 
 }
 
 /// Which other company already uses this Web Connector user name, if any.
+/// The companies already holding this QuickBooks company's books.
+pub fn companies_bound_to(state: &AppState, source_id: &str) -> ApiResult<Vec<CompanyId>> {
+    let ids = state
+        .companies
+        .ids()
+        .map_err(|e| ApiError::internal(e.to_string()))?;
+    let mut out = Vec::new();
+    for id in ids {
+        let bound = lb_qbd::sync::bound_source(&state.companies.get(id)?)
+            .map_err(|e| ApiError::internal(e.to_string()))?;
+        if bound.as_deref() == Some(source_id) {
+            out.push(id);
+        }
+    }
+    Ok(out)
+}
+
 pub fn user_name_taken(state: &AppState, company: CompanyId, user_name: &str) -> ApiResult<bool> {
     for other in state.companies.list()? {
         if other.id == company {

@@ -820,3 +820,36 @@ async fn web_connector_sign_in_failures_are_rate_limited() {
     s.state.imports.prune();
     assert_eq!(wc.authenticate(&wc.password).await.1, "nvu");
 }
+
+#[tokio::test]
+async fn companies_are_found_by_the_quickbooks_company_they_hold() {
+    let s = Server::open(OpsOptions::default());
+    let company = |source: Option<&str>| {
+        let info = lb_core::CompanyInfo {
+            name: "Imported".into(),
+            ..lb_core::CompanyInfo::default()
+        };
+        let id = s.state.companies.create(&info).unwrap();
+        if let Some(source) = source {
+            let books = s.state.companies.get(id).unwrap();
+            books
+                .write(&lb_store::Actor::system(), |w| {
+                    lb_store::company::set_setting(w, lb_qbd::sync::SETTING_SOURCE, source)
+                })
+                .unwrap();
+        }
+        id
+    };
+    let ours = company(Some("qbd:ein-1"));
+    company(Some("qbd:ein-2"));
+    company(None);
+    let found = |id: &str| lb_server::import::companies_bound_to(&s.state, id).unwrap();
+    assert_eq!(found("qbd:ein-1"), vec![ours]);
+    assert_eq!(found("qbd:ein-3"), Vec::new());
+    let again = company(Some("qbd:ein-1"));
+    let mut both = found("qbd:ein-1");
+    both.sort();
+    let mut want = vec![ours, again];
+    want.sort();
+    assert_eq!(both, want);
+}
