@@ -194,8 +194,24 @@ async fn parity_over_qbxml_reads_the_trial_balance_report() {
     )
     .await
     .unwrap();
-    assert_eq!(via_qbxml.summary, via_bridge.summary);
-    assert_eq!(via_qbxml.accounts, via_bridge.accounts);
+    // The same figures; only the bridge has its gaps to blame.
+    assert_eq!(via_qbxml.summary.notes, Vec::<String>::new());
+    assert_ne!(via_bridge.summary.notes, Vec::<String>::new());
+    assert_eq!(
+        via_qbxml.summary.total_abs_difference,
+        via_bridge.summary.total_abs_difference
+    );
+    assert_eq!(
+        via_qbxml.summary.accounts_off,
+        via_bridge.summary.accounts_off
+    );
+    let figures = |r: &lb_qbd::parity::ParityReport| {
+        r.accounts
+            .iter()
+            .map(|a| (a.full_name.clone(), a.qbd, a.ours))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(figures(&via_qbxml), figures(&via_bridge));
     let tb = via_qbxml.trial_balance.unwrap();
     assert_eq!(tb.rows.len(), via_bridge.trial_balance.unwrap().rows.len());
     assert!(
@@ -354,4 +370,205 @@ async fn a_connection_error_mid_run_aborts_the_sync() {
     assert!(report.aborted.is_some(), "{}", report.summary());
     assert_eq!(session.send_request_xml().await, "");
     assert!(session.close_connection().contains("stopped"));
+}
+
+const VISA: &str = "80000011-1700000000";
+const CHECKING: &str = "80000010-1700000000";
+const UTILITIES: &str = "8000001E-1700000000";
+const PAYABLE: &str = "80000016-1700000000";
+const RECEIVABLE: &str = "80000012-1700000000";
+const POWER: &str = "80000040-1700000000";
+const MART: &str = "80000042-1700000000";
+const CAFE: &str = "80000033-1700000100";
+const ENGINEERING: &str = "80000070-1700000200";
+const CABLE: &str = "80000072-1700000200";
+
+fn id(list_id: &str) -> serde_json::Value {
+    json!({ "ListID": list_id })
+}
+
+/// One record of everything the bridge can't reach, on top of `src`'s company.
+fn beyond_the_bridge(src: &lb_qbd::testing::FixtureSource) {
+    let header = |txn_id: &str| {
+        json!({"TxnID": txn_id, "EditSequence": "1", "TimeCreated": "2026-03-20T09:00:00-08:00",
+            "TimeModified": "2026-03-20T09:00:00-08:00", "TxnDate": "2026-03-20"})
+    };
+    let with = |txn_id: &str, fields: serde_json::Value| {
+        let mut r = header(txn_id);
+        r.as_object_mut()
+            .unwrap()
+            .extend(fields.as_object().unwrap().clone());
+        r
+    };
+    let expense =
+        |amount: &str| json!({"TxnLineID": "1-1", "AccountRef": id(UTILITIES), "Amount": amount});
+    src.put(
+        QbdEntity::CreditCardCharge,
+        with(
+            "CC-1",
+            json!({"AccountRef": id(VISA), "PayeeEntityRef": id(MART), "Amount": "45.00",
+            "ExpenseLineRet": expense("45.00")}),
+        ),
+    );
+    src.put(
+        QbdEntity::CreditCardCredit,
+        with(
+            "CR-1",
+            json!({"AccountRef": id(VISA), "PayeeEntityRef": id(MART), "Amount": "10.00",
+            "ExpenseLineRet": expense("10.00")}),
+        ),
+    );
+    src.put(
+        QbdEntity::Transfer,
+        with(
+            "T-1",
+            json!({"TransferFromAccountRef": id(CHECKING), "TransferToAccountRef": id(VISA),
+            "FromAccountBalance": "1.00", "ToAccountBalance": "2.00", "Amount": "100.00"}),
+        ),
+    );
+    src.put(
+        QbdEntity::Transfer,
+        with(
+            "T-2",
+            json!({"TransferFromAccountRef": id(CHECKING), "TransferToAccountRef": id(VISA),
+            "Amount": "0.00", "Memo": "VOID: the wrong card"}),
+        ),
+    );
+    src.put(
+        QbdEntity::Bill,
+        with(
+            "B-9",
+            json!({"VendorRef": id(POWER), "APAccountRef": id(PAYABLE), "AmountDue": "150.00",
+            "OpenAmount": "0.00", "IsPaid": "true", "ExpenseLineRet": expense("150.00")}),
+        ),
+    );
+    src.put(
+        QbdEntity::VendorCredit,
+        with(
+            "VC-1",
+            json!({"VendorRef": id(POWER), "APAccountRef": id(PAYABLE), "CreditAmount": "20.00",
+            "ExpenseLineRet": expense("20.00")}),
+        ),
+    );
+    src.put(
+        QbdEntity::BillPaymentCreditCard,
+        with(
+            "BP-1",
+            json!({"PayeeEntityRef": id(POWER), "APAccountRef": id(PAYABLE),
+            "CreditCardAccountRef": id(VISA), "Amount": "130.00",
+            "AppliedToTxnRet": {"TxnID": "B-9", "TxnType": "Bill", "Amount": "130.00",
+                "LinkedTxn": {"TxnID": "VC-1", "TxnType": "VendorCredit", "Amount": "-20.00"}}}),
+        ),
+    );
+    src.put(
+        QbdEntity::Charge,
+        with(
+            "SC-9",
+            json!({"CustomerRef": id(CAFE), "ItemRef": id(ENGINEERING), "Quantity": "2",
+            "Rate": "50.00", "Amount": "100.00", "BalanceRemaining": "100.00",
+            "ARAccountRef": id(RECEIVABLE), "IsPaid": "false"}),
+        ),
+    );
+    src.put(
+        QbdEntity::ItemReceipt,
+        with("IR-1", json!({"VendorRef": id(MART), "APAccountRef": id(PAYABLE), "TotalAmount": "30.00",
+            "ItemLineRet": {"TxnLineID": "2-1", "ItemRef": id(CABLE), "Quantity": "1", "Cost": "30.00", "Amount": "30.00"}})),
+    );
+    src.put(
+        QbdEntity::SalesTaxPaymentCheck,
+        with(
+            "ST-1",
+            json!({"PayeeEntityRef": id(POWER), "BankAccountRef": id(CHECKING), "Amount": "25.00",
+            "SalesTaxPaymentCheckLineRet": {"TxnLineID": "3-1", "Amount": "25.00"}}),
+        ),
+    );
+}
+
+#[tokio::test]
+async fn what_the_bridge_cannot_reach_imports_over_qbxml() {
+    let base = qbxml_source(50);
+    let b0 = books();
+    let r0 = run_clean(&b0, &base, &SyncOptions::default()).await;
+
+    let fixtures = larkspur();
+    beyond_the_bridge(&fixtures);
+    fixtures.count_also("Paycheck", 3);
+    let src = QbxmlSource::new(FakeQuickBooks::new(fixtures)).with_page_size(2);
+    let b = books();
+    let report = run_clean(&b, &src, &SyncOptions::default()).await;
+
+    for (entity, created) in [
+        (QbdEntity::CreditCardCharge, 1),
+        (QbdEntity::CreditCardCredit, 1),
+        (QbdEntity::Transfer, 2),
+        (QbdEntity::VendorCredit, 1),
+        (QbdEntity::BillPaymentCreditCard, 1),
+        (QbdEntity::Charge, 1),
+        (QbdEntity::ItemReceipt, 1),
+        (QbdEntity::SalesTaxPaymentCheck, 1),
+    ] {
+        assert_eq!(
+            report.entity(entity).unwrap().created,
+            created,
+            "{entity:?}"
+        );
+    }
+    assert_eq!(
+        report.mismatches, r0.mismatches,
+        "QuickBooks' figures all agree"
+    );
+    let moved = |name: &str| balance(&b, name) - balance(&b0, name);
+    // Charge 45, credit 10, paid 100 from the bank, bill paid on the card 130.
+    assert_eq!(moved("Visa x1234"), m("65.00"));
+    assert_eq!(moved("Checking"), m("-125.00"));
+    assert_eq!(moved("Accounts Receivable"), m("100.00"));
+    // The receipt is still owed; the bill is settled by the card and the credit.
+    assert_eq!(moved("Accounts Payable"), m("30.00"));
+    assert!(txn(&b, QbdEntity::Transfer, "T-2").is_void);
+
+    // The census found what no query can, and nothing else is missing.
+    assert_eq!(report.census["CreditCardCharge"], 1);
+    assert_eq!(report.census["Paycheck"], 3);
+    let gaps: Vec<_> = report
+        .gaps
+        .iter()
+        .filter(|g| g.count.is_some())
+        .map(|g| (g.qbd_type.as_str(), g.count))
+        .collect();
+    assert_eq!(gaps, vec![("Paycheck", Some(3))]);
+    assert!(!report.issues.iter().any(|i| i.message.contains("counted")));
+    assert_eq!(src.transport().open_iterators(), 0);
+
+    // The same run again finds nothing new.
+    let again = run_clean(&b, &src, &SyncOptions::default()).await;
+    assert_eq!(again.entity(QbdEntity::Transfer).unwrap().created, 0);
+}
+
+#[tokio::test]
+async fn a_list_short_of_the_census_is_reported() {
+    let fixtures = larkspur();
+    fixtures.count_also("CreditCardCharge", 2);
+    let src = QbxmlSource::new(FakeQuickBooks::new(fixtures));
+    let report = run_clean(&books(), &src, &SyncOptions::default()).await;
+    assert!(
+        report
+            .issues
+            .iter()
+            .any(|i| i.entity == QbdEntity::CreditCardCharge
+                && i.message == "QuickBooks counted 2 but listed 0"),
+        "{:#?}",
+        report.issues
+    );
+}
+
+#[tokio::test]
+async fn the_bridge_never_asks_for_what_it_lacks() {
+    let bridge = larkspur();
+    let report = run_clean(&books(), &bridge, &SyncOptions::default()).await;
+    assert!(report.entity(QbdEntity::Transfer).is_none());
+    assert!(report.census.is_empty());
+    for t in ["CreditCardCharge", "Transfer", "Paycheck"] {
+        let gap = report.gaps.iter().find(|g| g.qbd_type == t);
+        assert_eq!(gap.map(|g| g.count), Some(None), "{t}");
+    }
 }

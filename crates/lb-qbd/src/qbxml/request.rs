@@ -58,6 +58,15 @@ pub const fn query_name(entity: QbdEntity) -> &'static str {
         QbdEntity::ReceivePayment => "ReceivePaymentQueryRq",
         QbdEntity::BillPaymentCheck => "BillPaymentCheckQueryRq",
         QbdEntity::Deposit => "DepositQueryRq",
+        QbdEntity::CreditCardCharge => "CreditCardChargeQueryRq",
+        QbdEntity::CreditCardCredit => "CreditCardCreditQueryRq",
+        QbdEntity::Transfer => "TransferQueryRq",
+        QbdEntity::VendorCredit => "VendorCreditQueryRq",
+        QbdEntity::ItemReceipt => "ItemReceiptQueryRq",
+        QbdEntity::BillPaymentCreditCard => "BillPaymentCreditCardQueryRq",
+        QbdEntity::SalesTaxPaymentCheck => "SalesTaxPaymentCheckQueryRq",
+        QbdEntity::InventoryAdjustment => "InventoryAdjustmentQueryRq",
+        QbdEntity::Charge => "ChargeQueryRq",
     }
 }
 
@@ -86,7 +95,8 @@ pub const fn capabilities(entity: QbdEntity) -> Capabilities {
     use QbdEntity as E;
     Capabilities {
         iterator: entity.supports_iterator(),
-        include_line_items: entity.is_transaction() && !matches!(entity, E::TimeTracking),
+        include_line_items: entity.is_transaction()
+            && !matches!(entity, E::TimeTracking | E::Transfer | E::Charge),
         include_linked_txns: matches!(
             entity,
             E::Invoice
@@ -96,6 +106,9 @@ pub const fn capabilities(entity: QbdEntity) -> Capabilities {
                 | E::PurchaseOrder
                 | E::Bill
                 | E::Check
+                | E::VendorCredit
+                | E::ItemReceipt
+                | E::Charge
         ),
         owner_id: matches!(
             entity,
@@ -107,7 +120,8 @@ pub const fn capabilities(entity: QbdEntity) -> Capabilities {
                 | E::ItemService
                 | E::ItemNonInventory
                 | E::ItemInventory
-        ) || (entity.is_transaction() && !matches!(entity, E::TimeTracking)),
+        ) || (entity.is_transaction()
+            && !matches!(entity, E::TimeTracking | E::Transfer)),
     }
 }
 
@@ -179,11 +193,8 @@ pub fn list(entity: QbdEntity, query: &ListQuery, paging: &Paging, request_id: u
         }
     }
     if entity.is_transaction() {
-        if let Some(m) = &query.modified_after {
-            body.push_str("<ModifiedDateRangeFilter>");
-            text(&mut body, "FromModifiedDate", m);
-            body.push_str("</ModifiedDateRangeFilter>");
-        }
+        // The schema allows one or the other. A dated run gets every row in its
+        // range; the unchanged ones are skipped by `EditSequence`.
         if query.from_date.is_some() || query.to_date.is_some() {
             body.push_str("<TxnDateRangeFilter>");
             if let Some(d) = query.from_date {
@@ -193,8 +204,14 @@ pub fn list(entity: QbdEntity, query: &ListQuery, paging: &Paging, request_id: u
                 text(&mut body, "ToTxnDate", &date(d));
             }
             body.push_str("</TxnDateRangeFilter>");
+        } else if let Some(m) = &query.modified_after {
+            body.push_str("<ModifiedDateRangeFilter>");
+            text(&mut body, "FromModifiedDate", m);
+            body.push_str("</ModifiedDateRangeFilter>");
         }
-        if let Some(n) = &query.entity_name {
+        if let Some(n) = &query.entity_name
+            && entity != QbdEntity::Transfer
+        {
             body.push_str("<EntityFilter>");
             text(&mut body, "FullName", n);
             body.push_str("</EntityFilter>");
@@ -249,6 +266,37 @@ pub fn get(entity: QbdEntity, id: &str, request_id: u64) -> Request {
         name,
         request_id,
         xml: document(name, request_id, "", &body),
+    }
+}
+
+/// A page of `TransactionQueryRq`, one row per transaction of any type, holding
+/// only its type and id: how many of each kind the company really has.
+pub fn census(paging: &Paging, request_id: u64) -> Request {
+    const NAME: &str = "TransactionQueryRq";
+    let mut body = String::new();
+    let mut attrs = String::new();
+    match paging {
+        Paging::Whole { limit: Some(n) } => text(&mut body, "MaxReturned", &n.to_string()),
+        Paging::Whole { limit: None } => {}
+        Paging::Start { page } => {
+            attrs.push_str(" iterator=\"Start\"");
+            text(&mut body, "MaxReturned", &page.to_string());
+        }
+        Paging::Continue { iterator_id, page } => {
+            attrs.push_str(&format!(
+                " iterator=\"Continue\" iteratorID=\"{}\"",
+                escape(iterator_id.as_str())
+            ));
+            text(&mut body, "MaxReturned", &page.to_string());
+        }
+    }
+    text(&mut body, "TransactionDetailLevelFilter", "SummaryOnly");
+    text(&mut body, "IncludeRetElement", "TxnType");
+    text(&mut body, "IncludeRetElement", "TxnID");
+    Request {
+        name: NAME,
+        request_id,
+        xml: document(NAME, request_id, &attrs, &body),
     }
 }
 
@@ -522,7 +570,6 @@ mod tests {
                 .nth(1)
                 .unwrap(),
             "<CheckQueryRq requestID=\"3\" iterator=\"Continue\" iteratorID=\"{abc}\"><MaxReturned>200</MaxReturned>\
-             <ModifiedDateRangeFilter><FromModifiedDate>2026-01-01T00:00:00</FromModifiedDate></ModifiedDateRangeFilter>\
              <TxnDateRangeFilter><FromTxnDate>2026-01-01</FromTxnDate><ToTxnDate>2026-03-31</ToTxnDate></TxnDateRangeFilter>\
              <IncludeLineItems>true</IncludeLineItems><IncludeLinkedTxns>true</IncludeLinkedTxns><OwnerID>0</OwnerID>\
              </CheckQueryRq></QBXMLMsgsRq></QBXML>"
@@ -549,6 +596,61 @@ mod tests {
             t.contains("<TimeTrackingQueryRq requestID=\"1\"></TimeTrackingQueryRq>"),
             "{t}"
         );
+    }
+
+    #[test]
+    fn a_watermark_alone_filters_by_modified_date() {
+        let q = ListQuery {
+            modified_after: Some("2026-01-01T00:00:00".into()),
+            ..ListQuery::default()
+        };
+        let r = list(QbdEntity::Check, &q, &Paging::Whole { limit: None }, 1);
+        assert!(r.xml.contains(
+            "<ModifiedDateRangeFilter><FromModifiedDate>2026-01-01T00:00:00</FromModifiedDate></ModifiedDateRangeFilter>"
+        ), "{}", r.xml);
+    }
+
+    #[test]
+    fn each_query_carries_only_what_its_schema_allows() {
+        let body =
+            |e: QbdEntity| list(e, &ListQuery::default(), &Paging::Whole { limit: None }, 1).xml;
+        // No lines to include, and no custom fields on a transfer.
+        assert!(
+            body(QbdEntity::Transfer)
+                .contains("<TransferQueryRq requestID=\"1\"></TransferQueryRq>")
+        );
+        let charge = body(QbdEntity::Charge);
+        assert!(!charge.contains("IncludeLineItems"), "{charge}");
+        assert!(charge.contains("<IncludeLinkedTxns>true</IncludeLinkedTxns><OwnerID>0</OwnerID>"));
+        let card = body(QbdEntity::CreditCardCharge);
+        assert!(card.contains("<IncludeLineItems>true</IncludeLineItems><OwnerID>0</OwnerID>"));
+        assert!(!card.contains("IncludeLinkedTxns"), "{card}");
+        for e in [QbdEntity::VendorCredit, QbdEntity::ItemReceipt] {
+            assert!(
+                body(e).contains(
+                    "<IncludeLineItems>true</IncludeLineItems><IncludeLinkedTxns>true</IncludeLinkedTxns><OwnerID>0</OwnerID>"
+                ),
+                "{e:?}"
+            );
+        }
+        // A transfer has no name to filter by.
+        let q = ListQuery {
+            entity_name: Some("Someone".into()),
+            ..ListQuery::default()
+        };
+        let t = list(QbdEntity::Transfer, &q, &Paging::Whole { limit: None }, 1).xml;
+        assert!(!t.contains("EntityFilter"), "{t}");
+    }
+
+    #[test]
+    fn the_census_asks_for_type_and_id_of_everything() {
+        let r = census(&Paging::Start { page: 1000 }, 9);
+        assert!(r.xml.contains(
+            "<TransactionQueryRq requestID=\"9\" iterator=\"Start\"><MaxReturned>1000</MaxReturned>\
+             <TransactionDetailLevelFilter>SummaryOnly</TransactionDetailLevelFilter>\
+             <IncludeRetElement>TxnType</IncludeRetElement><IncludeRetElement>TxnID</IncludeRetElement></TransactionQueryRq>"
+        ), "{}", r.xml);
+        check_read_only(&r.xml).unwrap();
     }
 
     #[test]

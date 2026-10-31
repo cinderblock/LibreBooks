@@ -342,6 +342,9 @@ impl QbdError {
 /// queue ([`crate::qbwc`]) or the SDK ([`crate::sdk`], Windows); tests use
 /// fixtures ([`crate::testing::FixtureSource`]). The sync engine and parity check
 /// take any of them.
+/// Transactions by qbXML `TxnType`.
+pub type Census = std::collections::BTreeMap<String, u32>;
+
 pub trait QbdSource: Send + Sync {
     /// Every record of `entity` matching `query`, all pages. Transactions come
     /// without their lines (as the bridge's lists do); use [`QbdSource::get`].
@@ -374,6 +377,17 @@ pub trait QbdSource: Send + Sync {
     /// Requests made so far, where the source counts them.
     fn requests_made(&self) -> Option<u64> {
         None
+    }
+
+    /// Whether this source can reach `entity`.
+    fn serves(&self, _entity: QbdEntity) -> bool {
+        true
+    }
+
+    /// How many transactions the company holds, by qbXML `TxnType`, where the
+    /// source can tell: what a sync's gaps are measured against.
+    fn census(&self) -> impl Future<Output = Result<Option<Census>, QbdError>> + Send {
+        std::future::ready(Ok(None))
     }
 }
 
@@ -493,9 +507,10 @@ impl BridgeClient {
             let mut params = base.clone();
             params.push(("max_returned", page.to_string()));
             params.push(("iterator_id", iterator.clone()));
-            let body = self.get_once(entity.path(), None, &params).await?;
+            let path = bridge_path(entity)?;
+            let body = self.get_once(path, None, &params).await?;
             let meta = body.get("meta").cloned().unwrap_or(Value::Null);
-            let rows = rows(body, entity.path())?;
+            let rows = rows(body, path)?;
             let remaining = meta.get("remaining").and_then(Value::as_u64).unwrap_or(0) as usize;
             if expected.is_none() {
                 expected = Some(rows.len() + remaining);
@@ -585,8 +600,9 @@ impl BridgeClient {
     ) -> Result<Vec<Value>, QbdError> {
         let mut params = query.params(entity);
         params.push(("max_returned", max.to_string()));
-        let body = self.get_retrying(entity.path(), None, &params).await?;
-        rows(body, entity.path())
+        let path = bridge_path(entity)?;
+        let body = self.get_retrying(path, None, &params).await?;
+        rows(body, path)
     }
 
     fn backoff(&self, attempt: u32) -> Duration {
@@ -780,7 +796,19 @@ fn rows(v: Value, path: &str) -> Result<Vec<Value>, QbdError> {
     }
 }
 
+/// Where the bridge serves `entity`. The sync engine asks [`QbdSource::serves`]
+/// first, so this only refuses a direct call.
+fn bridge_path(entity: QbdEntity) -> Result<&'static str, QbdError> {
+    entity.path().ok_or_else(|| {
+        QbdError::Unsupported(format!("the bridge doesn't expose {}", entity.name()))
+    })
+}
+
 impl QbdSource for BridgeClient {
+    fn serves(&self, entity: QbdEntity) -> bool {
+        entity.path().is_some()
+    }
+
     async fn list(&self, entity: QbdEntity, query: &ListQuery) -> Result<Vec<Value>, QbdError> {
         if !self.knows_no_iterator(entity) {
             match self.list_iterating(entity, query).await {
@@ -797,7 +825,8 @@ impl QbdSource for BridgeClient {
     }
 
     async fn get(&self, entity: QbdEntity, id: &str) -> Result<Value, QbdError> {
-        Ok(data(self.get_retrying(entity.path(), Some(id), &[]).await?))
+        let path = bridge_path(entity)?;
+        Ok(data(self.get_retrying(path, Some(id), &[]).await?))
     }
 
     async fn company(&self) -> Result<Value, QbdError> {

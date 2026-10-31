@@ -846,7 +846,15 @@ export class FixtureAdmin {
         { severity: 'Info', entity: 'Bill', qbd_id: '3C4D-1700000002', record: 'Bill 8821 (Rockler Woodworking)', message: 'Linked item receipt not listed yet; the link is retried next sync' },
       ],
       mismatches: [{ entity: 'Invoice', qbd_id: '5E6F-1700000003', record: 'Invoice 1042 (Hollis Residence)', kind: 'SalesTax', qbd: 4_613, ours: 4_612 }],
-      gaps: [{ qbd_type: 'PayrollItemWage', links: 1, note: 'The bridge cannot list payroll items' }],
+      gaps: [
+        {
+          qbd_type: 'PayrollItemWage',
+          links: 1,
+          count: null,
+          note: 'The bridge cannot list payroll items',
+        },
+      ],
+      census: {},
       unmapped_fields: { 'Customer.PriceLevelRef': 3, 'Item.UnitOfMeasureSetRef': 2 },
       created_lists: ['SalesTaxCode "Non"'],
       aborted: null,

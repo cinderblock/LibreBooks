@@ -174,7 +174,7 @@ fn payments_report_links_they_cannot_make() {
             {"TxnID": "CM-1", "TxnType": "CreditMemo", "Amount": "-5.00"},
             {"TxnID": "P-2", "TxnType": "ReceivePayment", "Amount": "-10.00"}
          ]},
-        {"TxnID": "SC-1", "TxnType": "Charge", "Amount": "40.00"},
+        {"TxnID": "SC-1", "TxnType": "ARRefundCreditCard", "Amount": "40.00"},
         {"TxnID": "INV-9", "TxnType": "Invoice", "Amount": "0.00"}
     ]});
     let mut map = Map {
@@ -200,8 +200,60 @@ fn payments_report_links_they_cannot_make() {
     );
     assert_eq!(
         imp.missing_links[0].to_string(),
-        "payment applied to Charge SC-1 (the bridge doesn't expose that type)"
+        "payment applied to ARRefundCreditCard SC-1 (this import can't bring that type in)"
     );
+}
+
+#[test]
+fn transfers_are_two_accounts_and_an_amount() {
+    let v = json!({"TxnID": "T-1", "TxnDate": "2026-03-10", "TransferFromAccountRef": r("bank"),
+        "FromAccountBalance": "900.00", "TransferToAccountRef": r("card"), "ToAccountBalance": "0.00",
+        "Amount": "100.00", "Memo": "Pay the card"});
+    let imp = qbxml::txns::txn(QbdEntity::Transfer, &v, &mut Map::default()).unwrap();
+    assert!(imp.txn.account_id.is_some());
+    assert!(imp.txn.to_account_id.is_some());
+    assert_eq!(imp.txn.amount.0, 10_000);
+    assert_eq!(imp.txn.memo.as_deref(), Some("Pay the card"));
+    assert_eq!(imp.qbd_total.unwrap().0, 10_000);
+    assert_eq!(imp.txn.extra, None, "the running balances aren't kept");
+
+    let voided = json!({"TxnID": "T-2", "TxnDate": "2026-03-10", "TransferFromAccountRef": r("bank"),
+        "TransferToAccountRef": r("card"), "Amount": "0.00", "Memo": "VOID: wrong card"});
+    let imp = qbxml::txns::txn(QbdEntity::Transfer, &voided, &mut Map::default()).unwrap();
+    assert!(imp.txn.is_void);
+
+    let lost = json!({"TxnID": "T-3", "TxnDate": "2026-03-10", "TransferFromAccountRef": r("bank"), "Amount": "1.00"});
+    let err = qbxml::txns::txn(QbdEntity::Transfer, &lost, &mut Map::default()).unwrap_err();
+    assert!(err.to_string().contains("TransferToAccountRef"), "{err}");
+}
+
+#[test]
+fn inventory_adjustments_carry_value_and_quantity() {
+    let v = json!({"TxnID": "A-1", "TxnDate": "2026-03-10", "AccountRef": r("shrink"),
+    "InventoryAdjustmentLineRet": [
+        {"TxnLineID": "A1-1", "ItemRef": r("widget"), "QuantityDifference": "-2", "ValueDifference": "-30.00"}
+    ]});
+    let imp = qbxml::txns::txn(QbdEntity::InventoryAdjustment, &v, &mut Map::default()).unwrap();
+    let line = &imp.txn.lines[0];
+    assert_eq!(line.kind, LineKind::Item);
+    assert_eq!(line.amount.0, -3000);
+    assert_eq!(line.quantity_change, Some(rust_decimal::Decimal::from(-2)));
+}
+
+#[test]
+fn a_statement_charge_is_one_line_with_its_balance() {
+    let v = json!({"TxnID": "SC-1", "TxnDate": "2026-03-10", "CustomerRef": r("acme"), "ItemRef": r("svc"),
+        "Quantity": "2", "Rate": "50.00", "Amount": "100.00", "BalanceRemaining": "40.00",
+        "ARAccountRef": r("ar"), "IsPaid": "false", "Desc": "March retainer"});
+    let imp = qbxml::txns::txn(QbdEntity::Charge, &v, &mut Map::default()).unwrap();
+    assert_eq!(imp.txn.txn_type, lb_core::TxnType::StatementCharge);
+    assert_eq!(imp.txn.lines.len(), 1);
+    assert_eq!(imp.txn.lines[0].amount.0, 10_000);
+    assert_eq!(
+        imp.txn.lines[0].description.as_deref(),
+        Some("March retainer")
+    );
+    assert_eq!(imp.qbd_open_balance.unwrap().0, 4000);
 }
 
 #[test]

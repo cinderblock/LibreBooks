@@ -588,11 +588,16 @@ describes the protocol:
       `0x80040527` "feature not enabled" lines in `qbsdklog.txt` on employees,
       items, journals and invoice lines are QuickBooks' own: every request still
       answered OK and no total or tax differed, so nothing we read was lost.
-- [ ] **Current:** import the types the bridge never had. The live run showed the
+- [x] Import the types the bridge never had (2026-10-31): the live run showed the
       SDK transport was asking only the bridge's 13 transaction types, so the 14
-      gaps would not have closed. See "Beyond the bridge" below.
-- [ ] Live: repeat the limited run; read the census; then a full import and
-      parity.
+      gaps would not have closed. Nine types added, plus the census, and the
+      bridge skips what it can't serve. See "Beyond the bridge". Built against
+      Intuit's schema and the fake QuickBooks; **not yet seen live**.
+- [ ] **Current:** Live: repeat the limited run; read the census; then a full
+      import and parity.
+- [ ] Paychecks and liability checks, if the census finds any (`TransactionQueryRq`
+      rows). `BuildAssembly` waits for inventory reposting: its record has no
+      amounts. `ARRefundCreditCard` needs a LibreBooks type.
 
 ## Open questions for the user
 

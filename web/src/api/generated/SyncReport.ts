@@ -25,6 +25,11 @@ full: boolean,
  */
 partial_run: boolean, entities: Array<EntityReport>, issues: Array<SyncIssue>, mismatches: Array<Mismatch>, gaps: Array<Gap>, 
 /**
+ * How many transactions QuickBooks holds, by qbXML `TxnType`, where the
+ * transport can say.
+ */
+census: { [key in string]: number }, 
+/**
  * QBD fields LibreBooks has no home for (`Customer.PriceLevelRef`), with how
  * many records carried them. Transactions keep theirs in `extra`; these are
  * from list records and sub-records.

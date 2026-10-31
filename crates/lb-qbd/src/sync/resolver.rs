@@ -33,6 +33,8 @@ pub struct ResolverState {
     pub non_taxable_code: Option<String>,
     pub created: Vec<String>,
     pub notes: Vec<String>,
+    /// What this run's transport can't reach.
+    pub unserved: Vec<QbdEntity>,
 }
 
 #[derive(Debug)]
@@ -353,5 +355,9 @@ impl Resolver for StoreResolver<'_, '_> {
             // any imported transaction with this id is the one.
             None => self.local_by_id(txn_id, "txn"),
         }
+    }
+
+    fn imports(&self, txn_type: &str) -> bool {
+        QbdEntity::for_qbxml_txn_type(txn_type).is_some_and(|e| !self.state.unserved.contains(&e))
     }
 }

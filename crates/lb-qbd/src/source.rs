@@ -19,14 +19,14 @@
 //! **Read-only.** Every document passes [`request::check_read_only`] in
 //! [`QbxmlSource::send`], the one function that hands documents to a transport.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde_json::Value;
 
-use crate::client::{ListQuery, QbdError, QbdSource, ReportQuery};
+use crate::client::{Census, ListQuery, QbdError, QbdSource, ReportQuery};
 use crate::entity::QbdEntity;
 use crate::qbxml::request::{self, Paging, Request, capabilities};
 use crate::qbxml::xml::{self, QueryResponse};
@@ -64,6 +64,9 @@ impl<T> std::fmt::Debug for QbxmlSource<T> {
 /// Rows per iterator page. qbXML pages carry whole records, lines included, so
 /// pages are smaller than the bridge's.
 pub const DEFAULT_PAGE_SIZE: usize = 200;
+
+/// Rows per page of the census. Each is just a type and an id.
+const CENSUS_PAGE_SIZE: usize = 1000;
 
 impl<T: QbxmlTransport> QbxmlSource<T> {
     pub fn new(transport: T) -> QbxmlSource<T> {
@@ -282,5 +285,39 @@ impl<T: QbxmlTransport> QbdSource for QbxmlSource<T> {
 
     fn requests_made(&self) -> Option<u64> {
         Some(self.requests.load(Ordering::Relaxed))
+    }
+
+    async fn census(&self) -> Result<Option<Census>, QbdError> {
+        // Ids, not rows: QuickBooks decides what a "summary" row is per type.
+        let mut seen: HashMap<String, HashSet<String>> = HashMap::new();
+        let mut paging = Paging::Start {
+            page: CENSUS_PAGE_SIZE,
+        };
+        loop {
+            let rs = self
+                .query(request::census(&paging, self.request_id()))
+                .await?;
+            let got = rs.records.len();
+            for (_, row) in rs.records {
+                let text = |k: &str| row.get(k).and_then(Value::as_str).map(str::to_owned);
+                if let (Some(t), Some(id)) = (text("TxnType"), text("TxnID")) {
+                    seen.entry(t).or_default().insert(id);
+                }
+            }
+            match rs.iterator_id {
+                Some(id) if rs.iterator_remaining_count.unwrap_or(0) > 0 && got > 0 => {
+                    paging = Paging::Continue {
+                        iterator_id: id,
+                        page: CENSUS_PAGE_SIZE,
+                    };
+                }
+                _ => break,
+            }
+        }
+        Ok(Some(
+            seen.into_iter()
+                .map(|(t, ids)| (t, ids.len() as u32))
+                .collect(),
+        ))
     }
 }

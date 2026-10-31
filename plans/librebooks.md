@@ -241,6 +241,8 @@ Phases are ordered; each ends usable. **Current step is marked ▶.**
   it came from. Next with the user: point
   QuickBooks' Web Connector on cad-3 at this server over HTTPS (steps in
   `plans/qbd-import.md`), run a sync, and see whether the 14 bridge gaps close.
+  (2026-10-31: the SDK transport works live on QuickBooks 2021 through its 32-bit
+  helper, and now reads the types the bridge lacks; a full run is next.)
 - Phase 1 — Ledger core
   - Domain types, chart of accounts (all QBD account types), names (customers +
     jobs, vendors, employees, other names), items (all QBD item types), classes,

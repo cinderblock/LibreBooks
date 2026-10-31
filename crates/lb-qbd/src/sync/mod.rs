@@ -36,7 +36,7 @@ use lb_store::{Books, StoreError, accounts, company, entities, extref, items, li
 use serde_json::Value;
 
 use crate::client::{ListQuery, QbdError, QbdSource};
-use crate::entity::{NOT_EXPOSED_TXN_TYPES, QbdEntity};
+use crate::entity::{QbdEntity, UNIMPORTED_TXN_TYPES};
 use crate::qbxml::record::{Meta, describe};
 use crate::qbxml::{self};
 use crate::source::RET_ELEMENT_KEY;
@@ -274,6 +274,10 @@ pub async fn sync<S: QbdSource>(
         state: ResolverState {
             taxable_code,
             non_taxable_code,
+            unserved: QbdEntity::ALL
+                .into_iter()
+                .filter(|e| !source.serves(*e))
+                .collect(),
             ..ResolverState::default()
         },
         report,
@@ -294,8 +298,19 @@ pub async fn sync<S: QbdSource>(
             "backfilled A/R and A/P links on older transactions"
         );
     }
+    match source.census().await {
+        Ok(Some(census)) => run.report.census = census,
+        Ok(None) => {}
+        Err(e) => run.issue(
+            Severity::Warning,
+            QbdEntity::Account,
+            None,
+            "Transaction census".into(),
+            format!("couldn't count QuickBooks' transactions: {e}"),
+        ),
+    }
     for entity in QbdEntity::SYNC_ORDER {
-        if !options.includes(entity) {
+        if !options.includes(entity) || !source.serves(entity) {
             continue;
         }
         if run.report.aborted.is_some() {
@@ -887,7 +902,10 @@ impl<S: QbdSource> Run<'_, S> {
     /// the rest; lists after transactions, children before parents).
     async fn sweep(&mut self) -> Result<(), SyncError> {
         for entity in QbdEntity::SYNC_ORDER.into_iter().rev() {
-            if !self.options.includes(entity) || self.report.aborted.is_some() {
+            if !self.options.includes(entity)
+                || !self.source.serves(entity)
+                || self.report.aborted.is_some()
+            {
                 continue;
             }
             self.progress(entity, SyncPhase::Sweeping, 0, 0);
@@ -1008,32 +1026,81 @@ impl<S: QbdSource> Run<'_, S> {
         })
     }
 
-    fn finish(mut self) -> Result<SyncReport, SyncError> {
+    /// What the books can't hold after this run. A census says exactly what the
+    /// company has; without one, every type out of reach is listed.
+    fn gaps(&mut self) {
+        let census = std::mem::take(&mut self.report.census);
+        let imported =
+            |t: &str| QbdEntity::for_qbxml_txn_type(t).is_some_and(|e| self.source.serves(e));
         for (t, links) in std::mem::take(&mut self.gap_links) {
             self.report.gaps.push(Gap {
                 note: format!(
-                    "imported records link to {links} {t} transaction(s), which the bridge doesn't expose"
+                    "imported records link to {links} {t} transaction(s), which this import can't bring in"
                 ),
+                count: census.get(&t).copied(),
                 qbd_type: t,
                 links,
             });
         }
-        for t in NOT_EXPOSED_TXN_TYPES {
+        let out_of_reach: Vec<(String, Option<u32>)> = if census.is_empty() {
+            QbdEntity::ALL
+                .into_iter()
+                .filter(|e| e.is_transaction() && !self.source.serves(*e))
+                .map(QbdEntity::name)
+                .chain(UNIMPORTED_TXN_TYPES)
+                .map(|t| (t.to_owned(), None))
+                .collect()
+        } else {
+            census
+                .iter()
+                .filter(|(t, n)| **n > 0 && !imported(t))
+                .map(|(t, n)| (t.clone(), Some(*n)))
+                .collect()
+        };
+        for (t, count) in out_of_reach {
             if !self.report.gaps.iter().any(|g| g.qbd_type == t) {
                 self.report.gaps.push(Gap {
-                    qbd_type: t.to_owned(),
+                    qbd_type: t,
                     links: 0,
-                    note:
-                        "not exposed by the bridge; these transactions are missing from the books"
-                            .into(),
+                    count,
+                    note: "this import can't bring these in; they're missing from the books".into(),
                 });
             }
         }
         self.report.gaps.push(Gap {
             qbd_type: "PayrollItemWage".into(),
             links: 0,
+            count: None,
             note: "LibreBooks has no payroll item list yet; time entries keep the payroll item in their extra fields".into(),
         });
+        self.report.census = census;
+    }
+
+    /// Everything listed in full should match what the census counted.
+    fn census_check(&mut self) {
+        let mut off = Vec::new();
+        for (entity, ids) in &self.listed_all {
+            if let Some(n) = self.report.census.get(entity.name())
+                && *n as usize != ids.len()
+            {
+                off.push((*entity, *n, ids.len()));
+            }
+        }
+        off.sort();
+        for (entity, counted, listed) in off {
+            self.issue(
+                Severity::Warning,
+                entity,
+                None,
+                format!("{} list", entity.name()),
+                format!("QuickBooks counted {counted} but listed {listed}"),
+            );
+        }
+    }
+
+    fn finish(mut self) -> Result<SyncReport, SyncError> {
+        self.gaps();
+        self.census_check();
         self.report.requests = self.source.requests_made();
         let finished = jiff::Timestamp::now();
         self.report.finished_at = Some(finished);

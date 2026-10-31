@@ -370,6 +370,24 @@ impl QbdSource for Source {
             Source::Sdk(s) => s.requests_made(),
         }
     }
+
+    fn serves(&self, entity: QbdEntity) -> bool {
+        match self {
+            Source::Bridge(s) => s.serves(entity),
+            Source::Queued(s) => s.serves(entity),
+            #[cfg(all(windows, feature = "qbsdk"))]
+            Source::Sdk(s) => s.serves(entity),
+        }
+    }
+
+    async fn census(&self) -> Result<Option<lb_qbd::client::Census>, QbdError> {
+        match self {
+            Source::Bridge(s) => s.census().await,
+            Source::Queued(s) => s.census().await,
+            #[cfg(all(windows, feature = "qbsdk"))]
+            Source::Sdk(s) => s.census().await,
+        }
+    }
 }
 
 impl From<QbdError> for ApiError {

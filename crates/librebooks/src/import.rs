@@ -207,6 +207,22 @@ impl QbdSource for Source {
             Source::Sdk(s) => s.requests_made(),
         }
     }
+
+    fn serves(&self, entity: QbdEntity) -> bool {
+        match self {
+            Source::Bridge(s) => s.serves(entity),
+            #[cfg(all(windows, feature = "qbsdk"))]
+            Source::Sdk(s) => s.serves(entity),
+        }
+    }
+
+    async fn census(&self) -> Result<Option<lb_qbd::client::Census>, QbdError> {
+        match self {
+            Source::Bridge(s) => s.census().await,
+            #[cfg(all(windows, feature = "qbsdk"))]
+            Source::Sdk(s) => s.census().await,
+        }
+    }
 }
 
 /// Build the source for `settings`, with the bridge key from the arguments or
@@ -389,6 +405,19 @@ pub fn run(data_dir: &Path, secret_key: Option<PathBuf>, command: ImportCommand)
                         e.unchanged,
                         e.failed
                     );
+                }
+            }
+            if !report.census.is_empty() {
+                let counts: Vec<String> = report
+                    .census
+                    .iter()
+                    .map(|(t, n)| format!("{t} {n}"))
+                    .collect();
+                println!("  QuickBooks holds: {}", counts.join(", "));
+            }
+            for g in &report.gaps {
+                if let Some(n) = g.count {
+                    println!("  not imported: {n} {}", g.qbd_type);
                 }
             }
             println!(

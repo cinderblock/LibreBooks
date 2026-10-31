@@ -48,6 +48,8 @@ pub struct FixtureSource {
     reports: Mutex<HashMap<String, Value>>,
     requests: AtomicU64,
     gets: Mutex<Vec<(QbdEntity, String)>>,
+    /// Transactions only a census sees (paychecks), by qbXML `TxnType`.
+    uncounted: Mutex<BTreeMap<String, u32>>,
 }
 
 pub(crate) fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
@@ -167,6 +169,30 @@ impl FixtureSource {
 
     pub fn set_report(&self, slug: &str, v: Value) {
         lock(&self.reports).insert(slug.to_owned(), v);
+    }
+
+    /// Make the census count transactions no fixture holds.
+    pub fn count_also(&self, txn_type: &str, n: u32) {
+        lock(&self.uncounted).insert(txn_type.to_owned(), n);
+    }
+
+    /// One `(TxnType, TxnID)` per transaction, as `TransactionQueryRq` sees them:
+    /// time entries aren't in it.
+    pub fn census_rows(&self) -> Vec<(String, String)> {
+        let mut out = Vec::new();
+        for e in QbdEntity::ALL {
+            if e.is_transaction() && e != QbdEntity::TimeTracking {
+                for r in self.records(e) {
+                    if let Some(id) = id_of(&r) {
+                        out.push((e.name().to_owned(), id.to_owned()));
+                    }
+                }
+            }
+        }
+        for (t, n) in lock(&self.uncounted).iter() {
+            out.extend((0..*n).map(|i| (t.clone(), format!("{t}-{i}"))));
+        }
+        out
     }
 
     /// Every `get` so far (entity, id), to check what a sync fetched.
@@ -320,7 +346,7 @@ impl QbdSource for FixtureSource {
             all.get(&entity)
                 .and_then(|rows| rows.iter().find(|r| id_of(r) == Some(id)))
                 .map(|r| strip(entity, r, false))
-                .ok_or_else(|| Self::not_found(format!("{}/{id}", entity.path()))),
+                .ok_or_else(|| Self::not_found(format!("{}/{id}", entity.name()))),
         )
     }
 
@@ -350,5 +376,10 @@ impl QbdSource for FixtureSource {
 
     fn requests_made(&self) -> Option<u64> {
         Some(self.requests.load(Ordering::Relaxed))
+    }
+
+    // These fixtures stand in for the bridge.
+    fn serves(&self, entity: QbdEntity) -> bool {
+        entity.path().is_some()
     }
 }

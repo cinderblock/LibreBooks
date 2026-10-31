@@ -280,6 +280,7 @@ impl FakeQuickBooks {
                     ),
                 }
             }
+            "TransactionQueryRq" => self.census_query(rq, &rs_name, request_id),
             name => match QbdEntity::ALL
                 .into_iter()
                 .find(|e| request::query_name(*e) == name)
@@ -304,12 +305,6 @@ impl FakeQuickBooks {
         rs_name: &str,
         request_id: Option<String>,
     ) -> Rs {
-        let attr = |k: &str| {
-            rq.attrs
-                .iter()
-                .find(|(n, _)| n == k)
-                .map(|(_, v)| v.clone())
-        };
         let param = |name: &str| rq.child(name).map(|n| n.text.clone());
         let with_detail = param("IncludeLineItems").as_deref() == Some("true");
         // Records come straight from the fixtures (type markers included, which
@@ -346,18 +341,63 @@ impl FakeQuickBooks {
                 ),
             };
         }
-        let max: Option<usize> = param("MaxReturned").and_then(|s| s.parse().ok());
-        let (rows, iterator) = match attr("iterator").as_deref() {
+        let (rows, iterator) = match self.page(rq, rs_name, request_id.as_deref(), || {
+            self.fixtures.select(entity, &Self::list_query(entity, rq))
+        }) {
+            Ok(page) => page,
+            Err(rs) => return *rs,
+        };
+        let mut rs = Self::found(rs_name, request_id, &rows, iterator);
+        rs.body = render(&rows);
+        rs
+    }
+
+    fn census_query(&self, rq: &Node, rs_name: &str, request_id: Option<String>) -> Rs {
+        let select = || {
+            self.fixtures
+                .census_rows()
+                .into_iter()
+                .map(|(t, id)| serde_json::json!({"TxnType": t, "TxnID": id}))
+                .collect()
+        };
+        let (rows, iterator) = match self.page(rq, rs_name, request_id.as_deref(), select) {
+            Ok(page) => page,
+            Err(rs) => return *rs,
+        };
+        let mut rs = Self::found(rs_name, request_id, &rows, iterator);
+        for r in &rows {
+            to_xml("TransactionRet", r, &mut rs.body);
+        }
+        rs
+    }
+
+    /// The rows of this request's page, and its iterator if it has one.
+    #[allow(clippy::type_complexity)]
+    fn page(
+        &self,
+        rq: &Node,
+        rs_name: &str,
+        request_id: Option<&str>,
+        select: impl FnOnce() -> Vec<Value>,
+    ) -> Result<(Vec<Value>, Option<(usize, String)>), Box<Rs>> {
+        let attr = |k: &str| {
+            rq.attrs
+                .iter()
+                .find(|(n, _)| n == k)
+                .map(|(_, v)| v.clone())
+        };
+        let max: Option<usize> = rq.child("MaxReturned").and_then(|n| n.text.parse().ok());
+        Ok(match attr("iterator").as_deref() {
             Some("Continue") => {
                 let id = attr("iteratorID").unwrap_or_default();
                 let mut open = lock(&self.iterators);
                 let Some(it) = open.get_mut(&id) else {
-                    return Rs::error(
+                    return Err(Box::new(Rs::error(
                         rs_name,
-                        request_id,
+                        request_id.map(str::to_owned),
                         0x8004_0400,
                         format!("iterator {id} isn't open"),
-                    );
+                    )));
                 };
                 let take = max.unwrap_or(it.rest.len()).min(it.rest.len());
                 let page: Vec<Value> = it.rest.drain(..take).collect();
@@ -368,8 +408,7 @@ impl FakeQuickBooks {
                 (page, Some((remaining, id)))
             }
             start => {
-                let q = Self::list_query(entity, rq);
-                let mut rows = self.fixtures.select(entity, &q);
+                let mut rows = select();
                 if start == Some("Start") {
                     let id = {
                         let mut n = lock(&self.next_iterator);
@@ -390,7 +429,16 @@ impl FakeQuickBooks {
                     (rows, None)
                 }
             }
-        };
+        })
+    }
+
+    /// An `…Rs` for these rows: status 1 when there are none, as QuickBooks says.
+    fn found(
+        rs_name: &str,
+        request_id: Option<String>,
+        rows: &[Value],
+        iterator: Option<(usize, String)>,
+    ) -> Rs {
         let mut rs = if rows.is_empty() && iterator.as_ref().is_none_or(|(r, _)| *r == 0) {
             Rs {
                 name: rs_name.to_owned(),
@@ -407,7 +455,6 @@ impl FakeQuickBooks {
             Rs::ok(rs_name, request_id)
         };
         rs.iterator = iterator;
-        rs.body = render(&rows);
         rs
     }
 

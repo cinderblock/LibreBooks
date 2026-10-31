@@ -82,6 +82,11 @@ pub trait Resolver {
         txn_type: Option<&str>,
         txn_id: &str,
     ) -> Result<Option<TxnId>, NormaliseError>;
+    /// Whether this run can import transactions of this qbXML `TxnType`, so a
+    /// link to one may simply be waiting for it.
+    fn imports(&self, txn_type: &str) -> bool {
+        crate::entity::QbdEntity::for_qbxml_txn_type(txn_type).is_some()
+    }
 }
 
 /// Resolve a reference that must resolve.

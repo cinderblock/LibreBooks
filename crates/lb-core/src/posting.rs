@@ -498,7 +498,8 @@ impl<'a> Builder<'a> {
         if from == to {
             return Err(PostingError::TransferToSameAccount);
         }
-        if !self.txn.amount.is_positive() {
+        // A transfer voided in QuickBooks keeps its accounts and has no amount.
+        if !self.txn.amount.is_positive() && !self.txn.is_void {
             return Err(PostingError::NonPositiveAmount);
         }
         let amount = self.txn.amount;

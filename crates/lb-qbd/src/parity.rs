@@ -359,6 +359,19 @@ pub async fn parity<S: QbdSource>(
         None
     };
 
+    // The causes above are what the bridge can't reach; a transport that has
+    // those types can't blame them.
+    let mut trial_balance = trial_balance;
+    if source.serves(QbdEntity::CreditCardCharge) {
+        summary.notes.clear();
+        let tb_rows = trial_balance.iter_mut().flat_map(|t| t.rows.iter_mut());
+        for r in rows.iter_mut().chain(tb_rows) {
+            if r.note.is_some() && r.note.as_deref() == r.account_type.and_then(likely_cause) {
+                r.note = None;
+            }
+        }
+    }
+
     Ok(ParityReport {
         generated_at: jiff::Timestamp::now(),
         source_id,

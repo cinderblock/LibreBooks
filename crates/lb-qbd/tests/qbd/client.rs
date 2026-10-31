@@ -138,16 +138,20 @@ async fn handle(
             Err(_) => err(StatusCode::NOT_FOUND, "NOT_FOUND", "no such report"),
         };
     }
-    if let Some(entity) = QbdEntity::ALL.into_iter().find(|e| e.path() == path) {
+    if let Some(entity) = QbdEntity::ALL
+        .into_iter()
+        .find(|e| e.path() == Some(path.as_str()))
+    {
         return list(&mock, entity, &query);
     }
     // GET {path}/{id}: the longest entity path that prefixes it.
     let found = QbdEntity::ALL
         .into_iter()
-        .filter(|e| path.starts_with(&format!("{}/", e.path())))
-        .max_by_key(|e| e.path().len());
-    if let Some(entity) = found {
-        let id = &path[entity.path().len() + 1..];
+        .filter_map(|e| Some((e, e.path()?)))
+        .filter(|(_, p)| path.starts_with(&format!("{p}/")))
+        .max_by_key(|(_, p)| p.len());
+    if let Some((entity, entity_path)) = found {
+        let id = &path[entity_path.len() + 1..];
         return match f.get(entity, id).await {
             Ok(v) => ok(v, None),
             Err(_) => err(
@@ -385,7 +389,9 @@ async fn sync_and_parity_run_end_to_end_over_http() {
         .filter(|l| {
             QbdEntity::ALL
                 .iter()
-                .any(|e| l.path.starts_with(&format!("{}/", e.path())) && e.needs_detail())
+                .filter(|e| e.needs_detail())
+                .filter_map(|e| e.path())
+                .any(|p| l.path.starts_with(&format!("{p}/")))
         })
         .count();
     assert_eq!(details, 0);

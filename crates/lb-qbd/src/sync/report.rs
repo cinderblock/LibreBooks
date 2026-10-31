@@ -1,6 +1,6 @@
 //! What a sync did, for people: counts per QBD record type, every record that
 //! failed and why, every figure where LibreBooks' posting rules disagree with
-//! what QBD stored, and the gaps the bridge leaves.
+//! what QBD stored, and the gaps the transport leaves.
 
 use std::collections::BTreeMap;
 
@@ -29,6 +29,10 @@ pub struct SyncReport {
     pub issues: Vec<SyncIssue>,
     pub mismatches: Vec<Mismatch>,
     pub gaps: Vec<Gap>,
+    /// How many transactions QuickBooks holds, by qbXML `TxnType`, where the
+    /// transport can say.
+    #[serde(default)]
+    pub census: BTreeMap<String, u32>,
     /// QBD fields LibreBooks has no home for (`Customer.PriceLevelRef`), with how
     /// many records carried them. Transactions keep theirs in `extra`; these are
     /// from list records and sub-records.
@@ -183,7 +187,7 @@ pub struct Mismatch {
     pub ours: Money,
 }
 
-/// Something the bridge can't give us, and how often the data pointed at it.
+/// Something the import can't bring in, and how often the data pointed at it.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct Gap {
@@ -191,6 +195,8 @@ pub struct Gap {
     pub qbd_type: String,
     /// Links from imported records to records of this type.
     pub links: u32,
+    /// How many QuickBooks holds, where the transport can say.
+    pub count: Option<u32>,
     pub note: String,
 }
 

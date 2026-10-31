@@ -530,7 +530,7 @@ mod tests {
         };
         assert_eq!(percent_for(&p(QbdEntity::Account, 0, 0)), 1);
         let mid = percent_for(&p(QbdEntity::Invoice, 50, 100));
-        assert!((40..70).contains(&mid), "{mid}");
+        assert!((25..60).contains(&mid), "{mid}");
         assert_eq!(percent_for(&p(QbdEntity::Deposit, 10, 10)), 99);
     }
 }

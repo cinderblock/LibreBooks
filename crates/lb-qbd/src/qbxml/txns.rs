@@ -1,4 +1,4 @@
-//! Transactions: every type the bridge exposes, into [`lb_core::Txn`].
+//! Transactions: every type the import reads, into [`lb_core::Txn`].
 //!
 //! How QBD's forms map:
 //!
@@ -18,6 +18,11 @@
 //!   engine de-duplicates across payments.
 //! - **Deposits.** A `DepositLineRet` with a `TxnID` moves that payment out of
 //!   Undeposited Funds (`linked_txn_id`); `CashBackInfoRet` is the cash-back line.
+//! - **Transfers** have no lines: the two accounts and the amount are the header.
+//! - **Statement charges** are one line on a header: the customer, an item, a
+//!   quantity and rate.
+//! - **Inventory adjustments.** `ValueDifference` is the line's amount and
+//!   `QuantityDifference` its quantity change.
 //! - **Time.** A `TimeTrackingRet` is a non-posting transaction with one line: the
 //!   service item, hours as the quantity, the customer:job as the line's name.
 //!
@@ -59,23 +64,9 @@ pub struct MissingLink {
     pub role: &'static str,
     pub txn_type: Option<String>,
     pub txn_id: String,
-    /// The bridge exposes this type, so it may simply not be imported yet (a
-    /// later sync can fill the link in). `false`: it never will be.
+    /// This run can import that type, so it may simply not be imported yet (a
+    /// later sync can fill the link in). `false`: it won't be.
     pub exposed: bool,
-}
-
-impl MissingLink {
-    fn new(role: &'static str, txn_type: Option<String>, txn_id: String) -> MissingLink {
-        let exposed = txn_type
-            .as_deref()
-            .is_none_or(|t| QbdEntity::for_qbxml_txn_type(t).is_some());
-        MissingLink {
-            role,
-            txn_type,
-            txn_id,
-            exposed,
-        }
-    }
 }
 
 impl std::fmt::Display for MissingLink {
@@ -90,7 +81,7 @@ impl std::fmt::Display for MissingLink {
         if self.exposed {
             f.write_str(" (not imported yet)")
         } else {
-            f.write_str(" (the bridge doesn't expose that type)")
+            f.write_str(" (this import can't bring that type in)")
         }
     }
 }
@@ -120,8 +111,11 @@ pub fn txn(
         blocks: Vec::new(),
     };
     match entity {
-        QbdEntity::Check => n.check(&mut r)?,
+        QbdEntity::Check | QbdEntity::CreditCardCharge | QbdEntity::CreditCardCredit => {
+            n.check(entity, &mut r)?;
+        }
         QbdEntity::Bill => n.bill(&mut r)?,
+        QbdEntity::VendorCredit | QbdEntity::ItemReceipt => n.vendor_form(entity, &mut r)?,
         QbdEntity::Invoice
         | QbdEntity::CreditMemo
         | QbdEntity::SalesReceipt
@@ -131,7 +125,13 @@ pub fn txn(
         QbdEntity::JournalEntry => n.journal(&mut r)?,
         QbdEntity::Deposit => n.deposit(&mut r)?,
         QbdEntity::ReceivePayment => n.receive_payment(&mut r)?,
-        QbdEntity::BillPaymentCheck => n.bill_payment(&mut r)?,
+        QbdEntity::BillPaymentCheck | QbdEntity::BillPaymentCreditCard => {
+            n.bill_payment(entity, &mut r)?;
+        }
+        QbdEntity::Transfer => n.transfer(&mut r)?,
+        QbdEntity::SalesTaxPaymentCheck => n.sales_tax_payment(&mut r)?,
+        QbdEntity::InventoryAdjustment => n.inventory_adjustment(&mut r)?,
+        QbdEntity::Charge => n.charge(&mut r)?,
         QbdEntity::TimeTracking => n.time(&mut r)?,
         other => {
             return Err(NormaliseError::Unsupported(format!(
@@ -221,6 +221,21 @@ struct Normaliser<'r> {
 impl Normaliser<'_> {
     fn txn(&mut self) -> &mut Txn {
         &mut self.imp.txn
+    }
+
+    fn missing_link(
+        &self,
+        role: &'static str,
+        txn_type: Option<String>,
+        txn_id: String,
+    ) -> MissingLink {
+        let exposed = txn_type.as_deref().is_none_or(|t| self.res.imports(t));
+        MissingLink {
+            role,
+            txn_type,
+            txn_id,
+            exposed,
+        }
     }
 
     fn opt_account(
@@ -482,11 +497,12 @@ impl Normaliser<'_> {
 
     // ---- forms ----
 
-    fn check(&mut self, r: &mut Record<'_>) -> Result<(), NormaliseError> {
+    /// A check, or a card charge or credit: the same form on a different account.
+    fn check(&mut self, entity: QbdEntity, r: &mut Record<'_>) -> Result<(), NormaliseError> {
         let bank = r.reference("AccountRef");
         let bank = match bank {
             Some(b) => require("bank account", &b, self.res.account(&b))?,
-            None => return Err(missing("Check.AccountRef")),
+            None => return Err(missing(&format!("{}.AccountRef", entity.name()))),
         };
         let payee = self.opt_entity("payee", r.reference("PayeeEntityRef"))?;
         let addr = self.address(r, "Address")?;
@@ -516,6 +532,136 @@ impl Normaliser<'_> {
         t.ar_ap_account_id = ap;
         t.bill_address = addr;
         self.purchase_lines(r)
+    }
+
+    /// A vendor credit or item receipt: a bill's shape, under a different total.
+    fn vendor_form(&mut self, entity: QbdEntity, r: &mut Record<'_>) -> Result<(), NormaliseError> {
+        let vendor = self.opt_entity("vendor", r.reference("VendorRef"))?;
+        let payable = r
+            .reference("APAccountRef")
+            .or_else(|| r.reference("LiabilityAccountRef"));
+        let ap = self.opt_account("A/P account", payable)?;
+        self.common(r)?;
+        self.imp.qbd_total = r.money(if entity == QbdEntity::VendorCredit {
+            "CreditAmount"
+        } else {
+            "TotalAmount"
+        })?;
+        let t = self.txn();
+        t.entity_id = vendor;
+        t.ar_ap_account_id = ap;
+        self.purchase_lines(r)
+    }
+
+    fn transfer(&mut self, r: &mut Record<'_>) -> Result<(), NormaliseError> {
+        let Some(from) = r.reference("TransferFromAccountRef") else {
+            return Err(missing("Transfer.TransferFromAccountRef"));
+        };
+        let from = require("account", &from, self.res.account(&from))?;
+        let Some(to) = r.reference("TransferToAccountRef") else {
+            return Err(missing("Transfer.TransferToAccountRef"));
+        };
+        let to = require("account", &to, self.res.account(&to))?;
+        let class = self.opt_class(r.reference("ClassRef"))?;
+        // QuickBooks' running balances, not part of the transfer.
+        r.ignore(&["FromAccountBalance", "ToAccountBalance"]);
+        let amount = r.money("Amount")?.unwrap_or(Money::ZERO);
+        self.imp.qbd_total = Some(amount);
+        let t = self.txn();
+        t.account_id = Some(from);
+        t.to_account_id = Some(to);
+        t.class_id = class;
+        t.amount = amount;
+        Ok(())
+    }
+
+    fn sales_tax_payment(&mut self, r: &mut Record<'_>) -> Result<(), NormaliseError> {
+        let agency = self.opt_entity("tax agency", r.reference("PayeeEntityRef"))?;
+        let bank = self.opt_account("bank account", r.reference("BankAccountRef"))?;
+        let addr = self.address(r, "Address")?;
+        let amount = r.money("Amount")?;
+        self.imp.qbd_total = amount;
+        let printed = r.bool("IsToBePrinted")?.unwrap_or(false);
+        for mut l in r.children("SalesTaxPaymentCheckLineRet")? {
+            let id = l.text("TxnLineID");
+            let mut line = TxnLine::new(LineKind::Item);
+            line.item_id = match l.reference("ItemSalesTaxRef") {
+                Some(i) => self.res.sales_tax_item(&i, None)?,
+                None => None,
+            };
+            line.amount = l.money("Amount")?.unwrap_or(Money::ZERO);
+            line.extra = line_extra(&l, id.as_deref());
+            self.push(line_order(id.as_deref()), vec![line]);
+        }
+        let t = self.txn();
+        t.entity_id = agency;
+        t.account_id = bank;
+        t.bill_address = addr;
+        t.is_to_be_printed = printed;
+        if let Some(a) = amount {
+            t.amount = a;
+        }
+        Ok(())
+    }
+
+    fn inventory_adjustment(&mut self, r: &mut Record<'_>) -> Result<(), NormaliseError> {
+        let account = match r.reference("AccountRef") {
+            Some(a) => require("adjustment account", &a, self.res.account(&a))?,
+            None => return Err(missing("InventoryAdjustment.AccountRef")),
+        };
+        let name = self.opt_entity("customer", r.reference("CustomerRef"))?;
+        let class = self.opt_class(r.reference("ClassRef"))?;
+        for mut l in r.children("InventoryAdjustmentLineRet")? {
+            let id = l.text("TxnLineID");
+            let Some(i) = l.reference("ItemRef") else {
+                return Err(missing(
+                    "InventoryAdjustment.InventoryAdjustmentLineRet.ItemRef",
+                ));
+            };
+            let mut line = TxnLine::new(LineKind::Item);
+            line.item_id = Some(require("item", &i, self.res.item(&i))?);
+            line.amount = l.money("ValueDifference")?.unwrap_or(Money::ZERO);
+            line.quantity_change = l.decimal("QuantityDifference")?;
+            line.extra = line_extra(&l, id.as_deref());
+            self.push(line_order(id.as_deref()), vec![line]);
+        }
+        let t = self.txn();
+        t.account_id = Some(account);
+        t.entity_id = name;
+        t.class_id = class;
+        Ok(())
+    }
+
+    fn charge(&mut self, r: &mut Record<'_>) -> Result<(), NormaliseError> {
+        let customer = match r.reference("CustomerRef") {
+            Some(c) => require("customer", &c, self.res.entity(&c))?,
+            None => return Err(missing("Charge.CustomerRef")),
+        };
+        let ar = self.opt_account("A/R account", r.reference("ARAccountRef"))?;
+        self.common(r)?;
+        let amount = r.money("Amount")?.unwrap_or(Money::ZERO);
+        self.imp.qbd_total = Some(amount);
+        self.imp.qbd_open_balance = r.money("BalanceRemaining")?;
+        r.ignore(&["IsPaid"]);
+        let mut line = match r.reference("ItemRef") {
+            Some(i) => {
+                let mut line = TxnLine::new(LineKind::Item);
+                line.item_id = Some(require("item", &i, self.res.item(&i))?);
+                line
+            }
+            None if amount.is_zero() => TxnLine::new(LineKind::Text),
+            None => return Err(missing("Charge.ItemRef")),
+        };
+        line.amount = amount;
+        line.quantity = r.decimal("Quantity")?;
+        line.unit_of_measure = r.text("UnitOfMeasure");
+        line.rate = r.decimal("Rate")?;
+        line.description = r.text("Desc");
+        self.push(0, vec![line]);
+        let t = self.txn();
+        t.entity_id = Some(customer);
+        t.ar_ap_account_id = ar;
+        Ok(())
     }
 
     fn purchase_order(&mut self, r: &mut Record<'_>) -> Result<(), NormaliseError> {
@@ -696,11 +842,8 @@ impl Normaliser<'_> {
                 if let Some(t) = self.res.txn(linked_type.as_deref(), &linked)? {
                     line.linked_txn_id = Some(t);
                 } else {
-                    self.imp.missing_links.push(MissingLink::new(
-                        "deposit of",
-                        linked_type.clone(),
-                        linked.clone(),
-                    ));
+                    let link = self.missing_link("deposit of", linked_type.clone(), linked.clone());
+                    self.imp.missing_links.push(link);
                     // Keep QBD's link on the line so a later sync can see it.
                     let mut extra = l.leftovers();
                     extra.insert("TxnID".into(), Value::String(linked));
@@ -762,13 +905,11 @@ impl Normaliser<'_> {
                     continue;
                 };
                 let used = l.money("Amount")?.unwrap_or(Money::ZERO).abs();
-                match self.res.txn(t.as_deref(), &credit_id)? {
-                    Some(c) => credits.push((c, used)),
-                    None => {
-                        self.imp
-                            .missing_links
-                            .push(MissingLink::new("credit used", t, credit_id));
-                    }
+                if let Some(c) = self.res.txn(t.as_deref(), &credit_id)? {
+                    credits.push((c, used));
+                } else {
+                    let link = self.missing_link("credit used", t, credit_id);
+                    self.imp.missing_links.push(link);
                 }
             }
             for k in a.leftover_keys() {
@@ -777,11 +918,8 @@ impl Normaliser<'_> {
                     .push(format!("{kind}.AppliedToTxnRet.{k}"));
             }
             let Some(target) = self.res.txn(target_type.as_deref(), &target_id)? else {
-                self.imp.missing_links.push(MissingLink::new(
-                    "payment applied to",
-                    target_type,
-                    target_id,
-                ));
+                let link = self.missing_link("payment applied to", target_type, target_id);
+                self.imp.missing_links.push(link);
                 continue;
             };
             self.imp.txn.applications.push(Application {
@@ -823,13 +961,22 @@ impl Normaliser<'_> {
         self.applications(r, "ReceivePayment", &["CreditMemo"])
     }
 
-    fn bill_payment(&mut self, r: &mut Record<'_>) -> Result<(), NormaliseError> {
+    fn bill_payment(
+        &mut self,
+        entity: QbdEntity,
+        r: &mut Record<'_>,
+    ) -> Result<(), NormaliseError> {
         let vendor = match r.reference("PayeeEntityRef") {
             Some(v) => require("vendor", &v, self.res.entity(&v))?,
-            None => return Err(missing("BillPaymentCheck.PayeeEntityRef")),
+            None => return Err(missing(&format!("{}.PayeeEntityRef", entity.name()))),
         };
         let ap = self.opt_account("A/P account", r.reference("APAccountRef"))?;
-        let bank = self.opt_account("bank account", r.reference("BankAccountRef"))?;
+        let paid_from = if entity == QbdEntity::BillPaymentCreditCard {
+            "CreditCardAccountRef"
+        } else {
+            "BankAccountRef"
+        };
+        let bank = self.opt_account("bank account", r.reference(paid_from))?;
         let addr = self.address(r, "Address")?;
         let amount = r.money("Amount")?.unwrap_or(Money::ZERO);
         self.imp.qbd_total = Some(amount);
@@ -841,7 +988,7 @@ impl Normaliser<'_> {
         t.bill_address = addr;
         t.amount = amount;
         t.is_to_be_printed = printed;
-        self.applications(r, "BillPaymentCheck", &["VendorCredit"])
+        self.applications(r, entity.name(), &["VendorCredit"])
     }
 
     fn time(&mut self, r: &mut Record<'_>) -> Result<(), NormaliseError> {

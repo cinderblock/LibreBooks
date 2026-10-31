@@ -1,16 +1,17 @@
-//! What QuickBooks Desktop records the import knows about, and how the QB Bridge
-//! serves each one.
+//! What QuickBooks Desktop records the import knows about, and how each transport
+//! serves them.
 //!
-//! The facts here come from probing the live bridge (see `plans/qbd-import.md`):
-//! which paths exist, which lists can page with an iterator, and which records
-//! need a second request to get their lines. Keeping them in one table means the
-//! client, the sync engine and the tests agree on them.
+//! The bridge's facts come from probing it live (see `plans/qbd-import.md`): which
+//! paths exist, which lists can page with an iterator, and which records need a
+//! second request to get their lines. The types with no bridge path are reached
+//! only over qbXML (the Web Connector and the SDK). Keeping them in one table means
+//! the client, the sync engine and the tests agree on them.
 
 use lb_core::TxnType;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-/// A kind of QBD record the bridge exposes.
+/// A kind of QBD record the import reads.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub enum QbdEntity {
@@ -45,10 +46,21 @@ pub enum QbdEntity {
     ReceivePayment,
     BillPaymentCheck,
     Deposit,
+    // Transactions only qbXML reaches
+    CreditCardCharge,
+    CreditCardCredit,
+    Transfer,
+    VendorCredit,
+    ItemReceipt,
+    BillPaymentCreditCard,
+    SalesTaxPaymentCheck,
+    InventoryAdjustment,
+    /// A statement charge.
+    Charge,
 }
 
 impl QbdEntity {
-    pub const ALL: [QbdEntity; 27] = [
+    pub const ALL: [QbdEntity; 36] = [
         QbdEntity::Account,
         QbdEntity::Class,
         QbdEntity::Terms,
@@ -76,6 +88,15 @@ impl QbdEntity {
         QbdEntity::ReceivePayment,
         QbdEntity::BillPaymentCheck,
         QbdEntity::Deposit,
+        QbdEntity::CreditCardCharge,
+        QbdEntity::CreditCardCredit,
+        QbdEntity::Transfer,
+        QbdEntity::VendorCredit,
+        QbdEntity::ItemReceipt,
+        QbdEntity::BillPaymentCreditCard,
+        QbdEntity::SalesTaxPaymentCheck,
+        QbdEntity::InventoryAdjustment,
+        QbdEntity::Charge,
     ];
 
     /// The order a sync imports in, so that everything a record points at is
@@ -83,8 +104,9 @@ impl QbdEntity {
     /// employees and other names before sales reps (a rep *is* one of those);
     /// sales reps before customers (customers name their rep); items after the
     /// accounts and vendors they use; transactions that can be paid before the
-    /// payments; payments before the deposits that bank them.
-    pub const SYNC_ORDER: [QbdEntity; 23] = [
+    /// payments; receipts before the bills that bill them; payments before the
+    /// deposits that bank them.
+    pub const SYNC_ORDER: [QbdEntity; 32] = [
         QbdEntity::Account,
         QbdEntity::Class,
         QbdEntity::Terms,
@@ -97,21 +119,30 @@ impl QbdEntity {
         QbdEntity::Item,
         QbdEntity::JournalEntry,
         QbdEntity::Invoice,
+        QbdEntity::Charge,
         QbdEntity::CreditMemo,
         QbdEntity::SalesReceipt,
         QbdEntity::Estimate,
         QbdEntity::SalesOrder,
         QbdEntity::PurchaseOrder,
+        QbdEntity::ItemReceipt,
         QbdEntity::Bill,
+        QbdEntity::VendorCredit,
         QbdEntity::Check,
+        QbdEntity::CreditCardCharge,
+        QbdEntity::CreditCardCredit,
+        QbdEntity::Transfer,
         QbdEntity::TimeTracking,
         QbdEntity::ReceivePayment,
         QbdEntity::BillPaymentCheck,
+        QbdEntity::BillPaymentCreditCard,
+        QbdEntity::SalesTaxPaymentCheck,
+        QbdEntity::InventoryAdjustment,
         QbdEntity::Deposit,
     ];
 
-    /// The bridge's name for it (`GET /api/v1/entities`), also used as the
-    /// external-reference kind in the store.
+    /// QuickBooks' name for it (the bridge's `GET /api/v1/entities`, and qbXML's
+    /// `TxnType`), also used as the external-reference kind in the store.
     pub const fn name(self) -> &'static str {
         match self {
             QbdEntity::Account => "Account",
@@ -141,6 +172,15 @@ impl QbdEntity {
             QbdEntity::ReceivePayment => "ReceivePayment",
             QbdEntity::BillPaymentCheck => "BillPaymentCheck",
             QbdEntity::Deposit => "Deposit",
+            QbdEntity::CreditCardCharge => "CreditCardCharge",
+            QbdEntity::CreditCardCredit => "CreditCardCredit",
+            QbdEntity::Transfer => "Transfer",
+            QbdEntity::VendorCredit => "VendorCredit",
+            QbdEntity::ItemReceipt => "ItemReceipt",
+            QbdEntity::BillPaymentCreditCard => "BillPaymentCreditCard",
+            QbdEntity::SalesTaxPaymentCheck => "SalesTaxPaymentCheck",
+            QbdEntity::InventoryAdjustment => "InventoryAdjustment",
+            QbdEntity::Charge => "Charge",
         }
     }
 
@@ -148,9 +188,9 @@ impl QbdEntity {
         QbdEntity::ALL.into_iter().find(|e| e.name() == s)
     }
 
-    /// The bridge path, under the base URL.
-    pub const fn path(self) -> &'static str {
-        match self {
+    /// The bridge path, under the base URL. `None`: the bridge doesn't have it.
+    pub const fn path(self) -> Option<&'static str> {
+        Some(match self {
             QbdEntity::Account => "/api/v1/accounts",
             QbdEntity::Class => "/api/v1/classes",
             QbdEntity::Terms => "/api/v1/terms",
@@ -178,7 +218,8 @@ impl QbdEntity {
             QbdEntity::ReceivePayment => "/api/v1/payments",
             QbdEntity::BillPaymentCheck => "/api/v1/bill-payments",
             QbdEntity::Deposit => "/api/v1/deposits",
-        }
+            _ => return None,
+        })
     }
 
     pub const fn is_transaction(self) -> bool {
@@ -189,7 +230,7 @@ impl QbdEntity {
     pub const fn is_charge(self) -> bool {
         matches!(
             self,
-            QbdEntity::Invoice | QbdEntity::JournalEntry | QbdEntity::Check
+            QbdEntity::Invoice | QbdEntity::Charge | QbdEntity::JournalEntry | QbdEntity::Check
         )
     }
 
@@ -209,12 +250,21 @@ impl QbdEntity {
             QbdEntity::ReceivePayment => TxnType::ReceivePayment,
             QbdEntity::BillPaymentCheck => TxnType::BillPaymentCheck,
             QbdEntity::Deposit => TxnType::Deposit,
+            QbdEntity::CreditCardCharge => TxnType::CreditCardCharge,
+            QbdEntity::CreditCardCredit => TxnType::CreditCardCredit,
+            QbdEntity::Transfer => TxnType::Transfer,
+            QbdEntity::VendorCredit => TxnType::VendorCredit,
+            QbdEntity::ItemReceipt => TxnType::ItemReceipt,
+            QbdEntity::BillPaymentCreditCard => TxnType::BillPaymentCreditCard,
+            QbdEntity::SalesTaxPaymentCheck => TxnType::SalesTaxPaymentCheck,
+            QbdEntity::InventoryAdjustment => TxnType::InventoryAdjustment,
+            QbdEntity::Charge => TxnType::StatementCharge,
             _ => return None,
         })
     }
 
     /// The QBD entity for a qbXML `TxnType` value (as in `LinkedTxn` and
-    /// `AppliedToTxnRet`), when the bridge exposes it.
+    /// `AppliedToTxnRet`), when the import knows the type.
     pub fn for_qbxml_txn_type(s: &str) -> Option<QbdEntity> {
         QbdEntity::ALL
             .into_iter()
@@ -242,9 +292,14 @@ impl QbdEntity {
     }
 
     /// Transactions whose list rows leave out their lines (and, for payments,
-    /// what they pay), so each one needs `GET {path}/{id}`.
+    /// what they pay), so each one needs `GET {path}/{id}`. A time entry, transfer
+    /// or statement charge has no lines to leave out.
     pub const fn needs_detail(self) -> bool {
-        self.is_transaction() && !matches!(self, QbdEntity::TimeTracking)
+        self.is_transaction()
+            && !matches!(
+                self,
+                QbdEntity::TimeTracking | QbdEntity::Transfer | QbdEntity::Charge
+            )
     }
 
     /// The qbXML element a query response holds one of these in (`CheckRet`), for
@@ -279,6 +334,15 @@ impl QbdEntity {
             QbdEntity::ReceivePayment => "ReceivePaymentRet",
             QbdEntity::BillPaymentCheck => "BillPaymentCheckRet",
             QbdEntity::Deposit => "DepositRet",
+            QbdEntity::CreditCardCharge => "CreditCardChargeRet",
+            QbdEntity::CreditCardCredit => "CreditCardCreditRet",
+            QbdEntity::Transfer => "TransferRet",
+            QbdEntity::VendorCredit => "VendorCreditRet",
+            QbdEntity::ItemReceipt => "ItemReceiptRet",
+            QbdEntity::BillPaymentCreditCard => "BillPaymentCreditCardRet",
+            QbdEntity::SalesTaxPaymentCheck => "SalesTaxPaymentCheckRet",
+            QbdEntity::InventoryAdjustment => "InventoryAdjustmentRet",
+            QbdEntity::Charge => "ChargeRet",
         }
     }
 
@@ -300,23 +364,17 @@ impl QbdEntity {
     }
 }
 
-/// QBD transaction types the bridge does not expose. Links to them (a payment
-/// applied to a statement charge, a deposit of a sales tax refund) cannot be
-/// imported, and their postings are missing from the parity comparison.
-pub const NOT_EXPOSED_TXN_TYPES: [&str; 13] = [
-    "CreditCardCharge",
-    "CreditCardCredit",
-    "Transfer",
-    "VendorCredit",
-    "ItemReceipt",
-    "BillPaymentCreditCard",
-    "SalesTaxPaymentCheck",
-    "InventoryAdjustment",
-    "Charge",
-    "SalesOrder",
-    "Paycheck",
-    "LiabilityCheck",
+/// qbXML `TxnType`s no transport imports yet. Paychecks and liability checks have
+/// no query of their own, only `TransactionQueryRq` rows; a build's record carries
+/// no amounts; LibreBooks has no card refund type. Links to them can't be imported,
+/// and their postings are missing from the parity comparison.
+pub const UNIMPORTED_TXN_TYPES: [&str; 6] = [
+    "ARRefundCreditCard",
     "BuildAssembly",
+    "LiabilityAdjustment",
+    "Paycheck",
+    "PayrollLiabilityCheck",
+    "YTDAdjustment",
 ];
 
 #[cfg(test)]
@@ -328,7 +386,9 @@ mod tests {
         let mut paths = std::collections::HashSet::new();
         for e in QbdEntity::ALL {
             assert_eq!(QbdEntity::from_name(e.name()), Some(e));
-            assert!(paths.insert(e.path()), "duplicate path {}", e.path());
+            if let Some(path) = e.path() {
+                assert!(paths.insert(path), "duplicate path {path}");
+            }
         }
     }
 
@@ -342,6 +402,10 @@ mod tests {
         assert!(pos(QbdEntity::Bill) < pos(QbdEntity::BillPaymentCheck));
         assert!(pos(QbdEntity::ReceivePayment) < pos(QbdEntity::Deposit));
         assert!(pos(QbdEntity::SalesReceipt) < pos(QbdEntity::Deposit));
+        assert!(pos(QbdEntity::Charge) < pos(QbdEntity::ReceivePayment));
+        assert!(pos(QbdEntity::ItemReceipt) < pos(QbdEntity::Bill));
+        assert!(pos(QbdEntity::VendorCredit) < pos(QbdEntity::BillPaymentCheck));
+        assert!(pos(QbdEntity::Bill) < pos(QbdEntity::BillPaymentCreditCard));
         // Every transaction type is synced.
         for e in QbdEntity::ALL {
             if e.is_transaction() {
@@ -356,7 +420,11 @@ mod tests {
             QbdEntity::for_qbxml_txn_type("ReceivePayment"),
             Some(QbdEntity::ReceivePayment)
         );
-        assert_eq!(QbdEntity::for_qbxml_txn_type("CreditCardCharge"), None);
+        assert_eq!(
+            QbdEntity::for_qbxml_txn_type("CreditCardCharge"),
+            Some(QbdEntity::CreditCardCharge)
+        );
+        assert_eq!(QbdEntity::for_qbxml_txn_type("Paycheck"), None);
         assert_eq!(QbdEntity::for_qbxml_txn_type("Account"), None);
     }
 }
