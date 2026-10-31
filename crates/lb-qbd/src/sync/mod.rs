@@ -83,6 +83,8 @@ pub struct SyncOptions {
     /// wherever QBD shows the invoice settled and we don't. The bridge never
     /// says which credit memo QBD applied to which invoice, so this is how
     /// those settlements are reproduced (oldest first, as QBD applies them).
+    /// Never on a run limited by count or date: a payment imported without its
+    /// invoices looks like unused cash, and would be spent twice.
     pub apply_credits: bool,
     /// Abort after this many consecutive failures to reach the bridge.
     pub max_consecutive_bridge_failures: u32,
@@ -868,7 +870,7 @@ impl<S: QbdSource> Run<'_, S> {
     fn check_open_balances(&mut self) -> Result<(), SyncError> {
         let checks = std::mem::take(&mut self.open_checks);
         let mut off = self.open_mismatches(&checks)?;
-        if self.options.apply_credits && !off.is_empty() {
+        if self.options.apply_credits && !self.options.restricted() && !off.is_empty() {
             // Only charges QBD shows more settled than we do, and only by the
             // difference: a credit QBD left unapplied must stay unapplied here.
             for (c, ours) in &off {

@@ -595,3 +595,39 @@ async fn a_feature_quickbooks_has_off_means_there_are_none() {
     assert_eq!(report.aborted, None);
     assert!(report.entity(QbdEntity::Deposit).unwrap().created > 0);
 }
+
+#[tokio::test]
+async fn a_limited_run_leaves_credits_alone() {
+    let fixtures = larkspur();
+    let may = |txn_id: &str| {
+        json!({"TxnID": txn_id, "EditSequence": "1", "TimeCreated": "2026-05-01T09:00:00-08:00",
+            "TimeModified": "2026-05-01T09:00:00-08:00", "TxnDate": "2026-05-01",
+            "CustomerRef": id(CAFE), "ARAccountRef": id(RECEIVABLE), "Subtotal": "10.00"})
+    };
+    let mut invoice = may("I-1");
+    invoice["BalanceRemaining"] = json!("0.00");
+    invoice["InvoiceLineRet"] =
+        json!({"TxnLineID": "1-1", "ItemRef": id(ENGINEERING), "Amount": "10.00"});
+    fixtures.put(QbdEntity::Invoice, invoice);
+    let mut credit = may("C-1");
+    credit["CreditRemaining"] = json!("0.00");
+    credit["CreditMemoLineRet"] =
+        json!({"TxnLineID": "1-2", "ItemRef": id(ENGINEERING), "Amount": "10.00"});
+    fixtures.put(QbdEntity::CreditMemo, credit);
+
+    let short = |report: &lb_qbd::SyncReport| {
+        report
+            .mismatches
+            .iter()
+            .any(|x| x.qbd_id == "I-1" && x.ours == m("10.00"))
+    };
+    let limited = SyncOptions {
+        txn_from: Some(jiff::civil::date(2026, 5, 1)),
+        ..SyncOptions::default()
+    };
+    let report = run_clean(&books(), &fixtures, &limited).await;
+    assert!(short(&report), "{:#?}", report.mismatches);
+    // A whole run settles the invoice with the credit.
+    let report = run_clean(&books(), &fixtures, &SyncOptions::default()).await;
+    assert!(!short(&report), "{:#?}", report.mismatches);
+}

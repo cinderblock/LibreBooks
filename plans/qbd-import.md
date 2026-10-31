@@ -602,26 +602,32 @@ describes the protocol:
       `SalesTaxPaymentCheckQueryRq` answers 3250 "feature not enabled" with sales
       tax off (now means "none"), and the CLI made a new company on every run
       (now it carries on with the one bound to that QuickBooks).
-- [ ] **Current:** Live: a full import into `01a19431-de35-718f-947d-4938c2f81ec2`,
-      then parity. Company `01a19385-...` on cad-3 is the earlier 5-of-each trial.
+- [x] Live: the first full import, 2026-10-31 4:40-4:41 PM PDT (23:40-23:41Z), on
+      top of the 5-of-each sample: 105 s, 82 requests, 0 failed, every census
+      count matched its list. **Parity 159/159 accounts, total difference 0.00,
+      trial balance 68/68** (the bridge managed 145/159). `librebooks check`: ok.
+      Two open-balance mismatches, both on payments the sample run had imported
+      without their invoices: `apply_credits` spent their "unused" cash on other
+      invoices, then the full run applied them for real. Cash was never touched.
+      Fixed: credits aren't applied on a limited run.
+- [ ] **Current:** a clean full import into a fresh company, for 0 mismatches.
+      Companies `01a19385-...` and `01a19431-...` on cad-3 are the sampled ones.
 - [ ] For other companies: paychecks and liability checks (`TransactionQueryRq`
       rows), `BuildAssembly` (its record has no amounts; waits for inventory
       reposting), `ARRefundCreditCard` (needs a LibreBooks type).
 
 ## Open questions for the user
 
-1. **Ask the bridge for `include_line_items` on lists?** (Recommendation: yes;
-   it turns the full import from ~8,100 requests into ~20 and makes routine
-   syncs much lighter on QuickBooks.) Same for the missing transaction types,
-   which are what will keep parity off.
+1. ~~Ask the bridge for `include_line_items` on lists?~~ Moot since 2026-10-31:
+   the SDK has lines in its lists and reaches every type, so the bridge needs
+   nothing more for the import.
 2. ~~How should the Windows app reach the 32-bit SDK?~~ Answered 2026-10-30:
    direct first, and a small 32-bit helper only if that can't reach QuickBooks
    (see the SDK steps). Rejected: a whole 32-bit Windows build (caps memory for
    everyone to serve one transport) and a registry DCOM surrogate (`dllhost` is
    the same helper, but needs a machine change per install).
-3. **Run the first full import during off-hours?** Each request touches the
-   QuickBooks the user is working in; at the default 100 ms pause it's about 45
-   minutes of light, steady load.
+3. ~~Run the first full import during off-hours?~~ Moot since 2026-10-31: over the
+   SDK it is 105 seconds, not 45 minutes.
 
 ## Things not to do
 

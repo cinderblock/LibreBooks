@@ -31,3 +31,12 @@ Seen 2026-10-30: `createUpdaterArtifacts` is only on in
 build with `--config` on it, but nothing in `.github/workflows/` does, so a
 tagged release may publish no updater artifacts despite `includeUpdaterJson`.
 Not checked against a real tagged run; the first release should confirm it.
+
+## Credits matched oldest-first though qbXML says which invoice each settled
+
+Seen 2026-10-31 on the first full SDK import: 48 applications were made by
+`apply_credits_to` (`lb-store/src/apply.rs`), dated by LibreBooks. That guess
+exists because the bridge never said which credit memo settled which invoice,
+but over qbXML `CreditMemoQueryRq` sends `LinkedTxn` (`IncludeLinkedTxns`), so
+the real pairing is available. Balances and open amounts agree either way;
+only which credit paid which invoice, and its date, can differ from QuickBooks.
