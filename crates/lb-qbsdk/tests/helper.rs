@@ -1,7 +1,6 @@
 //! The helper as a program. These never send a valid hello: on a machine with
 //! QuickBooks that would open the user's company.
 
-use std::io::Write;
 use std::process::{Command, Stdio};
 
 use lb_qbsdk::wire;
@@ -20,7 +19,10 @@ fn any_argument_prints_what_it_is() {
     );
 }
 
+#[cfg(windows)]
 fn answer_to(frame: &[u8]) -> Option<Result<String, String>> {
+    use std::io::Write;
+
     let mut child = Command::new(HELPER)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
