@@ -271,8 +271,8 @@ fn open_source(
         QbdTransport::Sdk => {
             #[cfg(all(windows, feature = "qbsdk"))]
             {
-                eprintln!(
-                    "connecting to QuickBooks through the SDK (the first time, QuickBooks asks you to allow LibreBooks: choose \"Yes, always\")"
+                println!(
+                    "connecting to QuickBooks (the first time, QuickBooks asks you to allow LibreBooks: choose \"Yes, always\")"
                 );
                 let config = lb_qbd::sdk::SdkConfig {
                     company_file: settings.company_file.clone(),
@@ -280,7 +280,15 @@ fn open_source(
                     ..lb_qbd::sdk::SdkConfig::default()
                 };
                 let source = lb_qbd::sdk::sdk_source(&config)?;
-                eprintln!("QuickBooks opened {}", source.transport().company_file());
+                println!(
+                    "connected to {}{}",
+                    source.transport().company_file(),
+                    if source.transport().through_helper() {
+                        " (through the 32-bit helper)"
+                    } else {
+                        ""
+                    }
+                );
                 Ok(Source::Sdk(source))
             }
             #[cfg(not(all(windows, feature = "qbsdk")))]
@@ -308,7 +316,7 @@ fn company_holding(state: &AppState, record: &Value) -> Result<Option<CompanyId>
     match bound.as_slice() {
         [] => Ok(None),
         [id] => {
-            eprintln!("carrying on with company {id}");
+            println!("carrying on with company {id}");
             Ok(Some(*id))
         }
         many => {
@@ -318,6 +326,14 @@ fn company_holding(state: &AppState, record: &Value) -> Result<Option<CompanyId>
                 ids.join(", ")
             )
         }
+    }
+}
+
+fn counted(n: usize, what: &str) -> String {
+    match (n, what.ends_with("ch")) {
+        (1, _) => format!("1 {what}"),
+        (_, true) => format!("{n} {what}es"),
+        (_, false) => format!("{n} {what}s"),
     }
 }
 
@@ -372,11 +388,14 @@ pub fn run(data_dir: &Path, secret_key: Option<PathBuf>, command: ImportCommand)
                     .companies
                     .create(&info)
                     .map_err(|e| anyhow::anyhow!(e.message))?;
-                eprintln!("created company {id}");
+                println!("created company {id}");
                 id
             };
             let books = books_of(&state, id)?;
-            if save || existing.is_none() {
+            // A company's first import remembers how it was reached, so the
+            // server's Sync button carries on the same way.
+            let first_import = lb_qbd::sync::bound_source(&books)?.is_none();
+            if save || existing.is_none() || first_import {
                 let mut to_save = settings.clone();
                 if let Some(key) = transport.given_key()? {
                     let name = server_import::bridge_key_name(id);
@@ -388,7 +407,7 @@ pub fn run(data_dir: &Path, secret_key: Option<PathBuf>, command: ImportCommand)
                 }
                 server_import::save_settings(&books, &to_save)
                     .map_err(|e| anyhow::anyhow!(e.message))?;
-                eprintln!("saved the import settings on company {id}");
+                println!("saved the import settings on company {id}");
             }
             let options = SyncOptions {
                 full,
@@ -404,10 +423,14 @@ pub fn run(data_dir: &Path, secret_key: Option<PathBuf>, command: ImportCommand)
                 let mut l = last
                     .lock()
                     .unwrap_or_else(std::sync::PoisonError::into_inner);
-                let label = format!("{:?} {:?}", p.entity, p.phase);
+                // Nothing of this kind: nothing to say.
+                if p.total == 0 {
+                    return;
+                }
+                let label = format!("{:?} {:?}", p.phase, p.entity);
                 // A line per entity and phase, then at most one every 5 seconds.
-                if l.0 != label || l.1.elapsed() > Duration::from_secs(5) || p.done == p.total {
-                    eprintln!("  {label}: {}/{}", p.done, p.total);
+                if l.0 != label || l.1.elapsed() > Duration::from_secs(5) {
+                    println!("  {label}: {}/{}", p.done, p.total);
                     *l = (label, Instant::now());
                 }
             };
@@ -427,12 +450,13 @@ pub fn run(data_dir: &Path, secret_key: Option<PathBuf>, command: ImportCommand)
             for e in &report.entities {
                 if e.listed + e.created + e.updated + e.failed > 0 {
                     println!(
-                        "  {:<22} listed {:>6}  created {:>6}  updated {:>5}  unchanged {:>6}  failed {:>4}",
+                        "  {:<22} listed {:>6}  created {:>6}  updated {:>5}  unchanged {:>6}  deleted {:>4}  failed {:>4}",
                         format!("{:?}", e.entity),
                         e.listed,
                         e.created,
                         e.updated,
                         e.unchanged,
+                        e.deleted,
                         e.failed
                     );
                 }
@@ -451,10 +475,10 @@ pub fn run(data_dir: &Path, secret_key: Option<PathBuf>, command: ImportCommand)
                 }
             }
             println!(
-                "  {} issues, {} mismatches, {} gaps; full report: {}",
-                report.issues.len(),
-                report.mismatches.len(),
-                report.gaps.len(),
+                "  {}, {}, {}; full report: {}",
+                counted(report.issues.len(), "issue"),
+                counted(report.mismatches.len(), "mismatch"),
+                counted(report.gaps.len(), "gap"),
                 path.display()
             );
             if let Some(why) = &report.aborted {

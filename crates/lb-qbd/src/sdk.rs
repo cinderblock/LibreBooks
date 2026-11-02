@@ -158,7 +158,9 @@ impl SdkSession {
                 helper.display()
             )));
         }
-        tracing::info!(
+        // The usual road to a 32-bit QuickBooks, not a fault: if the helper
+        // can't get through either, the error carries both reasons.
+        tracing::debug!(
             direct = %direct.message,
             "QuickBooks isn't reachable from this process; trying the 32-bit helper"
         );
@@ -267,7 +269,7 @@ fn direct(
 ) {
     lb_qbsdk::session::run(config, |opened| match opened {
         Err(e) => {
-            tracing::warn!(error = %e, "QuickBooks SDK session didn't open");
+            tracing::debug!(error = %e, "QuickBooks SDK session didn't open");
             let _ = ready.send(Err(e));
         }
         Ok(session) => {

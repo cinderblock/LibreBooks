@@ -1,6 +1,6 @@
 // QuickBooks import (Company → Import from QuickBooks; admin): how LibreBooks
 // reaches the QBD company file (the bridge on the QuickBooks machine, the Web
-// Connector, or the SDK in the desktop app), running a sync and watching it,
+// Connector, or the SDK on the QuickBooks machine), running a sync and watching it,
 // the last sync's report, and the parity report (QBD's balances beside ours).
 // One `ImportStatus` document carries all of it (`GET /import/qbd`); the
 // settings are lb-qbd's generated `ImportSettings`. Routes: `/import/qbd`,
@@ -34,7 +34,7 @@ import { AdminGate, When } from './common';
 
 type Tab = 'sync' | 'settings' | 'parity';
 
-const TRANSPORT_LABEL: Record<QbdTransport, string> = { bridge: 'Bridge', qbwc: 'Web Connector', sdk: 'SDK (desktop app)' };
+const TRANSPORT_LABEL: Record<QbdTransport, string> = { bridge: 'Bridge', qbwc: 'Web Connector', sdk: 'SDK' };
 const FILE_MODE_LABEL: Record<FileMode, string> = { dont_care: 'However QuickBooks has it open', single_user: 'Single-user', multi_user: 'Multi-user' };
 
 /**
@@ -172,8 +172,8 @@ function RunningLine({ job }: { job: RunningJob }) {
   );
 }
 
-/** Every kind of QBD record the bridge lists (`QbdEntity`), for the "only these" option. */
-const QBD_ENTITIES: readonly QbdEntity[] = ['Account', 'Class', 'Terms', 'PaymentMethod', 'Vendor', 'Employee', 'OtherName', 'SalesRep', 'Customer', 'Item', 'ItemService', 'ItemNonInventory', 'ItemInventory', 'PayrollItemWage', 'JournalEntry', 'Invoice', 'CreditMemo', 'SalesReceipt', 'Estimate', 'PurchaseOrder', 'Bill', 'Check', 'TimeTracking', 'ReceivePayment', 'BillPaymentCheck', 'Deposit'];
+/** Every kind of QBD record the import reads (`QbdEntity`), for the "only these" option. */
+const QBD_ENTITIES: readonly QbdEntity[] = ['Account', 'Class', 'Terms', 'PaymentMethod', 'Vendor', 'Employee', 'OtherName', 'SalesRep', 'Customer', 'Item', 'ItemService', 'ItemNonInventory', 'ItemInventory', 'PayrollItemWage', 'JournalEntry', 'Invoice', 'CreditMemo', 'SalesReceipt', 'Estimate', 'SalesOrder', 'PurchaseOrder', 'Bill', 'VendorCredit', 'ItemReceipt', 'Check', 'CreditCardCharge', 'CreditCardCredit', 'Transfer', 'Charge', 'TimeTracking', 'ReceivePayment', 'BillPaymentCheck', 'BillPaymentCreditCard', 'SalesTaxPaymentCheck', 'InventoryAdjustment', 'Deposit'];
 
 /** The rest of `SyncBody`, as the Options disclosure holds it. */
 interface SyncOptions {
@@ -448,7 +448,7 @@ function ReportView({ report }: { report: SyncReport }) {
           {report.gaps.length > 0 && (
             <Card withBorder>
               <Text fw={600} mb="xs">
-                What the bridge can't give us
+                Not imported
               </Text>
               {report.gaps.map((g) => (
                 <Text key={g.qbd_type} size="sm">
@@ -595,7 +595,7 @@ function SettingsPanel({ status }: { status: ImportStatus }) {
           <Stack gap="sm">
             <Alert color={status.sdk_available ? 'blue' : 'yellow'} variant="light">
               {status.sdk_available
-                ? 'The desktop app talks to QuickBooks directly through the SDK on this Windows machine. Open the company file in QuickBooks and sync.'
+                ? 'LibreBooks talks to QuickBooks directly through the SDK on this Windows machine. It only reads. Open the company file in QuickBooks and sync. LibreBooks must be running in the same signed-in Windows session as QuickBooks, not as a service.'
                 : 'The QuickBooks SDK needs LibreBooks running on the Windows machine that has QuickBooks; this server has no SDK support. Use the bridge or the Web Connector instead.'}
             </Alert>
             <Select label="Open the company file" data={(Object.keys(FILE_MODE_LABEL) as FileMode[]).map((m) => ({ value: m, label: FILE_MODE_LABEL[m] }))} value={s.sdk.file_mode} onChange={(v) => v && setS({ ...s, sdk: { file_mode: v as FileMode } })} allowDeselect={false} />

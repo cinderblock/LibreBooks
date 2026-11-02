@@ -610,8 +610,25 @@ describes the protocol:
       without their invoices: `apply_credits` spent their "unused" cash on other
       invoices, then the full run applied them for real. Cash was never touched.
       Fixed: credits aren't applied on a limited run.
-- [ ] **Current:** a clean full import into a fresh company, for 0 mismatches.
-      Companies `01a19385-...` and `01a19431-...` on cad-3 are the sampled ones.
+- [x] Live: a clean full import into a fresh company,
+      `01a19461-11e4-7176-bd73-b74c75422637`, 2026-10-31 4:54 PM PDT (23:54Z): 107 s,
+      0 failed, **0 mismatches**, 159/159 accounts, 0.00 difference, trial balance
+      68/68. The sampled companies `01a19385-...` and `01a19431-...` remain in
+      `data`, undeleted, until the user decides about them.
+- [x] Live: the first update, 2026-11-02 10:56-10:58 AM PST (18:56-18:58Z), after
+      the accountant's edits, with `--sweep`: 95 s, 0 failed, 0 mismatches, 159/159,
+      68/68. 16 checks, 2 invoices, 4 deposits and 3 payments created; 1 deleted
+      check swept. It ran against `books`, a data folder holding only the clean
+      company, which is the one to use from now on.
+- [x] Quieter CLI: normal messages on stdout (PowerShell shows anything on stderr
+      as an error once `2>&1` is used), the 32-bit fallback at debug level, no
+      `0/0` lines, and a `deleted` column. A company's first import saves its
+      transport, so the server's Sync button carries on the same way.
+- [ ] **Current:** Live: the web UI on cad-3, run with `serve` in the desktop session
+      (a service can't reach the SDK). First-admin passkey on `localhost:8740`,
+      Connection set to SDK by hand (the company predates the save above), then
+      Sync and sweep deletions from the GUI: its first live test. The accountant's
+      reactions go in a plan of their own.
 - [ ] For other companies: paychecks and liability checks (`TransactionQueryRq`
       rows), `BuildAssembly` (its record has no amounts; waits for inventory
       reposting), `ARRefundCreditCard` (needs a LibreBooks type).

@@ -127,7 +127,10 @@ the log is `logs/server.<date>.log` in the data folder (a service has no
 console), and the recovery actions registered at install restart the service
 after a failure and after the exit code 75 a self-update leaves with.
 `--account` runs it as something other than LocalSystem; the account must be
-able to write the data folder and the program's folder.
+able to write the data folder and the program's folder. A service can't reach
+QuickBooks through the SDK, because QuickBooks only answers programs in its own
+signed-in Windows session: to sync over the SDK from the web UI, run `serve` in
+that session. The bridge and the Web Connector work either way.
 
 On Linux the unit has `Restart=on-failure`, `RestartForceExitStatus=75`,
 `KillSignal=SIGTERM`, `TimeoutStopSec=90` and sandboxing (`ProtectSystem=strict`
