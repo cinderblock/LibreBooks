@@ -624,11 +624,17 @@ describes the protocol:
       as an error once `2>&1` is used), the 32-bit fallback at debug level, no
       `0/0` lines, and a `deleted` column. A company's first import saves its
       transport, so the server's Sync button carries on the same way.
-- [ ] **Current:** Live: the web UI on cad-3, run with `serve` in the desktop session
-      (a service can't reach the SDK). First-admin passkey on `localhost:8740`,
-      Connection set to SDK by hand (the company predates the save above), then
-      Sync and sweep deletions from the GUI: its first live test. The accountant's
-      reactions go in a plan of their own.
+- [ ] **Current:** Live: the desktop app on cad-3, the "LibreBooks" desktop
+      shortcut, from `%LOCALAPPDATA%\LibreBooks-dogfood\app` (`cargo tauri build
+      --no-bundle --config tauri.qbsdk.conf.json`, with the helper beside it; no
+      installer, nothing tagged yet). `settings.json` points it at `books`. Local
+      mode needs no sign-in. Set Connection to SDK by hand (the company predates
+      the save above), then Sync and sweep deletions: the GUI's first live test.
+      Its window can't be tested over SSH: it stops at the webview with
+      `0x80070578 Invalid window handle`, because that session has no desktop.
+      `serve` remains the fallback, in the desktop session (a service can't reach
+      the SDK), never on the same folder at once. The accountant's reactions go in
+      a plan of their own.
 - [ ] For other companies: paychecks and liability checks (`TransactionQueryRq`
       rows), `BuildAssembly` (its record has no amounts; waits for inventory
       reposting), `ARRefundCreditCard` (needs a LibreBooks type).
