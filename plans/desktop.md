@@ -341,6 +341,21 @@ plus `rpm-build` for rpm bundles. Runtime: WebKitGTK 4.1, and a Secret Service
   on the process's `MainWindowHandle` (PowerShell's `FindWindow` with `$null`
   passes `""`, not NULL, and finds nothing).
 
+- **`app.security.freezePrototype` must stay `false`.** Tauri applies it as an
+  initialization script on *every* page, so the SPA served by lb-server runs
+  with `Object.prototype` frozen too. dayjs (through `@mantine/dates`) assigns
+  `valueOf` on its own prototype, and in strict mode that assignment throws
+  when the inherited `Object.prototype.valueOf` is read-only (the "override
+  mistake"): `TypeError: Cannot assign to read only property 'valueOf' of
+  object '#<g>'` while the bundle starts, so React never renders and the window
+  is white. Seen on cad-3 2026-11-02 (both the first-run path and a later
+  launch). Headless Edge against `serve --no-auth`, with and without the
+  desktop injection, rendered fine; adding `Object.freeze(Object.prototype)`
+  reproduced it exactly. `web/public/boot-check.js` now shows a "couldn't
+  start" message for start-up failures like this instead of a blank page.
+- The WebView's own history (`EBWebView\Default\History`, sqlite; copy it
+  before reading) shows where the window actually went, without a debugger.
+
 ## Progress log
 
 - [x] Scaffold, icons (from `web/public/icon.svg` via resvg + `cargo tauri icon`)
@@ -378,6 +393,7 @@ plus `rpm-build` for rpm bundles. Runtime: WebKitGTK 4.1, and a Secret Service
 - Don't add `desktop/src-tauri` to `default-members`.
 - Don't edit `web/` (another agent owns it).
 - Don't use the Tauri 3.0 alphas.
+- Don't turn on `freezePrototype` (white window; see Findings).
 - Don't point the network listener at `lb_server::router(state)`: that applies
   the local token auth mode to network clients. Wait for `router_with_auth`.
 - Don't put the device key or session cookie anywhere the webview can read.

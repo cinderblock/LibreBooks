@@ -21,7 +21,7 @@
         "img-src": "'self' data:",
         "connect-src": "ipc: http://ipc.localhost"
       },
-      "freezePrototype": true
+      "freezePrototype": false
     }
   },
   "bundle": {
