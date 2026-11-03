@@ -1182,3 +1182,19 @@ test('stress: a 100,000-line register and 5,000 more names stay responsive', asy
   await payee.pressSequentially('juniper fre');
   await expect(page.getByRole('option', { name: /Juniper Freight/ }).first()).toBeVisible();
 });
+
+test('a failure while the app starts says so instead of leaving a blank page', async ({ page }) => {
+  // The bundle throws as it starts, as it did in the desktop app with
+  // Object.prototype frozen (plans/desktop.md, Findings).
+  await page.route(/\/src\/main\.tsx/, (route) => route.fulfill({ contentType: 'text/javascript', body: "throw new TypeError(\"Cannot assign to read only property 'valueOf'\");" }));
+  await page.goto('/?fixtures=1&latency=0');
+  const box = page.getByTestId('boot-error');
+  await expect(box).toBeVisible();
+  await expect(box).toContainText("LibreBooks couldn't start");
+  await expect(box).toContainText("TypeError: Cannot assign to read only property 'valueOf'");
+});
+
+test('the boot check stays quiet when the app starts', async ({ page }) => {
+  await start(page);
+  await expect(page.getByTestId('boot-error')).toHaveCount(0);
+});
