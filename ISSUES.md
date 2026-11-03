@@ -40,3 +40,14 @@ exists because the bridge never said which credit memo settled which invoice,
 but over qbXML `CreditMemoQueryRq` sends `LinkedTxn` (`IncludeLinkedTxns`), so
 the real pairing is available. Balances and open amounts agree either way;
 only which credit paid which invoice, and its date, can differ from QuickBooks.
+
+## On Windows the desktop and CLI builds overwrite each other in target/release
+
+The CLI's binary is `librebooks.exe` and the desktop's `mainBinaryName` is
+`LibreBooks`. Both land in the shared `target/release/`, and Windows file names
+are case-insensitive, so a `cargo tauri build` replaces the CLI and the other
+way round. Seen 2026-11-02 about 5:08 PM PST: a script that meant to start the
+CLI headless started the desktop app instead. The workaround for now is
+`CARGO_TARGET_DIR=target/desktop` for desktop builds. CI and the release
+workflow should be checked for the same collision; renaming one binary, or
+keeping a separate target dir everywhere, would fix it.
