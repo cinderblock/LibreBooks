@@ -634,7 +634,13 @@ describes the protocol:
       `0x80070578 Invalid window handle`, because that session has no desktop.
       `serve` remains the fallback, in the desktop session (a service can't reach
       the SDK), never on the same folder at once. The accountant's reactions go in
-      a plan of their own.
+      a plan of their own. The first build (2026-11-02 2:14 PM PST) opened to a
+      white window: Tauri's `freezePrototype` broke dayjs (`838313f`, see
+      `plans/desktop.md` Findings). Rebuilt with the fix and the "LB" icon into
+      `target/desktop` (a separate target dir, so the CLI's
+      `target/release/librebooks.exe` isn't overwritten) and deployed
+      2026-11-03 12:56 AM PST (08:56Z), hash 9EDC70BE…; the previous exe is
+      `LibreBooks.prev.exe`. Not yet opened by anyone.
 - [ ] For other companies: paychecks and liability checks (`TransactionQueryRq`
       rows), `BuildAssembly` (its record has no amounts; waits for inventory
       reposting), `ARRefundCreditCard` (needs a LibreBooks type).
