@@ -4,4 +4,11 @@ import type { FileMode } from "./FileMode";
 /**
  * The SDK.
  */
-export type SdkSettings = { file_mode: FileMode, };
+export type SdkSettings = { file_mode: FileMode, 
+/**
+ * Which installed QuickBooks this company syncs from, by major version
+ * (24 is 2014 / Enterprise 14.0, 31 is 2021). `None` is fine with one
+ * installed; with several, a sync refuses until one is chosen (see
+ * [`crate::which`]).
+ */
+quickbooks: number | null, };

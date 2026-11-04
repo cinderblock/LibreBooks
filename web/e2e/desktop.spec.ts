@@ -1198,3 +1198,68 @@ test('the boot check stays quiet when the app starts', async ({ page }) => {
   await start(page);
   await expect(page.getByTestId('boot-error')).toHaveCount(0);
 });
+
+test('QuickBooks import: the company file can be dropped or browsed for in the desktop app, not in a browser', async ({ page }) => {
+  // The desktop app's local-mode file helpers, faked: Browse answers a path,
+  // and a dropped File resolves to where it lives.
+  await page.addInitScript(() => {
+    Object.defineProperty(window, '__LIBREBOOKS__', {
+      value: Object.freeze({
+        mode: 'desktop',
+        backend: 'local',
+        token: null,
+        apiBase: '/api/v1',
+        keyboard: 'native',
+        shell: Object.freeze({
+          version: '0.0.0',
+          os: 'windows',
+          openSettings() {},
+          pickCompanyFile: async () => 'C:\\Old Books\\Shop 2014.QBW',
+          pathOf: async (file: File) => `C:\\Dropped\\${file.name}`,
+        }),
+      }),
+    });
+  });
+  await start(page, `${CO}/import/qbd`);
+  const win = page.getByTestId('qbd-import');
+  await win.getByRole('tab', { name: 'Connection' }).click();
+  await win.getByText('SDK', { exact: true }).click();
+  const field = win.getByRole('textbox', { name: /Company file/ });
+  await win.getByRole('button', { name: 'Browse…' }).click();
+  await expect(field).toHaveValue('C:\\Old Books\\Shop 2014.QBW');
+
+  const drop = win.getByTestId('company-file-drop');
+  const qbw = await page.evaluateHandle(() => {
+    const d = new DataTransfer();
+    d.items.add(new File(['x'], 'Older.QBW'));
+    return d;
+  });
+  await drop.dispatchEvent('dragover', { dataTransfer: qbw });
+  await drop.dispatchEvent('drop', { dataTransfer: qbw });
+  await expect(field).toHaveValue('C:\\Dropped\\Older.QBW');
+
+  // Anything but a .QBW is refused, and the path stays.
+  const other = await page.evaluateHandle(() => {
+    const d = new DataTransfer();
+    d.items.add(new File(['x'], 'backup.QBB'));
+    return d;
+  });
+  await drop.dispatchEvent('drop', { dataTransfer: other });
+  await expect(page.getByText(/backup\.QBB isn't a QuickBooks company file/)).toBeVisible();
+  await expect(field).toHaveValue('C:\\Dropped\\Older.QBW');
+});
+
+test('QuickBooks import: in a browser a dropped company file asks for its path instead', async ({ page }) => {
+  await start(page, `${CO}/import/qbd`);
+  const win = page.getByTestId('qbd-import');
+  await win.getByRole('tab', { name: 'Connection' }).click();
+  await win.getByText('SDK', { exact: true }).click();
+  await expect(win.getByRole('button', { name: 'Browse…' })).toHaveCount(0);
+  const dt = await page.evaluateHandle(() => {
+    const d = new DataTransfer();
+    d.items.add(new File(['x'], 'Shop.QBW'));
+    return d;
+  });
+  await win.getByTestId('company-file-drop').dispatchEvent('drop', { dataTransfer: dt });
+  await expect(page.getByText(/A browser doesn't reveal where a dropped file lives/)).toBeVisible();
+});

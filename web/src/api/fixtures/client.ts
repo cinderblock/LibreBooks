@@ -1769,6 +1769,9 @@ export class FixtureApiClient implements ApiClient {
   qbwcFile(co: CompanyId): Promise<FileDownload> {
     return this.adm(() => ({ blob: this.admin.qbwcFile(), filename: `librebooks-${slug(this.info.name)}.qwc` }), co);
   }
+  openInQuickBooks(co: CompanyId) {
+    return this.adm(() => this.admin.openInQuickBooks(), co);
+  }
   qbwcPassword(co: CompanyId, password?: string | null) {
     return this.adm(() => this.admin.qbwcPassword(password), co);
   }

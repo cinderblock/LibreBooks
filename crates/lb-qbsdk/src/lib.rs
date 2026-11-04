@@ -16,6 +16,8 @@
 //! routes can't differ: see [`session`]. The crate keeps its dependencies few
 //! because it's built for `i686-pc-windows-msvc`.
 
+#[cfg(all(windows, feature = "com"))]
+pub mod installs;
 pub mod read_only;
 #[cfg(all(windows, feature = "com"))]
 pub mod session;
@@ -31,6 +33,26 @@ pub struct Config {
     /// The `.QBW` to open; empty for the company QuickBooks has open.
     pub company_file: String,
     pub file_mode: FileMode,
+}
+
+/// A QuickBooks installed on this machine.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Install {
+    /// QuickBooks' major version: 24 is 2014 (Enterprise 14.0), 31 is 2021.
+    pub major: u32,
+    /// What QuickBooks calls itself ("QuickBooks Pro 2021").
+    pub product: String,
+    /// Its program (`qbw32.exe`, or `QBW.EXE` from 2022).
+    pub exe: std::path::PathBuf,
+}
+
+/// A QuickBooks program running in this Windows session.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Running {
+    pub pid: u32,
+    /// The install it was started from, when it matches one.
+    pub major: Option<u32>,
+    pub exe: std::path::PathBuf,
 }
 
 /// How the SDK opens the company file.

@@ -55,6 +55,8 @@ pub struct SdkConfig {
     /// The `.QBW` to open; empty for the company QuickBooks has open.
     pub company_file: String,
     pub file_mode: FileMode,
+    /// Which installed QuickBooks, by major version (see [`crate::which`]).
+    pub quickbooks: Option<u32>,
 }
 
 impl Default for SdkConfig {
@@ -64,6 +66,7 @@ impl Default for SdkConfig {
             app_name: "LibreBooks".into(),
             company_file: String::new(),
             file_mode: FileMode::DontCare,
+            quickbooks: None,
         }
     }
 }
@@ -120,6 +123,35 @@ fn session_error(message: impl Into<String>) -> QbdError {
     }
 }
 
+/// The QuickBooks installed here, each marked running or not.
+pub fn quickbooks_here() -> Vec<crate::which::QuickBooksInstall> {
+    let installs = lb_qbsdk::installs::installed();
+    let running = lb_qbsdk::installs::running(&installs);
+    crate::which::describe(&installs, &running)
+}
+
+/// Start the company's QuickBooks with `company_file`, when no QuickBooks is
+/// running: the one way LibreBooks starts QuickBooks, and always the chosen
+/// program, never "whichever the SDK picks". Returns the product started.
+pub fn open_in_quickbooks(choice: Option<u32>, company_file: &str) -> Result<String, QbdError> {
+    let installs = lb_qbsdk::installs::installed();
+    let running = lb_qbsdk::installs::running(&installs);
+    let install = crate::which::to_open(choice, &installs, &running, company_file)
+        .map_err(session_error)?;
+    let file = company_file.trim();
+    if !Path::new(file).is_file() {
+        return Err(session_error(format!("{file} doesn't exist")));
+    }
+    Command::new(&install.exe)
+        .arg(file)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|e| session_error(format!("couldn't start {}: {e}", install.product)))?;
+    Ok(install.product.clone())
+}
+
 /// Where to reach QuickBooks from.
 enum Route {
     Direct,
@@ -140,7 +172,67 @@ impl SdkSession {
     /// Reach QuickBooks directly or, failing that, through the helper. Blocks
     /// until QuickBooks has accepted (or refused) the connection, which includes
     /// the time the user takes on the authorisation dialog the first time.
+    ///
+    /// First the guard in [`crate::which`]: the company's QuickBooks must
+    /// already be running, alone, so the SDK never starts one itself. Once
+    /// connected, QuickBooks must report that version, or the session ends
+    /// before anything is read.
     pub fn open(config: &SdkConfig) -> Result<SdkSession, QbdError> {
+        let installs = lb_qbsdk::installs::installed();
+        let running = lb_qbsdk::installs::running(&installs);
+        let want = crate::which::check(config.quickbooks, &installs, &running)
+            .map_err(session_error)?;
+        let session = SdkSession::connect(config)?;
+        if let Err(e) = session.is_version(want, &installs) {
+            session.close();
+            return Err(e);
+        }
+        Ok(session)
+    }
+
+    /// Ask QuickBooks which it is, and refuse anything but `want`.
+    fn is_version(&self, want: Option<u32>, installs: &[lb_qbsdk::Install]) -> Result<(), QbdError> {
+        let Some(want) = want else { return Ok(()) };
+        let answer = self.ask_blocking(crate::qbxml::request::host(1).xml)?;
+        match crate::which::host_major(&answer) {
+            Some(v) if v == want => Ok(()),
+            got => {
+                let name = |m: u32| {
+                    installs
+                        .iter()
+                        .find(|i| i.major == m)
+                        .map_or_else(|| format!("QuickBooks version {m}"), |i| i.product.clone())
+                };
+                Err(session_error(format!(
+                    "connected to {}, but this company syncs from {}; disconnected before reading anything",
+                    got.map_or_else(|| "a QuickBooks that didn't say its version".to_owned(), name),
+                    name(want)
+                )))
+            }
+        }
+    }
+
+    /// One request, waiting for the answer (for use before the session is
+    /// handed to async code).
+    fn ask_blocking(&self, xml: String) -> Result<String, QbdError> {
+        let (tx, rx) = oneshot::channel();
+        {
+            let jobs = self
+                .jobs
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let Some(sender) = jobs.as_ref() else {
+                return Err(session_error("the SDK session is closed"));
+            };
+            sender
+                .send(Job { xml, reply: tx })
+                .map_err(|_| session_error("the SDK thread has ended"))?;
+        }
+        rx.blocking_recv()
+            .unwrap_or_else(|_| Err(session_error("the SDK thread dropped the request")))
+    }
+
+    fn connect(config: &SdkConfig) -> Result<SdkSession, QbdError> {
         let direct = match SdkSession::start(config, Route::Direct) {
             Ok(session) => return Ok(session),
             Err(e) => e,

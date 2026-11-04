@@ -154,7 +154,7 @@ export class FixtureAdmin {
       transport: 'bridge',
       bridge: { url: 'http://192.168.1.40:8750', key_ref: `secret:${this.bridgeKeyName()}`, delay_ms: 250 },
       qbwc: { user_name: 'librebooks', app_url: null, run_every_minutes: 60, owner_id: '90a44fb5-33d9-4815-ac85-bc87a7e7d1eb', file_id: '57f3b9b6-86f1-4fcc-b1ee-566de1813d20' },
-      sdk: { file_mode: 'dont_care' },
+      sdk: { file_mode: 'dont_care', quickbooks: null },
       company_file: '',
     };
     this.lastSync = this.sampleReport(daysAgo(2), {});
@@ -622,6 +622,7 @@ export class FixtureAdmin {
       bridge_key_set: this.qbd.bridge.key_ref !== null,
       qbwc_password_set: this.qbwcPasswordSet,
       sdk_available: false,
+      quickbooks: [],
       running: this.qbdJob ? { ...this.qbdJob } : null,
       last_sync: this.lastSync,
       last_parity: this.parity,
@@ -791,6 +792,11 @@ export class FixtureAdmin {
   }
 
   /** `POST …/qbwc/password`: a chosen password (≥ 8 characters; nothing back) or a generated one, shown this once. */
+  /** `POST …/import/qbd/open-quickbooks`: fixtures have no QuickBooks to start. */
+  openInQuickBooks(): string {
+    throw new ApiError(501, 'unsupported', 'starting QuickBooks needs LibreBooks on the Windows machine that has it');
+  }
+
   qbwcPassword(password?: string | null): string | null {
     const given = password?.trim() ?? '';
     if (given && given.length < 8) throw new ApiError(400, 'invalid', 'the Web Connector password needs at least 8 characters');

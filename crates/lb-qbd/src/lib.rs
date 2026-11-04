@@ -38,6 +38,7 @@ pub mod sdk;
 pub mod source;
 pub mod sync;
 pub mod testing;
+pub mod which;
 
 pub use client::{
     Active, Basis, BridgeClient, BridgeConfig, ListQuery, QbdError, QbdSource, ReportQuery,

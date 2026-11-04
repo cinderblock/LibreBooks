@@ -39,7 +39,11 @@ keyboard-first data entry, with no subscription. MIT licensed.
   [QB Bridge](https://github.com/cinderblock/quickbooks-desktop-sdk-bridge).
   Incremental, and it compares LibreBooks' balances with QuickBooks' own so you
   can run both side by side until you trust it. It never writes to QuickBooks:
-  every transport can only send queries, by construction.
+  every transport can only send queries, by construction. With several
+  QuickBooks versions installed, each company says which one it syncs from,
+  and the SDK only connects while that QuickBooks is running alone, so an older
+  company file is never opened (and upgraded) by a newer QuickBooks.
+  (`librebooks import quickbooks` lists what's installed.)
 - **Feeds.** Bank and card transactions from OFX/QFX/QBO/CSV downloads,
   SimpleFIN, OFX Direct Connect and others, with matching rules; Amazon orders.
 - **Built-in backups**: scheduled, verified, compressed, optionally encrypted,

@@ -15,7 +15,7 @@
 
 import { Alert, Badge, Button, Card, Checkbox, Code, Collapse, CopyButton, Group, List, Modal, MultiSelect, NumberInput, PasswordInput, Progress, SegmentedControl, Select, SimpleGrid, Stack, Switch, Table, Tabs, Text, TextInput, Title, Tooltip } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
-import { IconCheck, IconChevronDown, IconChevronRight, IconCopy, IconDownload, IconRefresh, IconScale } from '@tabler/icons-react';
+import { IconCheck, IconChevronDown, IconChevronRight, IconCopy, IconDownload, IconFolderOpen, IconPlayerPlay, IconRefresh, IconScale } from '@tabler/icons-react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
 import { saveDownload } from '~/api/client';
@@ -23,10 +23,11 @@ import { useApi, useCompanyId, useRecordChanges } from '~/api/context';
 import { describeError, isApiError } from '~/api/errors';
 import { useQbdParity, useQbdStatus } from '~/api/hooks';
 import { qk } from '~/api/keys';
-import type { ChangeEvent, FileMode, ImportSettings, ImportStatus, JobKind, ParityBody, QbdEntity, QbdTransport, RunningJob, SyncBody, SyncReport } from '~/api/types';
+import type { ChangeEvent, FileMode, ImportSettings, ImportStatus, JobKind, ParityBody, QbdEntity, QbdTransport, QuickBooksInstall, RunningJob, SyncBody, SyncReport } from '~/api/types';
 import { DateField } from '~/inputs/DateField';
 import { formatDateTime } from '~/lib/dates';
 import { formatMoney } from '~/lib/money';
+import { localFiles } from '~/lib/platform';
 import { useIsMobile } from '~/lib/useMobile';
 import { useWindow } from '~/windows/WindowsProvider';
 import classes from '../screens.module.css';
@@ -53,8 +54,78 @@ function setupProblems(st: ImportStatus): string[] {
     if (!st.qbwc_password_set) out.push('the Web Connector password has not been set');
   } else if (!st.sdk_available) {
     out.push('the QuickBooks SDK needs LibreBooks running on the Windows machine that has QuickBooks');
+  } else if (st.quickbooks.length > 1 && chosenQuickBooks(st) === null) {
+    out.push('more than one QuickBooks is installed: choose which one this company syncs from (Connection)');
   }
   return out;
+}
+
+/** The QuickBooks this company syncs from: its choice, or the only one installed. */
+function chosenQuickBooks(st: ImportStatus): QuickBooksInstall | null {
+  const want = st.settings.sdk.quickbooks;
+  if (want !== null) return st.quickbooks.find((q) => q.major === want) ?? null;
+  return st.quickbooks.length === 1 ? st.quickbooks[0]! : null;
+}
+
+/**
+ * The `.QBW` path: typed, chosen with Browse… or dropped from Explorer. Browse
+ * and drop need the desktop app in local mode, where the server is on this
+ * computer (a browser never sees a dropped file's path).
+ */
+function CompanyFileField({ value, onChange }: { value: string; onChange(v: string): void }) {
+  const files = localFiles();
+  const [over, setOver] = useState(false);
+  const take = (path: string | null) => {
+    if (!path) return;
+    if (!/\.qbw$/i.test(path)) {
+      notifications.show({ message: `${path} isn't a QuickBooks company file (.QBW).`, color: 'yellow' });
+      return;
+    }
+    onChange(path);
+  };
+  return (
+    <div
+      data-testid="company-file-drop"
+      onDragOver={(e) => {
+        if (!e.dataTransfer.types.includes('Files')) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'copy';
+        setOver(true);
+      }}
+      onDragLeave={() => setOver(false)}
+      onDrop={(e) => {
+        const file = e.dataTransfer.files[0];
+        if (!file) return;
+        e.preventDefault();
+        setOver(false);
+        if (!files) {
+          notifications.show({ message: "A browser doesn't reveal where a dropped file lives. Type its path, or drop it in the LibreBooks desktop app.", color: 'yellow' });
+          return;
+        }
+        void files.pathOf(file).then((path) => {
+          if (path) take(path);
+          else notifications.show({ message: "Couldn't tell where that file lives. Type its path or use Browse….", color: 'yellow' });
+        });
+      }}
+      style={over ? { outline: '2px dashed var(--mantine-color-blue-5)', outlineOffset: 4, borderRadius: 4 } : undefined}
+    >
+      <Group align="flex-end" gap="xs" wrap="nowrap">
+        <TextInput
+          style={{ flex: 1 }}
+          label="Company file (blank: whichever QuickBooks has open)"
+          description={files ? 'Type the path, Browse…, or drop the .QBW here from Explorer.' : undefined}
+          placeholder="C:\Users\Public\Documents\Intuit\QuickBooks\Company Files\Shop.QBW"
+          value={value}
+          onChange={(e) => onChange(e.currentTarget.value)}
+        />
+        {files && (
+          <Button variant="default" leftSection={<IconFolderOpen size={16} />} onClick={() => void files.pickCompanyFile(value || null).then(take)}>
+            Browse…
+          </Button>
+        )}
+      </Group>
+    </div>
+  );
 }
 
 /** A 400 `invalid` from `PUT /import/qbd` or a job start lists what to fix in `detail.problems`. */
@@ -261,6 +332,12 @@ function SyncPanel({ status: st, onConfigure }: { status: ImportStatus; onConfig
               <Badge variant="light" color="gray">
                 {TRANSPORT_LABEL[st.settings.transport]}
               </Badge>
+              {st.settings.transport === 'sdk' && chosenQuickBooks(st) && (
+                <Badge variant="light" color={chosenQuickBooks(st)!.running ? 'teal' : 'gray'}>
+                  {chosenQuickBooks(st)!.product}
+                  {chosenQuickBooks(st)!.running ? '' : ' (not running)'}
+                </Badge>
+              )}
             </Group>
             {last?.finished_at && !running && (
               <Text size="xs" c="dimmed">
@@ -537,7 +614,14 @@ function SettingsPanel({ status }: { status: ImportStatus }) {
   };
   const bridge = (patch: Partial<ImportSettings['bridge']>) => setS({ ...s, bridge: { ...s.bridge, ...patch } });
   const qbwc = (patch: Partial<ImportSettings['qbwc']>) => setS({ ...s, qbwc: { ...s.qbwc, ...patch } });
-  const companyFile = <TextInput label="Company file (blank: whichever QuickBooks has open)" placeholder="C:\Users\Public\Documents\Intuit\QuickBooks\Company Files\Shop.QBW" value={s.company_file} onChange={(e) => setS({ ...s, company_file: e.currentTarget.value })} />;
+  const companyFile = <CompanyFileField value={s.company_file} onChange={(v) => setS({ ...s, company_file: v })} />;
+  const dirty = JSON.stringify(s) !== JSON.stringify(status.settings);
+  const open = useMutation({
+    mutationFn: () => api.openInQuickBooks(co),
+    onSuccess: (product) => notifications.show({ message: `Starting ${product} with the company file. Sync once it has opened.`, color: 'teal', autoClose: 8_000 }),
+  });
+  const several = status.quickbooks.length > 1;
+  const chosen = s.sdk.quickbooks !== null ? (status.quickbooks.find((q) => q.major === s.sdk.quickbooks) ?? null) : status.quickbooks.length === 1 ? status.quickbooks[0]! : null;
   return (
     <Stack gap="md" maw={720}>
       <SegmentedControl fullWidth data={(Object.keys(TRANSPORT_LABEL) as QbdTransport[]).map((t) => ({ value: t, label: TRANSPORT_LABEL[t] }))} value={s.transport} onChange={(v) => setS({ ...s, transport: v as QbdTransport })} />
@@ -598,8 +682,30 @@ function SettingsPanel({ status }: { status: ImportStatus }) {
                 ? 'LibreBooks talks to QuickBooks directly through the SDK on this Windows machine. It only reads. Open the company file in QuickBooks and sync. LibreBooks must be running in the same signed-in Windows session as QuickBooks, not as a service.'
                 : 'The QuickBooks SDK needs LibreBooks running on the Windows machine that has QuickBooks; this server has no SDK support. Use the bridge or the Web Connector instead.'}
             </Alert>
-            <Select label="Open the company file" data={(Object.keys(FILE_MODE_LABEL) as FileMode[]).map((m) => ({ value: m, label: FILE_MODE_LABEL[m] }))} value={s.sdk.file_mode} onChange={(v) => v && setS({ ...s, sdk: { file_mode: v as FileMode } })} allowDeselect={false} />
+            {status.sdk_available && (
+              <Select
+                label="QuickBooks"
+                description="Which installed QuickBooks this company syncs from. Opening a company file in a newer QuickBooks upgrades it, and the older one can't open it again, so LibreBooks only connects when this QuickBooks is running and no other version is; it never starts QuickBooks itself except with the button below."
+                placeholder={status.quickbooks.length ? 'Choose…' : 'No QuickBooks found on this computer'}
+                data={status.quickbooks.map((q) => ({ value: String(q.major), label: `${q.product}${q.running ? ' (running)' : ''}` }))}
+                value={s.sdk.quickbooks !== null ? String(s.sdk.quickbooks) : null}
+                onChange={(v) => setS({ ...s, sdk: { ...s.sdk, quickbooks: v === null ? null : Number(v) } })}
+                clearable={!several}
+                error={several && s.sdk.quickbooks === null ? 'More than one QuickBooks is installed: choose one.' : undefined}
+              />
+            )}
+            <Select label="Open the company file" data={(Object.keys(FILE_MODE_LABEL) as FileMode[]).map((m) => ({ value: m, label: FILE_MODE_LABEL[m] }))} value={s.sdk.file_mode} onChange={(v) => v && setS({ ...s, sdk: { ...s.sdk, file_mode: v as FileMode } })} allowDeselect={false} />
             {companyFile}
+            {status.sdk_available && (
+              <Group gap="xs">
+                <Tooltip label={dirty ? 'Save first: this uses the saved settings' : !status.settings.company_file.trim() ? 'Set and save the company file first' : `Starts ${chosen?.product ?? 'QuickBooks'} with this file, when no QuickBooks is running`}>
+                  <Button variant="default" size="xs" leftSection={<IconPlayerPlay size={14} />} loading={open.isPending} disabled={dirty || !status.settings.company_file.trim() || !chosen} onClick={() => open.mutate()}>
+                    Open in {chosen?.product ?? 'QuickBooks'}
+                  </Button>
+                </Tooltip>
+              </Group>
+            )}
+            {open.error && <Alert color="red">{describeError(open.error)}</Alert>}
           </Stack>
         </Card>
       )}

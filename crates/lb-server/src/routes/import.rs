@@ -41,6 +41,7 @@ pub fn routes() -> Router<AppState> {
         .route("/import/qbd", get(get_status).put(put_settings))
         .route("/import/qbd/status", get(get_status))
         .route("/import/qbd/sync", post(start_sync))
+        .route("/import/qbd/open-quickbooks", post(open_quickbooks))
         .route("/import/qbd/parity", get(get_parity).post(start_parity))
         .route("/import/qbd/qbwc.qwc", get(qwc_file))
         .route("/import/qbd/qbwc/password", post(set_password))
@@ -183,6 +184,17 @@ async fn start_sync(
         StatusCode::ACCEPTED,
         Json(status_of(&s, company, &books).await?),
     ))
+}
+
+/// Start the company's chosen QuickBooks with its company file.
+async fn open_quickbooks(
+    State(s): State<AppState>,
+    p: Principal,
+    Path(company): Path<CompanyId>,
+) -> ApiResult<Json<serde_json::Value>> {
+    let books = s.books_for(&p, company, Role::Admin)?;
+    let product = import::open_in_quickbooks(&books, company).await?;
+    Ok(Json(json!({ "started": product })))
 }
 
 async fn start_parity(

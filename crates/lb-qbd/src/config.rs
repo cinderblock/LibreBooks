@@ -110,6 +110,11 @@ pub enum FileMode {
 #[serde(default)]
 pub struct SdkSettings {
     pub file_mode: FileMode,
+    /// Which installed QuickBooks this company syncs from, by major version
+    /// (24 is 2014 / Enterprise 14.0, 31 is 2021). `None` is fine with one
+    /// installed; with several, a sync refuses until one is chosen (see
+    /// [`crate::which`]).
+    pub quickbooks: Option<u32>,
 }
 
 /// Everything about one company's import.

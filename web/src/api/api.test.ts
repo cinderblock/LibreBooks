@@ -191,7 +191,7 @@ describe('HttpApiClient', () => {
     await api.attachments('co1', { record_kind: 'txn', record_id: 't1' });
     await api.qbdStatus('co1', 500);
     await api.qbdParity('co1');
-    const settings = { transport: 'bridge', bridge: { url: 'http://b', key_ref: null, delay_ms: 100 }, qbwc: { user_name: 'lb', app_url: null, run_every_minutes: null, owner_id: 'o', file_id: 'f' }, sdk: { file_mode: 'dont_care' }, company_file: '' } as const;
+    const settings = { transport: 'bridge', bridge: { url: 'http://b', key_ref: null, delay_ms: 100 }, qbwc: { user_name: 'lb', app_url: null, run_every_minutes: null, owner_id: 'o', file_id: 'f' }, sdk: { file_mode: 'dont_care', quickbooks: null }, company_file: '' } as const;
     await api.putQbdSettings('co1', settings, 'k3y');
     await api.putQbdSettings('co1', settings);
     expect(await api.qbwcPassword('co1', 'chosen-one')).toBeNull();

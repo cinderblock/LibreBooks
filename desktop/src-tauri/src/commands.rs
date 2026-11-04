@@ -124,6 +124,33 @@ pub async fn pick_folder(app: AppHandle, current: Option<String>) -> Option<Stri
     rx.await.ok().flatten().map(|p| p.display().to_string())
 }
 
+/// Ask for a QuickBooks company file (`.QBW`), for the import settings. Its
+/// path is only meaningful to a server on this computer (local mode).
+#[tauri::command]
+pub async fn pick_company_file(app: AppHandle, current: Option<String>) -> Option<String> {
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    let mut dialog = app
+        .dialog()
+        .file()
+        .set_title("QuickBooks company file")
+        .add_filter("QuickBooks company file", &["qbw", "QBW"]);
+    if let Some(dir) = current
+        .as_deref()
+        .map(std::path::Path::new)
+        .and_then(std::path::Path::parent)
+        .filter(|d| d.is_dir())
+    {
+        dialog = dialog.set_directory(dir);
+    }
+    if let Some(w) = app.get_webview_window(crate::window::MAIN) {
+        dialog = dialog.set_parent(&w);
+    }
+    dialog.pick_file(move |picked| {
+        let _ = tx.send(picked.and_then(|p| p.into_path().ok()));
+    });
+    rx.await.ok().flatten().map(|p| p.display().to_string())
+}
+
 /// Show the company folder in the file manager.
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)] // Tauri hands commands an owned AppHandle

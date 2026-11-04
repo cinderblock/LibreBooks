@@ -32,6 +32,26 @@ fn host_info(backend: &Backend) -> serde_json::Value {
     })
 }
 
+/// What only local mode offers the page: the server is on this computer, so a
+/// file's path here means something to it. `pickCompanyFile` is the native
+/// file dialog; `pathOf(file)` resolves a dropped `File` to its full path,
+/// which a page can't see, through WebView2's
+/// `postMessageWithAdditionalObjects` (answered by `webview2::answer_file_paths`).
+const LOCAL_SHELL: &str = r"
+  info.shell.pickCompanyFile = (current) =>
+    window.__TAURI_INTERNALS__.invoke('pick_company_file', { current: current || null });
+  info.shell.pathOf = (file) => new Promise((resolve) => {
+    const wv = window.chrome && window.chrome.webview;
+    if (!wv || typeof wv.postMessageWithAdditionalObjects !== 'function') { resolve(null); return; }
+    const id = String(Math.random()).slice(2);
+    const done = (path) => { window.removeEventListener('librebooks-file-path', on); clearTimeout(timer); resolve(path); };
+    const on = (e) => { if (e.detail && e.detail.id === id) done(e.detail.path || null); };
+    const timer = setTimeout(() => done(null), 5000);
+    window.addEventListener('librebooks-file-path', on);
+    wv.postMessageWithAdditionalObjects(JSON.stringify({ librebooks: 'file-path', id }), [file]);
+  });
+";
+
 /// The main window's initialization script. It runs before any page script on
 /// every load of the top frame, and only hands over the token when the page is
 /// on a trusted (loopback) origin.
@@ -39,11 +59,17 @@ fn init_script(backend: &Backend, trusted: &[String]) -> String {
     let info = host_info(backend);
     let trusted = serde_json::to_string(trusted).unwrap_or_else(|_| "[]".into());
     let release = !cfg!(debug_assertions);
+    let local_shell = if matches!(backend.kind, BackendKind::Local { .. }) {
+        LOCAL_SHELL
+    } else {
+        ""
+    };
     format!(
         r#"(() => {{
   if (!{trusted}.includes(window.location.origin)) return;
   const info = {info};
   info.shell.openSettings = () => window.__TAURI_INTERNALS__.invoke('open_settings');
+{local_shell}
   Object.freeze(info.shell);
   Object.defineProperty(window, '__LIBREBOOKS__', {{
     value: Object.freeze(info), writable: false, configurable: false, enumerable: false,
@@ -134,6 +160,9 @@ pub fn open_main(
     let window = builder.build()?;
 
     keep_keys_for_the_app(&window);
+    if matches!(backend.kind, BackendKind::Local { .. }) {
+        answer_file_paths(&window, trusted.clone());
+    }
     window.navigate(start)?;
     Ok(window)
 }
@@ -191,13 +220,120 @@ fn keep_keys_for_the_app(window: &WebviewWindow) {
     let _ = window;
 }
 
+/// Answer the page's `pathOf(file)` (see [`LOCAL_SHELL`]).
+fn answer_file_paths(window: &WebviewWindow, trusted: Vec<String>) {
+    #[cfg(windows)]
+    {
+        let result = window.with_webview(move |wv| {
+            if let Err(e) = webview2::answer_file_paths(&wv.controller(), trusted) {
+                log::warn!("dropped files won't give their paths: {e}");
+            }
+        });
+        if let Err(e) = result {
+            log::warn!("couldn't reach the webview: {e}");
+        }
+    }
+    #[cfg(not(windows))]
+    let _ = (window, trusted);
+}
+
 #[cfg(windows)]
 #[allow(unsafe_code)]
 mod webview2 {
     use webview2_com::Microsoft::Web::WebView2::Win32::{
-        ICoreWebView2Controller, ICoreWebView2Settings3,
+        ICoreWebView2, ICoreWebView2Controller, ICoreWebView2File, ICoreWebView2Settings3,
+        ICoreWebView2WebMessageReceivedEventArgs, ICoreWebView2WebMessageReceivedEventArgs2,
     };
-    use windows_core::Interface;
+    use webview2_com::{ExecuteScriptCompletedHandler, WebMessageReceivedEventHandler, take_pwstr};
+    use windows_core::{HSTRING, Interface, PWSTR};
+
+    /// Listen for `{ librebooks: "file-path", id }` messages carrying a `File`,
+    /// from a trusted origin only, and answer each with a
+    /// `librebooks-file-path` event `{ id, path }`. Tauri's own IPC handler sees
+    /// these messages too and logs one console error for each (not IPC).
+    pub fn answer_file_paths(
+        controller: &ICoreWebView2Controller,
+        trusted: Vec<String>,
+    ) -> windows_core::Result<()> {
+        let handler = WebMessageReceivedEventHandler::create(Box::new(
+            move |sender: Option<ICoreWebView2>,
+                  args: Option<ICoreWebView2WebMessageReceivedEventArgs>| {
+                let (Some(sender), Some(args)) = (sender, args) else {
+                    return Ok(());
+                };
+                if let Some((id, path)) = file_path(&args, &trusted) {
+                    let detail = serde_json::json!({ "id": id, "path": path });
+                    let js = format!(
+                        "window.dispatchEvent(new CustomEvent('librebooks-file-path', {{ detail: {detail} }}))"
+                    );
+                    // SAFETY: a COM call on the live webview that raised the
+                    // event, on its UI thread; the string outlives the call.
+                    unsafe {
+                        let _ = sender.ExecuteScript(
+                            &HSTRING::from(js),
+                            &ExecuteScriptCompletedHandler::create(Box::new(|_, _| Ok(()))),
+                        );
+                    }
+                }
+                Ok(())
+            },
+        ));
+        let mut token = 0i64;
+        // SAFETY: registering a handler on Tauri's live webview, on the UI
+        // thread (`with_webview` runs us there). It lives as long as the webview.
+        unsafe {
+            controller
+                .CoreWebView2()?
+                .add_WebMessageReceived(&handler, &raw mut token)
+        }
+    }
+
+    /// The id and the file's path, when this is our message from a trusted page.
+    fn file_path(
+        args: &ICoreWebView2WebMessageReceivedEventArgs,
+        trusted: &[String],
+    ) -> Option<(String, Option<String>)> {
+        // SAFETY: COM getters on the event's live arguments; each returned
+        // string is taken (and freed) by `take_pwstr`.
+        unsafe {
+            let mut source = PWSTR::null();
+            args.Source(&raw mut source).ok()?;
+            let source = take_pwstr(source);
+            let origin = url::Url::parse(&source).ok()?.origin().ascii_serialization();
+            if !trusted.contains(&origin) {
+                return None;
+            }
+            let mut text = PWSTR::null();
+            args.TryGetWebMessageAsString(&raw mut text).ok()?;
+            let text = take_pwstr(text);
+            let msg: serde_json::Value = serde_json::from_str(&text).ok()?;
+            if msg.get("librebooks")?.as_str()? != "file-path" {
+                return None;
+            }
+            let id = msg.get("id")?.as_str()?.to_owned();
+            let path = (|| {
+                let objects = args
+                    .cast::<ICoreWebView2WebMessageReceivedEventArgs2>()
+                    .ok()?
+                    .AdditionalObjects()
+                    .ok()?;
+                let mut count = 0u32;
+                objects.Count(&raw mut count).ok()?;
+                if count == 0 {
+                    return None;
+                }
+                let file = objects
+                    .GetValueAtIndex(0)
+                    .ok()?
+                    .cast::<ICoreWebView2File>()
+                    .ok()?;
+                let mut path = PWSTR::null();
+                file.Path(&raw mut path).ok()?;
+                Some(take_pwstr(path))
+            })();
+            Some((id, path))
+        }
+    }
 
     /// `ICoreWebView2Settings3::put_AreBrowserAcceleratorKeysEnabled(FALSE)`.
     /// Tauri doesn't expose this setting, so it goes through COM directly.

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-pick-company-file"
+description = "Enables the pick_company_file command without any pre-configured scope."
+commands.allow = ["pick_company_file"]
+
+[[permission]]
+identifier = "deny-pick-company-file"
+description = "Denies the pick_company_file command without any pre-configured scope."
+commands.deny = ["pick_company_file"]

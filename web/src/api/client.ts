@@ -338,6 +338,11 @@ export interface ApiClient {
    * the generated password, shown this once and never again.
    */
   qbwcPassword(co: CompanyId, password?: string | null): Promise<string | null>;
+  /**
+   * Start the company's chosen QuickBooks with its company file (only when no
+   * QuickBooks is running; 409 `quickbooks` says why not). The product started.
+   */
+  openInQuickBooks(co: CompanyId): Promise<string>;
 
   /** Live changes (SSE `/events?company=`); the fixture client emits its own. */
   subscribe(co: CompanyId, handlers: EventHandlers): EventSubscription;

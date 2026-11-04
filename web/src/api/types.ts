@@ -201,6 +201,7 @@ export type { QbdTransport } from './generated/QbdTransport';
 export type { BridgeSettings } from './generated/BridgeSettings';
 export type { QbwcSettings } from './generated/QbwcSettings';
 export type { SdkSettings } from './generated/SdkSettings';
+export type { QuickBooksInstall } from './generated/QuickBooksInstall';
 export type { FileMode } from './generated/FileMode';
 // The server's envelopes around them (lb-server): the status document
 // (`GET /import/qbd` and `…/status`), a running job, and the request bodies.

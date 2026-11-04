@@ -11,6 +11,7 @@ fn main() {
                 "get_shell",
                 "save_settings",
                 "pick_folder",
+                "pick_company_file",
                 "open_data_folder",
                 "test_server",
                 "enroll_device",

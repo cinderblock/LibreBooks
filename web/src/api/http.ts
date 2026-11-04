@@ -687,6 +687,10 @@ export class HttpApiClient implements ApiClient {
   qbwcFile(co: CompanyId) {
     return this.download('GET', this.co(co, '/import/qbd/qbwc.qwc'), 'librebooks.qwc');
   }
+  async openInQuickBooks(co: CompanyId) {
+    const r = await this.request<{ started: string }>('POST', this.co(co, '/import/qbd/open-quickbooks'), { body: {} });
+    return r.started;
+  }
   async qbwcPassword(co: CompanyId, password?: string | null) {
     // `{ value }` → 204; no value → `{ password }`, generated and shown once.
     const r = await this.request<{ password: string } | undefined>('POST', this.co(co, '/import/qbd/qbwc/password'), { body: password ? { value: password } : {} });

@@ -73,6 +73,9 @@ pub enum ImportCommand {
         #[arg(long)]
         as_of: Option<jiff::civil::Date>,
     },
+    /// List the QuickBooks installed on this machine (their major versions are
+    /// what `--quickbooks` takes) and which are running in this session.
+    Quickbooks,
     /// Write the QuickBooks Web Connector file (.qwc) for a company, to add to
     /// the Web Connector on the QuickBooks machine.
     Qwc {
@@ -118,6 +121,11 @@ pub struct TransportArgs {
     /// The .QBW path for the SDK (default: the company QuickBooks has open).
     #[arg(long)]
     company_file: Option<String>,
+    /// Which installed QuickBooks the SDK uses, by major version (24 is 2014 /
+    /// Enterprise 14.0, 31 is 2021). Needed when more than one is installed;
+    /// that QuickBooks must already be running, alone.
+    #[arg(long)]
+    quickbooks: Option<u32>,
 }
 
 impl TransportArgs {
@@ -134,6 +142,9 @@ impl TransportArgs {
         }
         if let Some(f) = &self.company_file {
             s.company_file = f.clone();
+        }
+        if let Some(v) = self.quickbooks {
+            s.sdk.quickbooks = Some(v);
         }
         s
     }
@@ -277,6 +288,7 @@ fn open_source(
                 let config = lb_qbd::sdk::SdkConfig {
                     company_file: settings.company_file.clone(),
                     file_mode: settings.sdk.file_mode,
+                    quickbooks: settings.sdk.quickbooks,
                     ..lb_qbd::sdk::SdkConfig::default()
                 };
                 let source = lb_qbd::sdk::sdk_source(&config)?;
@@ -497,6 +509,22 @@ pub fn run(data_dir: &Path, secret_key: Option<PathBuf>, command: ImportCommand)
             let source = open_source(&state, Some(company), &settings, &transport, None)?;
             let books = books_of(&state, company)?;
             print_parity(&rt, &books, &source, as_of)?;
+        }
+        ImportCommand::Quickbooks => {
+            #[cfg(all(windows, feature = "qbsdk"))]
+            {
+                let here = lb_qbd::sdk::quickbooks_here();
+                if here.is_empty() {
+                    println!("no QuickBooks found on this machine");
+                }
+                for q in here {
+                    let running = if q.running { "  (running)" } else { "" };
+                    println!("{:>3}  {}{running}", q.major, q.product);
+                    println!("     {}", q.exe);
+                }
+            }
+            #[cfg(not(all(windows, feature = "qbsdk")))]
+            bail!("finding QuickBooks needs LibreBooks on Windows (this build has no SDK support)");
         }
         ImportCommand::Qwc { company, url, out } => {
             let books = books_of(&state, company)?;

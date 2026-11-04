@@ -14,6 +14,23 @@ export function isTauri(): boolean {
   return injected?.mode === 'desktop' || '__TAURI_INTERNALS__' in window || '__TAURI__' in window;
 }
 
+/**
+ * What the desktop app offers only in local mode, where the server is on this
+ * computer and a path here means something to it: the native file dialog for a
+ * QuickBooks company file, and the full path of a dropped `File` (a page can't
+ * see it; WebView2 tells the app). `null` in a browser or a thin client.
+ */
+export interface LocalFiles {
+  pickCompanyFile(current?: string | null): Promise<string | null>;
+  pathOf(file: File): Promise<string | null>;
+}
+
+export function localFiles(): LocalFiles | null {
+  if (typeof window === 'undefined') return null;
+  const shell = (window as unknown as { __LIBREBOOKS__?: { shell?: Partial<LocalFiles> } }).__LIBREBOOKS__?.shell;
+  return shell?.pickCompanyFile && shell.pathOf ? (shell as LocalFiles) : null;
+}
+
 export function detectOS(): OS {
   const nav = navigator as Navigator & { userAgentData?: { platform?: string } };
   const p = (nav.userAgentData?.platform || navigator.platform || navigator.userAgent).toLowerCase();

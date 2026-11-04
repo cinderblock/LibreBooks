@@ -74,6 +74,43 @@ pub const fn sdk_available() -> bool {
 
 /// A company's settings, read from its file. A company that has none yet gets
 /// defaults, saved at once so the `.qwc` ids they mint stay the same.
+/// The QuickBooks installed here (none without SDK support).
+pub async fn quickbooks_here() -> Vec<lb_qbd::which::QuickBooksInstall> {
+    #[cfg(all(windows, feature = "qbsdk"))]
+    {
+        tokio::task::spawn_blocking(lb_qbd::sdk::quickbooks_here)
+            .await
+            .unwrap_or_default()
+    }
+    #[cfg(not(all(windows, feature = "qbsdk")))]
+    {
+        Vec::new()
+    }
+}
+
+/// Start the company's chosen QuickBooks with its company file (only when no
+/// QuickBooks is running). Answers the product started.
+pub async fn open_in_quickbooks(books: &Books, company: CompanyId) -> ApiResult<String> {
+    let settings = settings_of(books, company)?;
+    #[cfg(all(windows, feature = "qbsdk"))]
+    {
+        tokio::task::spawn_blocking(move || {
+            lb_qbd::sdk::open_in_quickbooks(settings.sdk.quickbooks, &settings.company_file)
+        })
+        .await?
+        .map_err(|e| ApiError::new(StatusCode::CONFLICT, "quickbooks", e.to_string()))
+    }
+    #[cfg(not(all(windows, feature = "qbsdk")))]
+    {
+        let _ = settings;
+        Err(ApiError::new(
+            StatusCode::NOT_IMPLEMENTED,
+            "unsupported",
+            "starting QuickBooks needs LibreBooks on the Windows machine that has it (this build has no SDK support)",
+        ))
+    }
+}
+
 pub fn settings_of(books: &Books, company: CompanyId) -> ApiResult<ImportSettings> {
     let stored = books.read(|c| lb_store::company::setting(c, SETTING_KEY))?;
     if let Some(json) = stored {
@@ -174,6 +211,9 @@ pub struct ImportStatus {
     pub bridge_key_set: bool,
     pub qbwc_password_set: bool,
     pub sdk_available: bool,
+    /// The QuickBooks installed on this machine, for the SDK's choice (empty
+    /// without SDK support).
+    pub quickbooks: Vec<lb_qbd::which::QuickBooksInstall>,
     pub running: Option<RunningJob>,
     pub last_sync: Option<SyncReport>,
     pub last_parity: Option<ParityReport>,
@@ -461,6 +501,7 @@ async fn make_source(
                 let config = lb_qbd::sdk::SdkConfig {
                     company_file: settings.company_file.clone(),
                     file_mode: settings.sdk.file_mode,
+                    quickbooks: settings.sdk.quickbooks,
                     ..lb_qbd::sdk::SdkConfig::default()
                 };
                 // Opening blocks on QuickBooks (and on the user's answer to its
@@ -800,6 +841,7 @@ pub async fn status(
         bridge_key_set: key_set,
         qbwc_password_set: password_set,
         sdk_available: sdk_available(),
+        quickbooks: quickbooks_here().await,
         running: slot.running_view(),
         last_sync: lock(&slot.last_sync).clone(),
         last_parity: lock(&slot.last_parity).clone(),

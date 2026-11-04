@@ -350,6 +350,7 @@ pub fn run() {
             commands::get_shell,
             commands::save_settings,
             commands::pick_folder,
+            commands::pick_company_file,
             commands::open_data_folder,
             commands::test_server,
             commands::enroll_device,
