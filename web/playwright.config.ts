@@ -2,8 +2,23 @@
 // is shared (see the compute budget in plans/web-ui.md).
 
 import { defineConfig, devices } from '@playwright/test';
+import { ALPHA_NOTICE_VERSION, FIXTURE_ALPHA_KEY } from './src/alpha/version';
 
 const port = 5740;
+
+/**
+ * Every test starts with the alpha notice already accepted, so a save doesn't
+ * stop to ask; the notice's own test clears this.
+ */
+const alphaAccepted = {
+  cookies: [],
+  origins: [
+    {
+      origin: `http://localhost:${port}`,
+      localStorage: [{ name: FIXTURE_ALPHA_KEY, value: JSON.stringify({ version: ALPHA_NOTICE_VERSION, accepted_at: '2026-01-01T00:00:00Z' }) }],
+    },
+  ],
+};
 
 export default defineConfig({
   testDir: 'e2e',
@@ -17,6 +32,7 @@ export default defineConfig({
     baseURL: `http://localhost:${port}`,
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
+    storageState: alphaAccepted,
   },
   webServer: {
     command: 'bun run dev',

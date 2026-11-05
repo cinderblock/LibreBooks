@@ -17,6 +17,7 @@ import { SignIn } from './auth/SignIn';
 import { KeyboardProvider } from './keyboard/KeyboardProvider';
 import { CompanyPicker } from './shell/CompanyPicker';
 import { CompanyShell } from './shell/CompanyShell';
+import { AlphaNoticeModal } from './alpha/AlphaNotice';
 
 const theme = createTheme({
   primaryColor: 'teal',
@@ -63,6 +64,7 @@ export function App() {
   return (
     <MantineProvider theme={theme} defaultColorScheme="auto">
       <Notifications position="top-right" limit={4} />
+      <AlphaNoticeModal />
       <QueryClientProvider client={queryClient}>
         <ApiProvider client={client}>
           <KeyboardProvider>

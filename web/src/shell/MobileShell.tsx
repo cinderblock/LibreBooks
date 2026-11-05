@@ -35,6 +35,7 @@ import { NAV_ITEMS } from './menus';
 import { useSignOut } from './UserMenu';
 import { WindowHost } from './WindowHost';
 import classes from './shell.module.css';
+import { AlphaBadge } from '~/alpha/AlphaNotice';
 
 function SheetItem({ icon, label, onClick, todo }: { icon: ReactNode; label: string; onClick(): void; todo?: boolean }) {
   return (
@@ -73,6 +74,7 @@ export function MobileShell({ live, onShortcuts }: { live: LiveStatus; onShortcu
           <span style={{ width: 8 }} />
         )}
         <span className={classes.mtitle}>{title}</span>
+        <AlphaBadge size="xs" />
         <FixtureBadge />
         <LiveIndicator status={live} />
         <ActionIcon variant="subtle" size="xl" aria-label="Search" onClick={() => spotlight.open()}>

@@ -6,11 +6,28 @@
 // turns it back off. The fixture books load with a dynamic import, so a
 // production page that never asks for them doesn't download them.
 
+import { AlphaNotice } from '~/alpha/notice';
+import { FIXTURE_ALPHA_KEY } from '~/alpha/version';
+import { gateWrites } from './access';
 import type { ApiClient } from './client';
 import type { FixtureApiClient } from './fixtures/client';
 import { HttpApiClient } from './http';
+import type { NoticeAcceptance } from './types';
 
 const KEY = 'librebooks.fixtures';
+
+/**
+ * Fixture mode's stand-in for the server remembering the alpha notice: the demo
+ * books start over on reload, the acceptance needn't. (Playwright seeds it.)
+ */
+function storedFixtureAlpha(): NoticeAcceptance | null {
+  try {
+    const v = JSON.parse(localStorage.getItem(FIXTURE_ALPHA_KEY) ?? 'null') as NoticeAcceptance | null;
+    return v && typeof v.version === 'number' && typeof v.accepted_at === 'string' ? v : null;
+  } catch {
+    return null;
+  }
+}
 
 export type FixtureMode = 'off' | 'on' | 'stress';
 
@@ -49,22 +66,35 @@ function apiBaseUrl(base: string | null | undefined): string | undefined {
   return /\/api\/v\d+$/.test(trimmed) ? trimmed : `${trimmed}/api/v1`;
 }
 
-let singleton: ApiClient | null = null;
+let singleton: { client: ApiClient; alpha: AlphaNotice } | null = null;
 
 /**
  * Create the page's one client (call once, before rendering). A singleton
  * rather than per-render state because React may run state initializers twice
  * (StrictMode), and fixture mode must not end up with two sets of books (one in
  * the app, another on the console handle).
+ *
+ * The app gets the client with its changes held until the alpha notice is
+ * accepted (`gateWrites`); the notice itself talks to the raw one.
  */
 export async function initApiClient(): Promise<ApiClient> {
-  singleton ??= await createApiClient();
-  return singleton;
+  if (!singleton) {
+    const raw = await createApiClient();
+    const alpha = new AlphaNotice(raw);
+    singleton = { client: gateWrites(raw, alpha), alpha };
+  }
+  return singleton.client;
 }
 
 export function getApiClient(): ApiClient {
   if (!singleton) throw new Error('initApiClient() must run before the app renders');
-  return singleton;
+  return singleton.client;
+}
+
+/** The page's alpha-notice state and prompt (see `~/alpha/notice.ts`). */
+export function getAlphaNotice(): AlphaNotice {
+  if (!singleton) throw new Error('initApiClient() must run before the app renders');
+  return singleton.alpha;
 }
 
 async function createApiClient(): Promise<ApiClient> {
@@ -72,7 +102,12 @@ async function createApiClient(): Promise<ApiClient> {
   if (mode !== 'off') {
     const { FixtureApiClient } = await import('./fixtures/client');
     const latency = Number(new URLSearchParams(window.location.search).get('latency') ?? '90');
-    const client = new FixtureApiClient({ stress: mode === 'stress', latencyMs: Number.isFinite(latency) ? latency : 90 });
+    const client = new FixtureApiClient({
+      stress: mode === 'stress',
+      latencyMs: Number.isFinite(latency) ? latency : 90,
+      alphaNotice: storedFixtureAlpha(),
+      onAlphaNotice: (a) => localStorage.setItem(FIXTURE_ALPHA_KEY, JSON.stringify(a)),
+    });
     // Console/e2e handle: `__librebooks.simulateRemoteEdit(id)`, `__librebooks.find(…)`.
     (window as unknown as { __librebooks?: FixtureApiClient }).__librebooks = client;
     return client;

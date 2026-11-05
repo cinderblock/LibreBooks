@@ -18,6 +18,7 @@ import { useApi } from '~/api/context';
 import { describeError, isApiError } from '~/api/errors';
 import type { EnrolmentPurpose } from '~/api/generated/EnrolmentPurpose';
 import { ceremonyError, isAborted } from './webauthn';
+import { AlphaTitle } from '~/alpha/AlphaNotice';
 
 let taken: string | null | undefined;
 
@@ -121,7 +122,7 @@ export function Enrol() {
           }}
         >
           <Stack>
-            <Title order={2}>LibreBooks</Title>
+            <AlphaTitle>LibreBooks</AlphaTitle>
             <Text fw={500}>{purpose ? PURPOSE_TEXT[purpose] : 'Set up your passkey'}</Text>
             {purpose && <Badge variant="light">{purpose.replace('_', ' ')}</Badge>}
             {!browserSupportsWebAuthn() && <Alert color="orange">This browser can't create passkeys. Try a current Chrome, Edge, Safari or Firefox.</Alert>}

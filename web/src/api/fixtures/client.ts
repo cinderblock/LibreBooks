@@ -74,6 +74,7 @@ import type {
   TxnType,
   TxnWithPostings,
   Fulfilment,
+  NoticeAcceptance,
 } from '../types';
 import { accountTypeOrder, isDebitNormal, naturalBalance } from '~/lib/accountTypes';
 import { addDays, addMonths, todayIso } from '~/lib/dates';
@@ -104,6 +105,9 @@ export interface FixtureOptions {
   /** Add thousands of names and a 100k-line register (`?fixtures=stress`). */
   stress?: boolean;
   today?: string;
+  /** The demo user's alpha-notice acceptance to start with; `onAlphaNotice` hears each new one (to remember it). */
+  alphaNotice?: NoticeAcceptance | null;
+  onAlphaNotice?(accepted: NoticeAcceptance): void;
 }
 
 type Lists = { [L in ListName]: ListRecords[L][] };
@@ -133,6 +137,7 @@ export class FixtureApiClient implements ApiClient {
   /** Register lines a bank feed matched or added (txn id → accounts). */
   private downloaded = new Map<string, Set<string>>();
   private feeds: FixtureFeeds;
+  private readonly onAlphaNotice: FixtureOptions['onAlphaNotice'];
   private admin: FixtureAdmin;
   /** Transactions dated on or before this are locked (`closed_period`). */
   private closing: string | null = null;
@@ -213,10 +218,22 @@ export class FixtureApiClient implements ApiClient {
       accounts: () => this.lists.accounts,
       balances: () => this.balanceRows(),
       emit: (kind, id, action) => this.emit(kind, id, action),
+      alphaNotice: opts.alphaNotice ?? null,
     });
+    this.onAlphaNotice = opts.onAlphaNotice;
   }
 
   /** The books' closing date lock, as the server applies it to every write: 423 `closed_period` with the date. */
+  acceptAlphaNotice(version: number): Promise<NoticeAcceptance> {
+    try {
+      const accepted = this.admin.acceptAlphaNotice(version);
+      this.onAlphaNotice?.(clone(accepted));
+      return this.delay(() => accepted);
+    } catch (e) {
+      return Promise.reject(e);
+    }
+  }
+
   private checkClosed(date: string) {
     if (this.closing && date <= this.closing) {
       throw new ApiError(423, 'closed_period', `The books are closed through ${this.closing}; this transaction is dated inside the closed period.`, { closing_date: this.closing });
@@ -323,7 +340,7 @@ export class FixtureApiClient implements ApiClient {
   }
   session(): Promise<Session> {
     return this.delay(() => ({
-      user: { id: 'fixture-user', display_name: 'Demo User', role: 'admin' as const, kind: 'local' as const },
+      user: { id: 'fixture-user', display_name: 'Demo User', role: 'admin' as const, kind: 'local' as const, alpha_notice: this.admin.alphaNotice() },
       companies: this.summaries(),
       sign_in: false,
     }));

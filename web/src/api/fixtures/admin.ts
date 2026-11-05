@@ -8,6 +8,7 @@
 
 import { ApiError } from '../errors';
 import { addDays, type IsoDate } from '~/lib/dates';
+import type { NoticeAcceptance } from '../generated/NoticeAcceptance';
 import type {
   Account,
   AccountBalance,
@@ -60,6 +61,8 @@ export interface AdminHost {
   accounts(): Account[];
   balances(): AccountBalance[];
   emit(kind: string, id: string, action: string): void;
+  /** The demo user's alpha-notice acceptance to start with (remembered across reloads). */
+  alphaNotice?: NoticeAcceptance | null;
 }
 
 /** The signed-in demo user (matches `FixtureApiClient.session()`). */
@@ -164,6 +167,11 @@ export class FixtureAdmin {
 
   private seedPeople() {
     const co = this.host.companyId;
+    // Maya accepted the alpha notice long ago; the demo user as remembered.
+    const accepted: Record<string, NoticeAcceptance | null> = {
+      [FIXTURE_USER_ID]: this.host.alphaNotice ?? null,
+      'user-maya': { version: 1, accepted_at: daysAgo(150) },
+    };
     const people: Array<[string, string, Role, Role | null, string | null]> = [
       [FIXTURE_USER_ID, 'Demo User', 'admin', 'admin', null],
       ['user-maya', 'Maya Okafor', 'bookkeeper', 'bookkeeper', null],
@@ -171,7 +179,7 @@ export class FixtureAdmin {
       ['user-old', 'Former Bookkeeper', 'bookkeeper', null, daysAgo(90)],
     ];
     for (const [id, name, role, coRole, disabled] of people) {
-      this.users.push({ id, display_name: name, role, created_at: daysAgo(200), disabled_at: disabled });
+      this.users.push({ id, display_name: name, role, created_at: daysAgo(200), disabled_at: disabled, alpha_notice: accepted[id] ?? null });
       if (coRole) this.access.set(`${id}:${co}`, coRole);
     }
     this.passkeys.set(FIXTURE_USER_ID, [
@@ -239,6 +247,18 @@ export class FixtureAdmin {
 
   listUsers(): User[] {
     return [...this.users].sort((a, b) => a.display_name.localeCompare(b.display_name));
+  }
+
+  /** The demo user accepts the alpha notice `version` (as the server: never lower, first time kept). */
+  acceptAlphaNotice(version: number): NoticeAcceptance {
+    if (!Number.isInteger(version) || version < 1) throw new ApiError(400, 'invalid', 'the notice version starts at 1');
+    const me = this.users.find((u) => u.id === FIXTURE_USER_ID)!;
+    if (!me.alpha_notice || me.alpha_notice.version < version) me.alpha_notice = { version, accepted_at: new Date().toISOString() };
+    return me.alpha_notice;
+  }
+
+  alphaNotice(): NoticeAcceptance | null {
+    return this.users.find((u) => u.id === FIXTURE_USER_ID)?.alpha_notice ?? null;
   }
 
   user(id: string): UserDetail {

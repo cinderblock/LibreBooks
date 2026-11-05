@@ -1283,3 +1283,54 @@ test('QuickBooks import: in a browser a dropped company file asks for its path i
   await win.getByTestId('company-file-drop').dispatchEvent('drop', { dataTransfer: dt });
   await expect(page.getByText(/A browser doesn't reveal where a dropped file lives/)).toBeVisible();
 });
+
+test.describe('the alpha notice', () => {
+  // Nothing accepted yet (the other tests start with it accepted).
+  test.use({ storageState: { cookies: [], origins: [] } });
+
+  test('the first save waits for it: cancel keeps the form, accept saves, and it is remembered', async ({ page }) => {
+    await start(page);
+    await expect(page.getByTestId('alpha-badge')).toBeVisible();
+    const notice = page.getByRole('dialog', { name: /alpha software/ });
+    await expect(notice).toBeHidden(); // reading doesn't ask
+
+    await page.keyboard.press('Alt+Shift+W');
+    const form = page.getByTestId('write-checks');
+    await expect(form).toBeVisible();
+    const payee = form.getByRole('combobox', { name: 'Payee' });
+    await payee.pressSequentially('Office D');
+    await expect(payee).toHaveValue('Office Depot');
+    await page.keyboard.press('Tab');
+    const amount = form.getByRole('textbox', { name: 'Check amount' });
+    await amount.click();
+    await amount.fill('40');
+    await page.keyboard.press('Alt+A'); // Save & Close
+
+    // Held: the notice asks; cancelling leaves the form and its data alone.
+    await expect(notice).toBeVisible();
+    await expect(notice.getByRole('button', { name: 'Accept and continue' })).toBeDisabled();
+    await page.screenshot({ path: test.info().outputPath('alpha-notice.png') });
+    await notice.getByRole('button', { name: 'Cancel the change' }).click();
+    await expect(notice).toBeHidden();
+    await expect(form).toBeVisible();
+    await expect(form.getByText(/its notice wasn't accepted/)).toBeVisible();
+    await expect(payee).toHaveValue('Office Depot');
+
+    // Again, and accept: the same save goes ahead.
+    await page.keyboard.press('Alt+A');
+    await expect(notice).toBeVisible();
+    await notice.getByRole('checkbox').check();
+    await notice.getByRole('button', { name: 'Accept and continue' }).click();
+    await expect(page.getByText(/Check \d+ for \$40\.00 saved/)).toBeVisible();
+    await expect(notice).toBeHidden();
+    await expect(form).toBeHidden();
+
+    // Remembered after a reload; the badge shows when it was accepted.
+    await start(page);
+    await page.getByTestId('alpha-badge').click();
+    await expect(notice).toBeVisible();
+    await expect(notice.getByTestId('alpha-notice-accepted')).toContainText('You accepted this on');
+    await notice.getByRole('button', { name: 'Close' }).click();
+    await expect(notice).toBeHidden();
+  });
+});

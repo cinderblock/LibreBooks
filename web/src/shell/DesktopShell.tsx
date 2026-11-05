@@ -18,6 +18,7 @@ import { useMenuPrefs } from './useMenuPrefs';
 import { UserMenu } from './UserMenu';
 import { WindowHost } from './WindowHost';
 import classes from './shell.module.css';
+import { AlphaBadge } from '~/alpha/AlphaNotice';
 
 function Hint({ command }: { command?: CommandId }) {
   const hint = useComboHint(command ?? 'palette.open');
@@ -179,6 +180,7 @@ export function DesktopShell({ live, run, onShortcuts }: { live: LiveStatus; run
     <div className={classes.desktop}>
       <header className={classes.menubar}>
         <span className={classes.brand}>LibreBooks</span>
+        <AlphaBadge />
         <TopMenu run={run} onShortcuts={onShortcuts} />
         <span className={classes.spacer} />
         <Tooltip label="Search and go to anything">

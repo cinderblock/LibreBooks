@@ -5,7 +5,7 @@
 // either way it is a NEW company, nothing existing is replaced, and the picker
 // opens it.
 
-import { Alert, Anchor, Button, Card, Center, FileInput, Group, Loader, Modal, Stack, Text, TextInput, Title } from '@mantine/core';
+import { Alert, Anchor, Button, Card, Center, FileInput, Group, Loader, Modal, Stack, Text, TextInput } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { IconAppWindow, IconFolderOpen, IconPlus } from '@tabler/icons-react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
@@ -21,6 +21,7 @@ import { formatBytes } from '~/lib/format';
 import { openNewWindow, wantsNewWindow } from '~/lib/newWindow';
 import { useIsMobile } from '~/lib/useMobile';
 import { CompanyInfoFields } from '~/screens/CompanyInfoFields';
+import { AlphaTitle } from '~/alpha/AlphaNotice';
 
 export function CompanyPicker({ force = false }: { /** Always show the list (the user menu's "Open another company"), even with one company. */ force?: boolean }) {
   const navigate = useNavigate();
@@ -41,7 +42,7 @@ export function CompanyPicker({ force = false }: { /** Always show the list (the
     return (
       <Center h="100dvh" p="md">
         <Stack maw={460}>
-          <Title order={2}>LibreBooks</Title>
+          <AlphaTitle>LibreBooks</AlphaTitle>
           <Alert color="red" title="Can't reach the server">
             {describeError(session.error)}
           </Alert>
@@ -68,7 +69,7 @@ export function CompanyPicker({ force = false }: { /** Always show the list (the
   return (
     <Center h="100dvh" p="md">
       <Stack w={460} maw="100%" data-testid="company-picker">
-        <Title order={2}>Open a company</Title>
+        <AlphaTitle>Open a company</AlphaTitle>
         {companies.length === 0 && (
           <Text c="dimmed">
             You don't have access to any company yet.

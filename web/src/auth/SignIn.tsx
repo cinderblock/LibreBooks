@@ -2,7 +2,7 @@
 // browser's passkey autofill on the name field where supported (conditional UI),
 // so returning users usually just pick their passkey from the field.
 
-import { Alert, Anchor, Button, Center, Paper, Stack, Text, TextInput, Title } from '@mantine/core';
+import { Alert, Anchor, Button, Center, Paper, Stack, Text, TextInput } from '@mantine/core';
 import { IconKey } from '@tabler/icons-react';
 import { browserSupportsWebAuthn, browserSupportsWebAuthnAutofill, startAuthentication, WebAuthnAbortService } from '@simplewebauthn/browser';
 import { useQueryClient } from '@tanstack/react-query';
@@ -11,6 +11,7 @@ import { useNavigate, useSearchParams } from 'react-router';
 import { useApi } from '~/api/context';
 import { describeError } from '~/api/errors';
 import { ceremonyError, isAborted } from './webauthn';
+import { AlphaTitle } from '~/alpha/AlphaNotice';
 
 /** Only follow same-app paths after signing in (never an absolute URL). */
 function safeNext(next: string | null): string {
@@ -59,7 +60,7 @@ export function SignIn() {
     <Center mih="100dvh" p="md">
       <Paper withBorder p="xl" radius="md" w={400} maw="100%">
         <Stack>
-          <Title order={2}>LibreBooks</Title>
+          <AlphaTitle>LibreBooks</AlphaTitle>
           <Text c="dimmed">Sign in with the passkey you set up for these books.</Text>
           {!supported && <Alert color="orange">This browser can't use passkeys. Try a current Chrome, Edge, Safari or Firefox.</Alert>}
           {/* The autofill target for conditional UI; the passkey carries the account. */}

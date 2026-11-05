@@ -15,6 +15,7 @@ import type { CsvMapping } from './generated/CsvMapping';
 import type { DeviceKeyInfo } from './generated/DeviceKeyInfo';
 import type { FeedFilter } from './generated/FeedFilter';
 import type { FileKind } from './generated/FileKind';
+import type { NoticeAcceptance } from './generated/NoticeAcceptance';
 import type { PasskeyInfo } from './generated/PasskeyInfo';
 import type { PortableManifest } from './generated/PortableManifest';
 import type { Statement } from './generated/Statement';
@@ -63,6 +64,7 @@ export type { User } from './generated/User';
 export type { UserId } from './generated/UserId';
 export type { UserUpdate } from './generated/UserUpdate';
 export type { CompanyAccess } from './generated/CompanyAccess';
+export type { NoticeAcceptance } from './generated/NoticeAcceptance';
 export type { PasskeyInfo } from './generated/PasskeyInfo';
 export type { SessionInfo } from './generated/SessionInfo';
 export type { DeviceKeyInfo } from './generated/DeviceKeyInfo';
@@ -232,10 +234,12 @@ export interface CompanySummary {
 /**
  * `GET /session`. `kind` says how this session signed in (passkey, device key,
  * or the desktop app's local token); `sign_in` is true when the server uses
- * sign-in at all (so "Sign out" means something).
+ * sign-in at all (so "Sign out" means something). `alpha_notice` is the newest
+ * alpha-software notice this person (or, without a session, this computer)
+ * accepted; null until they accept one.
  */
 export interface Session {
-  user: { id: string | null; display_name: string; role: Role; kind?: SessionKind | null };
+  user: { id: string | null; display_name: string; role: Role; kind?: SessionKind | null; alpha_notice?: NoticeAcceptance | null };
   companies: CompanySummary[];
   sign_in?: boolean;
 }

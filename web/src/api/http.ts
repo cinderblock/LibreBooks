@@ -27,6 +27,7 @@ import type {
   MintedEnrolmentLink,
   NameBalance,
   NewEnrolment,
+  NoticeAcceptance,
   ParityBody,
   ParityStatus,
   PasskeyInfo,
@@ -232,6 +233,9 @@ export class HttpApiClient implements ApiClient {
   }
   logout() {
     return this.request<void>('POST', '/auth/logout');
+  }
+  acceptAlphaNotice(version: number) {
+    return this.request<NoticeAcceptance>('POST', '/alpha-notice', { body: { version } });
   }
   companyInfo(co: CompanyId) {
     return this.request<CompanyInfo>('GET', this.co(co, '/info'));

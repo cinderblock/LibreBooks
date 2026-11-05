@@ -9,6 +9,11 @@ keyboard-first data entry, with no subscription. MIT licensed.
 > QuickBooks Desktop import and the web UI's foundation are working and tested;
 > most forms, the desktop app and the rest of [the plan](plans/librebooks.md)
 > are being built now. Not ready for real books yet.
+>
+> The app says so too: an **Alpha** badge sits in its header, and before
+> anyone's first change to any books they must accept an alpha-software notice
+> (once per person, remembered by the server; asked again when the notice
+> changes).
 
 ## What it is meant to be
 

@@ -18,6 +18,7 @@ import type {
   MintedEnrolmentLink,
   NameBalance,
   NewEnrolment,
+  NoticeAcceptance,
   ParityBody,
   ParityStatus,
   PasskeyInfo,
@@ -147,6 +148,12 @@ export interface ApiClient {
   enrolStart(body: EnrolStartRequest): Promise<EnrolStart>;
   enrolFinish(body: EnrolFinish): Promise<{ user: User }>;
   logout(): Promise<void>;
+  /**
+   * `POST /alpha-notice`: the person (or, without a session, this computer)
+   * accepted the alpha-software notice `version`; answers what's stored, which
+   * never goes down.
+   */
+  acceptAlphaNotice(version: number): Promise<NoticeAcceptance>;
 
   companyInfo(co: CompanyId): Promise<CompanyInfo>;
 
