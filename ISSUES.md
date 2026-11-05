@@ -24,14 +24,6 @@ message instead of misbehaving, but QuickBooks 2021 users would then be stuck
 until they copy it by hand. The desktop app's installer isn't affected. The
 updater should replace companion files from the same verified archive.
 
-## release.yml never passes tauri.release.conf.json
-
-Seen 2026-10-30: `createUpdaterArtifacts` is only on in
-`desktop/src-tauri/tauri.release.conf.json`, and `plans/desktop.md:236` says to
-build with `--config` on it, but nothing in `.github/workflows/` does, so a
-tagged release may publish no updater artifacts despite `includeUpdaterJson`.
-Not checked against a real tagged run; the first release should confirm it.
-
 ## Credits matched oldest-first though qbXML says which invoice each settled
 
 Seen 2026-10-31 on the first full SDK import: 48 applications were made by

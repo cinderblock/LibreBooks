@@ -185,6 +185,22 @@ jobs:
           cargo build --release --locked --target i686-pc-windows-msvc -p lb-qbsdk
           mkdir -p desktop/src-tauri/binaries
           cp target/i686-pc-windows-msvc/release/librebooks-qbsdk.exe desktop/src-tauri/binaries/librebooks-qbsdk-x86_64-pc-windows-msvc.exe
+      # MSI versions are numbers only (major.minor.patch.build), so Tauri refuses
+      # a tag like v0.1.0-alpha.1 for the MSI. A prerelease's MSI gets the
+      # trailing number of its tag as the build field: v0.1.0-alpha.1 → 0.1.0.1.
+      - name: MSI version for a prerelease
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          ver="${TAG#v}"
+          if [[ "$ver" == *-* ]]; then
+            build="$(grep -oE '[0-9]+$' <<< "${ver#*-}" || echo 0)"
+            msi="${ver%%-*}.$build"
+          else
+            msi="$ver"
+          fi
+          echo "MSI version: $msi"
+          printf '{ "bundle": { "windows": { "wix": { "version": "%s" } } } }\n' "$msi" > desktop/src-tauri/tauri.msi.conf.json
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ github.token }}
@@ -195,7 +211,8 @@ jobs:
           releaseId: ${{ needs.draft.outputs.release_id }}
           includeUpdaterJson: true
           tauriScript: cargo tauri
-          args: ${{ runner.os == 'Windows' && '--config tauri.qbsdk.conf.json' || '' }}
+          # tauri.release.conf.json turns on the signed updater bundles.
+          args: --config tauri.release.conf.json ${{ runner.os == 'Windows' && '--config tauri.qbsdk.conf.json --config tauri.msi.conf.json' || '' }}
 
   container:
     name: Container image
