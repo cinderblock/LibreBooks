@@ -47,7 +47,8 @@ pub use model::{
     ClientInfo, CompanyAccess, DeviceChallenge, DeviceEnrol, DeviceKeyId, DeviceKeyInfo,
     DeviceLogin, EnrolFinish, EnrolStart, EnrolStartRequest, EnrolmentId, EnrolmentInfo,
     EnrolmentPurpose, LoginFinish, LoginStart, MintedEnrolment, NewEnrolment, NewSession,
-    PasskeyId, PasskeyInfo, Principal, Role, SessionId, SessionInfo, SessionKind, User, UserUpdate,
+    NoticeAcceptance, PasskeyId, PasskeyInfo, Principal, Role, SessionId, SessionInfo, SessionKind,
+    User, UserUpdate,
 };
 pub use perm::Permission;
 pub use ratelimit::RateLimiter;

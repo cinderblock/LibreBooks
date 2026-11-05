@@ -11,24 +11,51 @@ use rusqlite::{Connection, OptionalExtension as _, Row, params};
 
 use crate::clock::{from_ms, ms, opt_from_ms};
 use crate::error::{AuthError, Result};
-use crate::model::{Principal, Role, User, UserUpdate, clean_name};
+use crate::model::{NoticeAcceptance, Principal, Role, User, UserUpdate, clean_name};
 use crate::perm::Permission;
 use crate::{AuthStore, session};
 
-const COLUMNS: &str = "id, display_name, role, created_at, disabled_at";
+const COLUMNS: &str =
+    "id, display_name, role, created_at, disabled_at, alpha_notice_version, alpha_notice_at";
 
-fn from_row(r: &Row<'_>) -> rusqlite::Result<(String, String, String, i64, Option<i64>)> {
-    Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))
+/// A `user` row, as [`COLUMNS`] reads it.
+struct UserRow {
+    id: String,
+    display_name: String,
+    role: String,
+    created_at: i64,
+    disabled_at: Option<i64>,
+    alpha_notice_version: Option<u32>,
+    alpha_notice_at: Option<i64>,
 }
 
-fn to_user(row: (String, String, String, i64, Option<i64>)) -> Result<User> {
-    let (id, display_name, role, created_at, disabled_at) = row;
+fn from_row(r: &Row<'_>) -> rusqlite::Result<UserRow> {
+    Ok(UserRow {
+        id: r.get(0)?,
+        display_name: r.get(1)?,
+        role: r.get(2)?,
+        created_at: r.get(3)?,
+        disabled_at: r.get(4)?,
+        alpha_notice_version: r.get(5)?,
+        alpha_notice_at: r.get(6)?,
+    })
+}
+
+fn to_user(row: UserRow) -> Result<User> {
+    let alpha_notice = match (row.alpha_notice_version, row.alpha_notice_at) {
+        (Some(version), Some(at)) => Some(NoticeAcceptance {
+            version,
+            accepted_at: from_ms(at),
+        }),
+        _ => None,
+    };
     Ok(User {
-        id: parse_user_id(&id)?,
-        display_name,
-        role: role.parse()?,
-        created_at: from_ms(created_at),
-        disabled_at: opt_from_ms(disabled_at),
+        id: parse_user_id(&row.id)?,
+        display_name: row.display_name,
+        role: row.role.parse()?,
+        created_at: from_ms(row.created_at),
+        disabled_at: opt_from_ms(row.disabled_at),
+        alpha_notice,
     })
 }
 
@@ -191,6 +218,29 @@ impl AuthStore {
                 _ => {}
             }
             get(tx, id)
+        })
+    }
+
+    /// Record that `by` accepted the web UI's alpha-software notice `version`.
+    /// The stored version never goes down, and accepting the same one again
+    /// keeps the first time. Anyone signed in may; it is only about themselves.
+    pub fn accept_alpha_notice(&self, by: &Principal, version: u32) -> Result<NoticeAcceptance> {
+        // As stored (milliseconds), so the answer matches what's read back later.
+        let now = from_ms(ms(self.now()));
+        self.write(|tx| {
+            let user = get(tx, by.user_id)?;
+            let accepted = NoticeAcceptance::accept(user.alpha_notice, version, now);
+            if Some(accepted) != user.alpha_notice {
+                tx.execute(
+                    "UPDATE user SET alpha_notice_version = ?2, alpha_notice_at = ?3 WHERE id = ?1",
+                    params![
+                        by.user_id.to_string(),
+                        accepted.version,
+                        ms(accepted.accepted_at)
+                    ],
+                )?;
+            }
+            Ok(accepted)
         })
     }
 

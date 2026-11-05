@@ -42,7 +42,8 @@ and the UI; change both together.
 | Method & path | Body → Response |
 | --- | --- |
 | `GET /health` | → `{ ok: true, version, mode: "server" \| "desktop" }` (no auth) |
-| `GET /session` | → `{ user: {id, display_name, role}, companies: [{id, name, role}] }` or 401 |
+| `GET /session` | → `{ user: {id, display_name, role, kind, alpha_notice}, companies: [{id, name, role}], sign_in }` or 401. `alpha_notice` is `{ version, accepted_at }` or null (plans/alpha-notice.md) |
+| `POST /alpha-notice` | `{ version }` (≥ 1) → `{ version, accepted_at }`: the caller accepted the web UI's alpha-software notice. Kept on the user, or for the desktop's own session in `notices.json` in the data dir; the version never goes down. Nothing is enforced server-side |
 | `POST /auth/login/start` | → `{ challenge_id, options }` (WebAuthn request options JSON for `@simplewebauthn/browser` `startAuthentication`) |
 | `POST /auth/login/finish` | `{ challenge_id, credential }` → sets cookie, `{ user }` |
 | `POST /auth/enroll/start` | `{ token }` → `{ challenge_id, options, purpose, display_name? }` (`startRegistration` options) |

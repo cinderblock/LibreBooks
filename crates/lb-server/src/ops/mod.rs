@@ -83,6 +83,8 @@ pub struct Ops {
     /// One settings change at a time (save, then apply).
     change: tokio::sync::Mutex<()>,
     pub secrets: SecretStore,
+    /// This computer's own notice acceptances (`notices.json`).
+    pub notices: crate::notices::LocalNotices,
     pub(crate) update: update::UpdateSlot,
     pub(crate) backups: backups::BackupSlots,
     pub(crate) tunnel: tunnel::TunnelSlot,
@@ -123,6 +125,7 @@ impl Ops {
             settings: RwLock::new(settings),
             change: tokio::sync::Mutex::new(()),
             secrets,
+            notices: crate::notices::LocalNotices::open(data_dir),
             update,
             backups: backups::BackupSlots::default(),
             tunnel: tunnel::TunnelSlot::default(),

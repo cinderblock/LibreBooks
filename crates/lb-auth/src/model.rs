@@ -114,6 +114,38 @@ pub struct User {
     /// Set when an admin disabled the account; a disabled user can't sign in
     /// and has no sessions.
     pub disabled_at: Option<Timestamp>,
+    /// The newest alpha-software notice this person accepted, and when; `None`
+    /// until they accept one. The web UI asks before their first change.
+    pub alpha_notice: Option<NoticeAcceptance>,
+}
+
+/// Someone accepted the web UI's alpha-software notice. `version` is the UI's
+/// (it bumps it when the wording changes enough to ask again); `accepted_at`
+/// is when that version was first accepted.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct NoticeAcceptance {
+    pub version: u32,
+    pub accepted_at: Timestamp,
+}
+
+impl NoticeAcceptance {
+    /// `version` accepted at `now`, on top of what was accepted before: the
+    /// version never goes down, and accepting the same one again keeps the
+    /// first time.
+    pub fn accept(
+        prior: Option<NoticeAcceptance>,
+        version: u32,
+        now: Timestamp,
+    ) -> NoticeAcceptance {
+        match prior {
+            Some(p) if p.version >= version => p,
+            _ => NoticeAcceptance {
+                version,
+                accepted_at: now,
+            },
+        }
+    }
 }
 
 /// An admin's change to a user (`PATCH /users/:id`). Absent fields stay as

@@ -96,4 +96,10 @@ CREATE TABLE company_access (
     PRIMARY KEY (user_id, company_id)
 ) STRICT;
 ",
+    // 2: the alpha-software notice each person accepted (the web UI's version
+    // number) and when they first accepted that version.
+    r"
+ALTER TABLE user ADD COLUMN alpha_notice_version INTEGER;
+ALTER TABLE user ADD COLUMN alpha_notice_at INTEGER;
+",
 ];

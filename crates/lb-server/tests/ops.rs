@@ -701,3 +701,63 @@ async fn requests_through_cloudflare_need_an_access_assertion() {
         .await;
     assert_eq!(r.status, StatusCode::OK);
 }
+
+#[tokio::test]
+async fn the_alpha_notice_is_kept_per_person_and_for_this_computer() {
+    // Signed in: on the person's user, so every device of theirs knows.
+    let mut s = Server::with_sessions(OpsOptions::default());
+    s.cookie = Some(s.sign_in("Ada", Role::Admin).await);
+    let (_, me) = s.call("GET", "/api/v1/session", None).await;
+    assert_eq!(me["user"]["alpha_notice"], Value::Null);
+    let (st, accepted) = s
+        .call(
+            "POST",
+            "/api/v1/alpha-notice",
+            Some(json!({ "version": 1 })),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "{accepted}");
+    assert_eq!(accepted["version"], 1);
+    let (_, me) = s.call("GET", "/api/v1/session", None).await;
+    assert_eq!(me["user"]["alpha_notice"], accepted);
+    // Versions start at 1.
+    let (_, again) = s
+        .call(
+            "POST",
+            "/api/v1/alpha-notice",
+            Some(json!({ "version": 0 })),
+        )
+        .await;
+    assert_eq!(again["error"]["code"], "invalid");
+    // Someone else hasn't accepted anything.
+    s.cookie = Some(s.sign_in("Bob", Role::Bookkeeper).await);
+    let (_, bob) = s.call("GET", "/api/v1/session", None).await;
+    assert_eq!(bob["user"]["alpha_notice"], Value::Null);
+    assert!(!s.dir.path().join("notices.json").exists());
+
+    // No session (the desktop app's own, or open mode): `notices.json`, which
+    // outlives the process.
+    let s = Server::open(OpsOptions::default());
+    let (_, me) = s.call("GET", "/api/v1/session", None).await;
+    assert_eq!(me["user"]["alpha_notice"], Value::Null);
+    let (st, accepted) = s
+        .call(
+            "POST",
+            "/api/v1/alpha-notice",
+            Some(json!({ "version": 3 })),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "{accepted}");
+    // A stale tab with an older notice doesn't lower it.
+    let (_, older) = s
+        .call(
+            "POST",
+            "/api/v1/alpha-notice",
+            Some(json!({ "version": 2 })),
+        )
+        .await;
+    assert_eq!(older, accepted);
+    let restarted = Server::in_dir(s.dir, None, OpsOptions::default());
+    let (_, me) = restarted.call("GET", "/api/v1/session", None).await;
+    assert_eq!(me["user"]["alpha_notice"], accepted);
+}

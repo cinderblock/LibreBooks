@@ -270,3 +270,27 @@ fn prune_forgets_long_dead_sessions_and_tokens() {
     assert_eq!(store.list_sessions(user.id, None).unwrap(), []);
     assert!(store.validate_session(&session.token).is_err());
 }
+
+#[test]
+fn the_alpha_notice_is_remembered_per_user_and_never_goes_back() {
+    let (store, clock) = store();
+    let (user, session) = admin(&store);
+    assert_eq!(user.alpha_notice, None);
+    let me = store.validate_session(&session.token).unwrap();
+
+    let first = store.accept_alpha_notice(&me, 1).unwrap();
+    assert_eq!(first.version, 1);
+    assert_eq!(first.accepted_at, clock.now());
+    assert_eq!(store.user(user.id).unwrap().alpha_notice, Some(first));
+
+    // Accepting the same version again keeps the first time; an older one
+    // (a stale tab) doesn't lower it.
+    clock.advance(minutes(5));
+    assert_eq!(store.accept_alpha_notice(&me, 1).unwrap(), first);
+    clock.advance(minutes(5));
+    let second = store.accept_alpha_notice(&me, 2).unwrap();
+    assert_eq!((second.version, second.accepted_at), (2, clock.now()));
+    assert_eq!(store.accept_alpha_notice(&me, 1).unwrap(), second);
+    assert_eq!(store.user(user.id).unwrap().alpha_notice, Some(second));
+    assert_eq!(store.list_users().unwrap()[0].alpha_notice, Some(second));
+}

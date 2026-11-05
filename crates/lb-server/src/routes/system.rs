@@ -25,11 +25,36 @@ pub async fn health(State(s): State<AppState>) -> Json<Value> {
 pub async fn session(State(s): State<AppState>, p: Principal) -> ApiResult<Json<Value>> {
     let companies = companies_json(&s, &p)?;
     let kind = p.session.as_ref().map(|sp| sp.kind);
+    let alpha_notice = crate::notices::alpha_for(&s, &p)?;
     Ok(Json(json!({
-        "user": { "id": p.user_id, "display_name": p.display_name, "role": p.role, "kind": kind },
+        "user": {
+            "id": p.user_id,
+            "display_name": p.display_name,
+            "role": p.role,
+            "kind": kind,
+            "alpha_notice": alpha_notice,
+        },
         "companies": companies,
         "sign_in": s.sessions.is_some(),
     })))
+}
+
+#[derive(Deserialize)]
+pub struct AcceptNotice {
+    version: u32,
+}
+
+/// `POST /alpha-notice`: the caller accepted the web UI's alpha-software
+/// notice `version`; answers what's now stored (never a lower version).
+pub async fn accept_alpha_notice(
+    State(s): State<AppState>,
+    p: Principal,
+    Json(body): Json<AcceptNotice>,
+) -> ApiResult<Json<lb_auth::NoticeAcceptance>> {
+    let accepted =
+        tokio::task::spawn_blocking(move || crate::notices::accept_alpha(&s, &p, body.version))
+            .await??;
+    Ok(Json(accepted))
 }
 
 pub async fn companies(State(s): State<AppState>, p: Principal) -> ApiResult<Json<Value>> {

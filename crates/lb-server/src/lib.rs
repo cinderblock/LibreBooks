@@ -23,6 +23,7 @@ pub mod auth;
 pub mod error;
 pub mod housekeeping;
 pub mod import;
+pub mod notices;
 pub mod ops;
 mod routes;
 pub mod secrets;

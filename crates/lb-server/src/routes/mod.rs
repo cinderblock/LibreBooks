@@ -115,6 +115,7 @@ pub fn api() -> Router<AppState> {
         .merge(ops::routes())
         .route("/health", get(system::health))
         .route("/session", get(system::session))
+        .route("/alpha-notice", post(system::accept_alpha_notice))
         .route(
             "/companies",
             get(system::companies).post(system::create_company),
