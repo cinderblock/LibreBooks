@@ -59,9 +59,16 @@ installed it may start 2021. So:
        `postMessageWithAdditionalObjects`, local mode only, trusted origin only.
 7. [x] Tests: guard unit tests, desktop clippy, e2e for Browse/drop (faked
        shell) and the browser fallback. README.
-8. [ ] **Current:** rebuild the CLI and desktop app, deploy to cad-3, check
-       `librebooks import quickbooks` there over SSH, then live with the user:
-       choose 14.0 for the old company, open it with the button, sync.
+8. [x] Built (`9d37db8`). CLI deployed to cad-3 `bin\librebooks.exe`
+       (0CBEDD92…, previous kept as `librebooks.prev.exe`); `import quickbooks`
+       there lists `24 QuickBooks Enterprise Solutions: Accountant Edition 14.0`
+       and `31 QuickBooks Pro 2021` with their `qbw32.exe` paths. (Over SSH
+       neither shows running: a different Windows session.) Desktop app staged
+       as `app\LibreBooks.new.exe` (67E3F55D…); a watcher swaps it in when the
+       running app exits, keeping `LibreBooks.prev.exe`.
+9. [ ] **Current:** live with the user: choose 14.0 for the old company, drop or
+       browse its `.QBW`, Save, close 2021, "Open in …14.0", sync. Choose 2021 for
+       TWILL.
 
 ## Findings / gotchas
 
@@ -69,6 +76,10 @@ installed it may start 2021. So:
   JS `chrome.webview.postMessageWithAdditionalObjects(msg, [file])`, host
   `ICoreWebView2WebMessageReceivedEventArgs2::AdditionalObjects` →
   `ICoreWebView2File::Path`.
+
+- Copying `librebooks.new.exe` and `LibreBooks.new.exe` to the same folder on
+  Windows is one file (case-insensitive names): the second upload replaces the
+  first. Stage the desktop app under a different name (`desktop-app.new.exe`).
 
 ## Things not to do
 
