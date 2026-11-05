@@ -73,11 +73,20 @@ jobs:
         id: draft
         env:
           GH_TOKEN: ${{ github.token }}
+        # The id comes from the create call's own answer: the release list can
+        # lag a just-created draft (the first run got an empty id that way, and
+        # the desktop installers were built but never uploaded).
         run: |
-          if ! gh release view "$TAG" >/dev/null 2>&1; then
-            gh release create "$TAG" --draft --title "LibreBooks $TAG" --generate-notes --verify-tag
+          repo="${{ github.repository }}"
+          id="$(gh api "repos/$repo/releases" --paginate --jq ".[] | select(.tag_name==\"$TAG\") | .id" | head -n1)"
+          if [ -z "$id" ]; then
+            # Without a tag, GitHub would make one from the default branch.
+            gh api "repos/$repo/git/ref/tags/$TAG" >/dev/null || { echo "::error::no tag $TAG"; exit 1; }
+            id="$(gh api -X POST "repos/$repo/releases" -f tag_name="$TAG" -f name="LibreBooks $TAG" \
+              -F draft=true -F generate_release_notes=true --jq .id)"
           fi
-          id="$(gh api "repos/${{ github.repository }}/releases" --jq ".[] | select(.tag_name==\"$TAG\") | .id")"
+          [ -n "$id" ] || { echo "::error::no release id for $TAG"; exit 1; }
+          echo "Release $id"
           echo "id=$id" >> "$GITHUB_OUTPUT"
 
   server:
@@ -185,22 +194,30 @@ jobs:
           cargo build --release --locked --target i686-pc-windows-msvc -p lb-qbsdk
           mkdir -p desktop/src-tauri/binaries
           cp target/i686-pc-windows-msvc/release/librebooks-qbsdk.exe desktop/src-tauri/binaries/librebooks-qbsdk-x86_64-pc-windows-msvc.exe
-      # MSI versions are numbers only (major.minor.patch.build), so Tauri refuses
-      # a tag like v0.1.0-alpha.1 for the MSI. A prerelease's MSI gets the
-      # trailing number of its tag as the build field: v0.1.0-alpha.1 → 0.1.0.1.
-      - name: MSI version for a prerelease
-        if: runner.os == 'Windows'
+      # A prerelease tag (v0.1.0-alpha.1) needs two exceptions:
+      # - MSI versions are numbers only (major.minor.patch.build), so its MSI
+      #   gets the tag's trailing number as the build field: 0.1.0.1.
+      # - RPM versions can't contain '-' at all, so a prerelease has no RPM.
+      # tauri.release.conf.json turns on the signed updater bundles.
+      - name: Tauri build arguments
+        id: tauri
         shell: bash
         run: |
           ver="${TAG#v}"
-          if [[ "$ver" == *-* ]]; then
-            build="$(grep -oE '[0-9]+$' <<< "${ver#*-}" || echo 0)"
-            msi="${ver%%-*}.$build"
-          else
+          args="--config tauri.release.conf.json"
+          if [ "$RUNNER_OS" = Windows ]; then
             msi="$ver"
+            if [[ "$ver" == *-* ]]; then
+              build="$(grep -oE '[0-9]+$' <<< "${ver#*-}" || echo 0)"
+              msi="${ver%%-*}.$build"
+            fi
+            printf '{ "bundle": { "windows": { "wix": { "version": "%s" } } } }\n' "$msi" > desktop/src-tauri/tauri.msi.conf.json
+            args="$args --config tauri.qbsdk.conf.json --config tauri.msi.conf.json"
+          elif [[ "$ver" == *-* ]]; then
+            args="$args --bundles appimage,deb"
           fi
-          echo "MSI version: $msi"
-          printf '{ "bundle": { "windows": { "wix": { "version": "%s" } } } }\n' "$msi" > desktop/src-tauri/tauri.msi.conf.json
+          echo "tauri build $args"
+          echo "args=$args" >> "$GITHUB_OUTPUT"
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ github.token }}
@@ -211,8 +228,7 @@ jobs:
           releaseId: ${{ needs.draft.outputs.release_id }}
           includeUpdaterJson: true
           tauriScript: cargo tauri
-          # tauri.release.conf.json turns on the signed updater bundles.
-          args: --config tauri.release.conf.json ${{ runner.os == 'Windows' && '--config tauri.qbsdk.conf.json --config tauri.msi.conf.json' || '' }}
+          args: ${{ steps.tauri.outputs.args }}
 
   container:
     name: Container image
