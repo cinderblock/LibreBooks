@@ -58,6 +58,30 @@ to be accepted (or the change is not made).
       `*.prev.exe`. The CLI went too: the auth DB migration (2) would leave an
       older CLI refusing a newer auth database. Not yet opened by anyone.
 
+## First prerelease: v0.1.0-alpha.1
+
+Cameron said go 2026-11-05. Until then `release.yml` had never run (no tags).
+
+- [x] Workspace version 0.1.0 → `0.1.0-alpha.1` (`Cargo.toml`, `Cargo.lock`,
+      `web/package.json`, `bun.lock`): the draft job requires tag == version.
+- [x] `release.yml`: pass `tauri.release.conf.json` (updater bundles; was an
+      ISSUES entry), and a generated `tauri.msi.conf.json` so the MSI gets a
+      numeric version (`0.1.0-alpha.1` → `0.1.0.1`).
+- [ ] Local MSI/NSIS build with the prerelease version (current step)
+- [ ] Commit, push, tag `v0.1.0-alpha.1`, watch the run
+- [ ] Check the release's assets: installers, `latest.json`, `.sig` files,
+      `SHA256SUMS(.minisig)`, the container image
+
+Notes:
+
+- Prerelease versions sort *below* their release: `0.1.0-alpha.1 < 0.1.0`.
+  The hand-built dogfood copy on cad-3 says `0.1.0`, so it would never see
+  this as an update. It doesn't matter yet: the Tauri updater reads
+  `releases/latest/download/latest.json`, and GitHub's "latest" skips
+  prereleases, so no prerelease is offered as an update to anyone.
+- Signing keys: both secrets are password-less (commit `42946a7`); the Tauri
+  updater key (`C9F5…F5B1`) is separate from `minisign.pub` (`7D23…0917`).
+
 ## Where things are
 
 - Version: `web/src/alpha/version.ts` (`ALPHA_NOTICE_VERSION`). Bump it to ask everyone again.

@@ -7,7 +7,7 @@
     },
     "web": {
       "name": "@librebooks/web",
-      "version": "0.1.0",
+      "version": "0.1.0-alpha.1",
       "dependencies": {
         "@mantine/core": "^9.7.3",
         "@mantine/dates": "^9.7.3",

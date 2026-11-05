@@ -3455,7 +3455,7 @@ dependencies = [
 
 [[package]]
 name = "lb-auth"
-version = "0.1.0"
+version = "0.1.0-alpha.1"
 dependencies = [
  "base64 0.23.1",
  "ed25519-dalek 3.0.0",
@@ -3479,7 +3479,7 @@ dependencies = [
 
 [[package]]
 name = "lb-backup"
-version = "0.1.0"
+version = "0.1.0-alpha.1"
 dependencies = [
  "age",
  "axum",
@@ -3507,7 +3507,7 @@ dependencies = [
 
 [[package]]
 name = "lb-core"
-version = "0.1.0"
+version = "0.1.0-alpha.1"
 dependencies = [
  "jiff",
  "pretty_assertions",
@@ -3523,7 +3523,7 @@ dependencies = [
 
 [[package]]
 name = "lb-feeds"
-version = "0.1.0"
+version = "0.1.0-alpha.1"
 dependencies = [
  "axum",
  "base64 0.23.1",
@@ -3552,7 +3552,7 @@ dependencies = [
 
 [[package]]
 name = "lb-qbd"
-version = "0.1.0"
+version = "0.1.0-alpha.1"
 dependencies = [
  "axum",
  "jiff",
@@ -3576,7 +3576,7 @@ dependencies = [
 
 [[package]]
 name = "lb-qbsdk"
-version = "0.1.0"
+version = "0.1.0-alpha.1"
 dependencies = [
  "quick-xml",
  "windows",
@@ -3584,7 +3584,7 @@ dependencies = [
 
 [[package]]
 name = "lb-reports"
-version = "0.1.0"
+version = "0.1.0-alpha.1"
 dependencies = [
  "calamine",
  "jiff",
@@ -3606,7 +3606,7 @@ dependencies = [
 
 [[package]]
 name = "lb-server"
-version = "0.1.0"
+version = "0.1.0-alpha.1"
 dependencies = [
  "age",
  "anyhow",
@@ -3652,7 +3652,7 @@ dependencies = [
 
 [[package]]
 name = "lb-store"
-version = "0.1.0"
+version = "0.1.0-alpha.1"
 dependencies = [
  "jiff",
  "lb-core",
@@ -3671,7 +3671,7 @@ dependencies = [
 
 [[package]]
 name = "lb-tunnel"
-version = "0.1.0"
+version = "0.1.0-alpha.1"
 dependencies = [
  "axum",
  "base64 0.23.1",
@@ -3694,7 +3694,7 @@ dependencies = [
 
 [[package]]
 name = "lb-update"
-version = "0.1.0"
+version = "0.1.0-alpha.1"
 dependencies = [
  "axum",
  "flate2",
@@ -3771,7 +3771,7 @@ checksum = "b6d2cec3eae94f9f509c767b45932f1ada8350c4bdb85af2fcab4a3c14807981"
 
 [[package]]
 name = "librebooks"
-version = "0.1.0"
+version = "0.1.0-alpha.1"
 dependencies = [
  "age",
  "anyhow",
@@ -3797,7 +3797,7 @@ dependencies = [
 
 [[package]]
 name = "librebooks-desktop"
-version = "0.1.0"
+version = "0.1.0-alpha.1"
 dependencies = [
  "anyhow",
  "axum",
