@@ -732,7 +732,7 @@ test('the company picker: a new company from its information, and a .lbk file, e
   // `/companies` shows the list even when the one company would open by itself.
   await page.goto('/companies?fixtures=1&latency=0&keymap=browser');
   const picker = page.getByTestId('company-picker');
-  await expect(picker.getByRole('button', { name: 'Juniper Hill Woodworks' })).toBeVisible();
+  await expect(picker.getByRole('button', { name: 'Juniper Hill Woodworks', exact: true })).toBeVisible();
   await picker.getByRole('button', { name: 'New company…' }).click();
   const dialog = page.getByRole('dialog', { name: 'New company' });
   await expect(dialog.getByRole('button', { name: 'Create company' })).toBeDisabled();
@@ -749,8 +749,8 @@ test('the company picker: a new company from its information, and a .lbk file, e
   await expect(page.getByTestId('company').getByText('July')).toBeVisible();
   // The user menu leads back to the list, which now has both; a .lbk file opens as a third.
   await page.getByRole('button', { name: 'Signed in as Demo User' }).click();
-  await page.getByRole('menuitem', { name: 'Open another company' }).click();
-  await expect(picker.getByRole('button', { name: 'Second Shop' })).toBeVisible();
+  await page.getByRole('menuitem', { name: 'Open another company', exact: true }).click();
+  await expect(picker.getByRole('button', { name: 'Second Shop', exact: true })).toBeVisible();
   await picker.getByRole('button', { name: 'Open a .lbk file…' }).click();
   const open = page.getByRole('dialog', { name: 'Open a company file' });
   await expect(open.getByRole('button', { name: 'Open as a new company' })).toBeDisabled();
@@ -758,6 +758,26 @@ test('the company picker: a new company from its information, and a .lbk file, e
   await open.getByRole('button', { name: 'Open as a new company' }).click();
   await expect(page).toHaveTitle(/riverside-cafe/);
   await expect(page.getByText(/"riverside-cafe" is a new company/)).toBeVisible();
+});
+
+test('two companies side by side: the picker and the user menu open a new window (a tab here), keeping fixture mode', async ({ page, context }) => {
+  await page.goto('/companies?fixtures=1&latency=0&keymap=browser');
+  const picker = page.getByTestId('company-picker');
+  const [other] = await Promise.all([context.waitForEvent('page'), picker.getByRole('button', { name: 'Open Juniper Hill Woodworks in a new window' }).click()]);
+  await expect(other).toHaveURL(/\/c\/[^/]+\/home\?fixtures=1$/);
+  await expect(other).toHaveTitle(/Juniper Hill Woodworks/);
+  // This window stays where it was.
+  await expect(picker).toBeVisible();
+  // Shift+click on a company's name does the same.
+  const [third] = await Promise.all([context.waitForEvent('page'), picker.getByRole('button', { name: 'Juniper Hill Woodworks', exact: true }).click({ modifiers: ['Shift'] })]);
+  await expect(third).toHaveURL(/\/c\/[^/]+\/home\?fixtures=1$/);
+  await expect(page).toHaveURL(/\/companies/);
+  // From inside a company, the user menu opens the list in a new window.
+  await other.getByRole('button', { name: 'Signed in as Demo User' }).click();
+  const [list] = await Promise.all([context.waitForEvent('page'), other.getByRole('menuitem', { name: 'Open another company in a new window' }).click()]);
+  await expect(list).toHaveURL(/\/companies\?fixtures=1$/);
+  await expect(list.getByTestId('company-picker')).toBeVisible();
+  await expect(other).toHaveURL(/\/c\/[^/]+\/home/);
 });
 
 test('QuickBooks import: a sync runs with progress and lands a report; parity compares balances', async ({ page }) => {

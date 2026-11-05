@@ -127,7 +127,11 @@ pub async fn pick_folder(app: AppHandle, current: Option<String>) -> Option<Stri
 /// Ask for a QuickBooks company file (`.QBW`), for the import settings. Its
 /// path is only meaningful to a server on this computer (local mode).
 #[tauri::command]
-pub async fn pick_company_file(app: AppHandle, current: Option<String>) -> Option<String> {
+pub async fn pick_company_file(
+    app: AppHandle,
+    window: tauri::WebviewWindow,
+    current: Option<String>,
+) -> Option<String> {
     let (tx, rx) = tokio::sync::oneshot::channel();
     let mut dialog = app
         .dialog()
@@ -142,9 +146,8 @@ pub async fn pick_company_file(app: AppHandle, current: Option<String>) -> Optio
     {
         dialog = dialog.set_directory(dir);
     }
-    if let Some(w) = app.get_webview_window(crate::window::MAIN) {
-        dialog = dialog.set_parent(&w);
-    }
+    // On top of the window that asked, of however many are open.
+    dialog = dialog.set_parent(&window);
     dialog.pick_file(move |picked| {
         let _ = tx.send(picked.and_then(|p| p.into_path().ok()));
     });

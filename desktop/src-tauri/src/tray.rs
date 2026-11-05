@@ -5,7 +5,7 @@ use tauri::tray::{MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, Tray
 use tauri::{AppHandle, Manager, Wry};
 
 use crate::Shell;
-use crate::window::{self, MAIN, SETTINGS};
+use crate::window::{self, SETTINGS};
 
 const TRAY_ID: &str = "librebooks";
 
@@ -82,9 +82,9 @@ fn truncate(s: &str, max: usize) -> String {
     }
 }
 
-/// Bring up the main window, or the settings window if there's no main one.
+/// Bring up a company window, or the settings window if there's none.
 pub fn show_app(app: &AppHandle) {
-    if let Some(w) = app.get_webview_window(MAIN) {
+    if let Some(w) = window::front_company_window(app) {
         window::focus(&w);
     } else if let Some(w) = app.get_webview_window(SETTINGS) {
         window::focus(&w);
@@ -123,7 +123,7 @@ fn on_menu(app: &AppHandle, event: &MenuEvent) {
         // feature); the menu item is debug-only too.
         #[cfg(debug_assertions)]
         "devtools" => {
-            if let Some(w) = app.get_webview_window(MAIN) {
+            if let Some(w) = window::front_company_window(app) {
                 w.open_devtools();
             }
         }

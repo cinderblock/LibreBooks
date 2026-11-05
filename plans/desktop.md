@@ -131,8 +131,8 @@ Without `__LIBREBOOKS__` the SPA is in a browser and uses cookie sessions.
    server refuses. Login message per `plans/auth.md` decision 9:
    `b"librebooks device login v1\0" || challenge(32) || origin`.
 7. **Mode / folder / server changes restart the backend in-process** and
-   rebuild the main window (new origin, new token, new init script). No app
-   relaunch.
+   rebuild the main window (new origin, new token, new init script); any other
+   company windows close. No app relaunch.
 8. **Updates**: check automatically is on by default; install automatically is
    **off** by default. When a scheduled check finds an update: if auto-install
    is off, a dialog offers "Install and restart" / "Later" (once per version
@@ -146,8 +146,10 @@ Without `__LIBREBOOKS__` the SPA is in a browser and uses cookie sessions.
    desktop app see the same books. Deviation from "the app's data dir" in the
    brief: one place for a user's books however they run LibreBooks.
    Changeable in settings.
-10. **Closing the main window quits** (as QuickBooks does), unless serving to
-    the network, in which case it hides to the tray.
+10. **Closing the last company window quits** (as QuickBooks does), unless
+    serving to the network, in which case it hides to the tray. Several company
+    windows (`main`, `company-<n>`) share the one backend; a page's same-origin
+    `window.open` opens another (`plans/desktop-windows.md`).
 11. **WebView2 browser accelerator keys are off in every build** (QBD's Ctrl+R,
     Ctrl+F, Ctrl+P, F5… must reach the SPA in dev too). Devtools in debug builds:
     tray → "Developer tools". This needs a few lines of COM (`unsafe`, one
@@ -310,8 +312,8 @@ plus `rpm-build` for rpm bundles. Runtime: WebKitGTK 4.1, and a Secret Service
   window is created on `about:blank` and navigated after the setting is
   applied, so the SPA never runs with the browser keys on.
 - Window labels are released only after the event loop processes the destroy;
-  `activate` waits for `get_webview_window("main")` to be `None` before
-  rebuilding, and the "main window gone → quit" logic lives in
+  `activate` waits for every company window to be gone before
+  rebuilding, and the "last company window gone → quit" logic lives in
   `RunEvent::WindowEvent(Destroyed)` (after Tauri drops the label), not the
   per-window handler.
 - Graceful shutdown: axum's graceful shutdown waits for open SSE streams

@@ -2,11 +2,13 @@
 // the desktop app's local session and fixture mode have nothing to sign out of).
 
 import { Avatar, Menu, Text, UnstyledButton } from '@mantine/core';
-import { IconBuildingStore, IconLogout, IconUserCircle } from '@tabler/icons-react';
+import { IconAppWindow, IconBuildingStore, IconLogout, IconUserCircle } from '@tabler/icons-react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router';
 import { useApi } from '~/api/context';
 import { useSession } from '~/api/hooks';
+import { openNewWindow } from '~/lib/newWindow';
+import { useIsMobile } from '~/lib/useMobile';
 import { useOpenWindow } from '~/windows/WindowsProvider';
 import { paths } from '~/windows/paths';
 
@@ -38,6 +40,7 @@ export function UserMenu() {
   const signOut = useSignOut();
   const open = useOpenWindow();
   const navigate = useNavigate();
+  const mobile = useIsMobile();
   if (!data) return null;
   const { user } = data;
   return (
@@ -66,6 +69,12 @@ export function UserMenu() {
         <Menu.Item leftSection={<IconBuildingStore size={14} />} onClick={() => void navigate('/companies')}>
           Open another company
         </Menu.Item>
+        {/* Two companies side by side: the list in a new window (desktop app) or tab (browser). */}
+        {!mobile && (
+          <Menu.Item leftSection={<IconAppWindow size={14} />} onClick={() => openNewWindow('/companies')}>
+            Open another company in a new window
+          </Menu.Item>
+        )}
         {signOut && (
           <Menu.Item leftSection={<IconLogout size={14} />} onClick={signOut}>
             Sign out

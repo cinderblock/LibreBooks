@@ -24,6 +24,9 @@ keyboard-first data entry, with no subscription. MIT licensed.
     which can also serve them to phones and other computers on your network;
   - a **headless server** (one binary or a container), first class;
   - the desktop app as a **thin client** to a remote server.
+
+  Several companies can be open at once, each in its own window ("New window"
+  in the company list, or Shift+click a company; a new tab in a browser).
 - **Phones are first class.** The web UI is built for a phone as much as for a
   desk: snap a receipt, check a balance, enter a bill.
 - **Keyboard first.** QuickBooks' shortcuts (Ctrl+W write checks, Ctrl+I

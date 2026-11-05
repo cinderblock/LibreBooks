@@ -7,7 +7,7 @@
 
 import { Alert, Anchor, Button, Card, Center, FileInput, Group, Loader, Modal, Stack, Text, TextInput, Title } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
-import { IconFolderOpen, IconPlus } from '@tabler/icons-react';
+import { IconAppWindow, IconFolderOpen, IconPlus } from '@tabler/icons-react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
 import { Navigate, useNavigate } from 'react-router';
@@ -18,6 +18,8 @@ import { useSession } from '~/api/hooks';
 import { sk } from '~/api/keys';
 import type { CompanyInfo, CompanySummary, Session } from '~/api/types';
 import { formatBytes } from '~/lib/format';
+import { openNewWindow, wantsNewWindow } from '~/lib/newWindow';
+import { useIsMobile } from '~/lib/useMobile';
 import { CompanyInfoFields } from '~/screens/CompanyInfoFields';
 
 export function CompanyPicker({ force = false }: { /** Always show the list (the user menu's "Open another company"), even with one company. */ force?: boolean }) {
@@ -26,6 +28,7 @@ export function CompanyPicker({ force = false }: { /** Always show the list (the
   const session = useSession();
   const [creating, setCreating] = useState(false);
   const [importing, setImporting] = useState(false);
+  const mobile = useIsMobile();
   if (session.isLoading) {
     return (
       <Center h="100dvh">
@@ -73,10 +76,26 @@ export function CompanyPicker({ force = false }: { /** Always show the list (the
           </Text>
         )}
         {companies.map((c) => (
-          <Card key={c.id} withBorder>
-            <Button variant="subtle" justify="space-between" fullWidth onClick={() => navigate(`/c/${encodeURIComponent(c.id)}/home`)}>
-              {c.name}
-            </Button>
+          <Card key={c.id} withBorder p="xs" data-testid="company-row">
+            <Group gap="xs" wrap="nowrap">
+              <Button
+                variant="subtle"
+                justify="space-between"
+                style={{ flex: 1 }}
+                onClick={(e) => (wantsNewWindow(e) ? openNewWindow(home(c.id)) : navigate(home(c.id)))}
+                onAuxClick={(e) => {
+                  if (e.button === 1) openNewWindow(home(c.id));
+                }}
+              >
+                {c.name}
+              </Button>
+              {/* Another company open beside this window's (a new window in the desktop app, a new tab in a browser). */}
+              {!mobile && (
+                <Button variant="default" size="xs" leftSection={<IconAppWindow size={14} />} onClick={() => openNewWindow(home(c.id))} aria-label={`Open ${c.name} in a new window`}>
+                  New window
+                </Button>
+              )}
+            </Group>
           </Card>
         ))}
         {admin && (
@@ -95,6 +114,8 @@ export function CompanyPicker({ force = false }: { /** Always show the list (the
     </Center>
   );
 }
+
+const home = (id: string) => `/c/${encodeURIComponent(id)}/home`;
 
 /** QBD's New Company: the information, then the books are empty and ready. */
 function NewCompanyModal({ opened, onClose, onCreated }: { opened: boolean; onClose(): void; onCreated(company: CompanySummary): void }) {

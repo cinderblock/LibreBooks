@@ -10,6 +10,8 @@ use crate::backend::{Backend, BackendKind, DevOverrides};
 
 pub const MAIN: &str = "main";
 pub const SETTINGS: &str = "settings";
+/// Other company windows (opened from a page): `company-1`, `company-2`…
+const EXTRA_PREFIX: &str = "company-";
 
 /// What the SPA learns about its host, as `window.__LIBREBOOKS__` (see
 /// `plans/desktop.md`, "Contract with the web UI").
@@ -108,7 +110,8 @@ fn open_outside(app: &AppHandle, url: &Url) {
     }
 }
 
-/// Create the main window for `backend`. Any previous one must be closed.
+/// Create the main window for `backend`. Any previous company windows must be
+/// closed.
 pub fn open_main(
     app: &AppHandle,
     backend: &Backend,
@@ -123,21 +126,89 @@ pub fn open_main(
     if let Some(u) = &dev.web_dev_url {
         trusted.push(u.origin().ascii_serialization());
     }
-    let script = init_script(backend, &trusted);
+    let recipe = Recipe {
+        script: init_script(backend, &trusted),
+        trusted,
+        local: matches!(backend.kind, BackendKind::Local { .. }),
+    };
+    build_company_window(app, &recipe, MAIN, start)
+}
 
+/// What every company window of one backend is built from.
+#[derive(Clone)]
+struct Recipe {
+    script: String,
+    trusted: Vec<String>,
+    local: bool,
+}
+
+/// Whether `label` is a window showing the web UI (the main window or another
+/// company window), as opposed to the settings window.
+pub fn is_company_window(label: &str) -> bool {
+    label == MAIN || label.starts_with(EXTRA_PREFIX)
+}
+
+/// The windows showing the web UI, the main window first.
+pub fn company_windows(app: &AppHandle) -> Vec<WebviewWindow> {
+    let mut all: Vec<WebviewWindow> = app
+        .webview_windows()
+        .into_values()
+        .filter(|w| is_company_window(w.label()))
+        .collect();
+    all.sort_by_key(|w| (w.label() != MAIN, w.label().to_owned()));
+    all
+}
+
+/// The company window to act on: the focused one, else a visible one (the
+/// main window first), else any.
+pub fn front_company_window(app: &AppHandle) -> Option<WebviewWindow> {
+    let all = company_windows(app);
+    let pick = all
+        .iter()
+        .position(|w| w.is_focused().unwrap_or(false))
+        .or_else(|| all.iter().position(|w| w.is_visible().unwrap_or(false)))
+        .unwrap_or(0);
+    all.into_iter().nth(pick)
+}
+
+/// The label of the next extra company window: `company-1`, `company-2`…
+fn next_extra_label() -> String {
+    static NEXT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(1);
+    let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    format!("{EXTRA_PREFIX}{n}")
+}
+
+/// Whether a page's request for a new window (`window.open`, a Shift+click…)
+/// becomes another company window: only for the app's own pages.
+fn opens_company_window(url: &Url, trusted: &[String]) -> bool {
+    matches!(url.scheme(), "http" | "https") && trusted_url(url, trusted)
+}
+
+/// Build a window showing the web UI at `start`: the main window, or another
+/// one opened from a page (each with the same token, guards and WebView2 set-up).
+fn build_company_window(
+    app: &AppHandle,
+    recipe: &Recipe,
+    label: &str,
+    start: Url,
+) -> tauri::Result<WebviewWindow> {
     let nav_app = app.clone();
-    let nav_trusted = trusted.clone();
+    let nav_trusted = recipe.trusted.clone();
     let popup_app = app.clone();
+    let popup_recipe = recipe.clone();
+    let selftest = label == MAIN
+        && cfg!(debug_assertions)
+        && std::env::var_os("LIBREBOOKS_SELFTEST").is_some();
     let mut builder = WebviewWindowBuilder::new(
         app,
-        MAIN,
+        label,
         // Blank first, so the webview's settings are in place before the SPA loads.
         WebviewUrl::External(Url::parse("about:blank").expect("valid")),
     )
     .title("LibreBooks")
     .inner_size(1280.0, 820.0)
     .min_inner_size(720.0, 480.0)
-    .initialization_script(script)
+    .initialization_script(recipe.script.clone())
     .on_navigation(move |url| {
         if trusted_url(url, &nav_trusted) {
             true
@@ -147,21 +218,43 @@ pub fn open_main(
         }
     })
     .on_new_window(move |url, _features| {
-        open_outside(&popup_app, &url);
+        if opens_company_window(&url, &popup_recipe.trusted) {
+            // Not from inside WebView2's event: building a webview there can
+            // deadlock on Windows.
+            let app = popup_app.clone();
+            let recipe = popup_recipe.clone();
+            tauri::async_runtime::spawn(async move {
+                match build_company_window(&app, &recipe, &next_extra_label(), url) {
+                    Ok(w) => focus(&w),
+                    Err(e) => log::error!("couldn't open another window: {e}"),
+                }
+            });
+        } else {
+            open_outside(&popup_app, &url);
+        }
         NewWindowResponse::Deny
+    })
+    // The taskbar and Alt+Tab tell windows apart by the page's title, which
+    // names the company ("Invoice · TWILL · LibreBooks").
+    .on_document_title_changed(move |w, title| {
+        if selftest && title.starts_with("selftest:") {
+            log::info!("{title}");
+        } else if !title.is_empty() {
+            let _ = w.set_title(&title);
+        }
     })
     // Let the SPA receive HTML5 drag and drop (e.g. a receipt onto a bill);
     // otherwise Tauri intercepts file drops on Windows.
     .disable_drag_drop_handler()
     .devtools(cfg!(debug_assertions));
-    if cfg!(debug_assertions) && std::env::var_os("LIBREBOOKS_SELFTEST").is_some() {
+    if selftest {
         builder = self_test(builder);
     }
     let window = builder.build()?;
 
     keep_keys_for_the_app(&window);
-    if matches!(backend.kind, BackendKind::Local { .. }) {
-        answer_file_paths(&window, trusted.clone());
+    if recipe.local {
+        answer_file_paths(&window, recipe.trusted.clone());
     }
     window.navigate(start)?;
     Ok(window)
@@ -187,11 +280,6 @@ fn self_test(
                 && payload.url().scheme() == "http"
             {
                 let _ = w.eval(PROBE);
-            }
-        })
-        .on_document_title_changed(|_, title| {
-            if title.starts_with("selftest:") {
-                log::info!("{title}");
             }
         })
 }
@@ -376,8 +464,8 @@ pub fn open_settings(app: &AppHandle, welcome: bool) -> tauri::Result<()> {
             .min_inner_size(520.0, 480.0)
             .center()
             .devtools(cfg!(debug_assertions));
-    if let Some(main) = app.get_webview_window(MAIN) {
-        builder = builder.parent(&main)?;
+    if let Some(front) = front_company_window(app) {
+        builder = builder.parent(&front)?;
     }
     let w = builder.build()?;
     keep_keys_for_the_app(&w);
@@ -399,5 +487,24 @@ mod tests {
         assert!(!ok("http://localhost:4321/"));
         assert!(!ok("https://example.com/"));
         assert!(!ok("data:text/html,hi"));
+    }
+
+    #[test]
+    fn only_the_apps_own_pages_open_another_window() {
+        let trusted = vec!["http://127.0.0.1:4321".to_owned()];
+        let new = |s: &str| opens_company_window(&Url::parse(s).unwrap(), &trusted);
+        assert!(new("http://127.0.0.1:4321/c/abc/home"));
+        assert!(new("http://127.0.0.1:4321/companies?fixtures=1"));
+        assert!(!new("blob:http://127.0.0.1:4321/5d1f"));
+        assert!(!new("about:blank"));
+        assert!(!new("https://example.com/"));
+        assert!(!new("http://127.0.0.1:9999/c/abc/home"));
+    }
+
+    #[test]
+    fn company_windows_are_main_and_the_extra_ones() {
+        assert!(is_company_window(MAIN));
+        assert!(is_company_window(&next_extra_label()));
+        assert!(!is_company_window(SETTINGS));
     }
 }

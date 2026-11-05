@@ -143,12 +143,16 @@ pub async fn activate(app: &AppHandle) {
     let shell = app.state::<Shell>();
     shell.restarting.store(true, Ordering::SeqCst);
     let mut slot = shell.backend.lock().await;
-    if let Some(w) = app.get_webview_window(window::MAIN) {
-        // destroy, not close: skip the close handler (which might hide it).
-        let _ = w.destroy();
-        // The label is only released once the event loop has processed it.
+    // Every company window belongs to the old backend (its token, its origin).
+    let old = window::company_windows(app);
+    if !old.is_empty() {
+        for w in old {
+            // destroy, not close: skip the close handler (which might hide it).
+            let _ = w.destroy();
+        }
+        // The labels are only released once the event loop has processed them.
         for _ in 0..100 {
-            if app.get_webview_window(window::MAIN).is_none() {
+            if window::company_windows(app).is_empty() {
                 break;
             }
             tokio::time::sleep(Duration::from_millis(20)).await;
@@ -193,20 +197,20 @@ pub async fn activate(app: &AppHandle) {
     }
 }
 
-/// Closing the main window quits, unless the books are being served to the
-/// network, in which case it only hides (the tray icon brings it back).
+/// Closing a company window closes just that one. Closing the last one quits,
+/// unless the books are being served to the network, in which case it only
+/// hides (the tray icon brings it back).
 fn on_window_event(window: &tauri::Window, event: &WindowEvent) {
-    if window.label() != window::MAIN {
+    if !window::is_company_window(window.label()) {
         return;
     }
     if let WindowEvent::CloseRequested { api, .. } = event {
-        let serving = window
-            .app_handle()
-            .state::<Shell>()
-            .status_snapshot()
-            .network
-            .is_some();
-        if serving {
+        let app = window.app_handle();
+        let serving = app.state::<Shell>().status_snapshot().network.is_some();
+        let others_shown = window::company_windows(app)
+            .iter()
+            .any(|w| w.label() != window.label() && w.is_visible().unwrap_or(false));
+        if serving && !others_shown {
             api.prevent_close();
             let _ = window.hide();
         }
@@ -222,16 +226,16 @@ fn on_run_event(app: &AppHandle, event: RunEvent) {
                 api.prevent_exit();
             }
         }
-        // The main window gone for good (not being rebuilt) quits the app, even
-        // if the settings window is still open. (Here rather than in the window
-        // handler: by now Tauri has dropped the label.)
+        // The last company window gone for good (not being rebuilt) quits the
+        // app, even if the settings window is still open. (Here rather than in
+        // the window handler: by now Tauri has dropped the label.)
         RunEvent::WindowEvent {
             label,
             event: WindowEvent::Destroyed,
             ..
-        } if label == window::MAIN
+        } if window::is_company_window(&label)
             && !app.state::<Shell>().restarting.load(Ordering::SeqCst)
-            && app.get_webview_window(window::MAIN).is_none() =>
+            && window::company_windows(app).is_empty() =>
         {
             app.exit(0);
         }
