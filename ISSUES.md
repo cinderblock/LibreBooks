@@ -51,3 +51,14 @@ CLI headless started the desktop app instead. The workaround for now is
 `CARGO_TARGET_DIR=target/desktop` for desktop builds. CI and the release
 workflow should be checked for the same collision; renaming one binary, or
 keeping a separate target dir everywhere, would fix it.
+
+## Desktop app: per-device preferences reset on every launch
+
+Seen 2026-11-05 adding the alpha notice: the desktop app serves the SPA from
+`127.0.0.1:<random port>` (`desktop/src-tauri/src/backend.rs`, unless
+`LIBREBOOKS_DESKTOP_PORT` is set), so each launch is a new origin with empty
+`localStorage`. Everything in `web/src/lib/prefs.ts` (Enter behaviour, report
+export format and paper) and the other `localStorage` keys are forgotten at
+every start. The
+alpha notice avoided this by keeping its answer on the server. Either a stable
+port/origin for the desktop webview, or prefs stored server-side, would fix it.
