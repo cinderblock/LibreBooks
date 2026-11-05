@@ -67,10 +67,29 @@ Cameron said go 2026-11-05. Until then `release.yml` had never run (no tags).
 - [x] `release.yml`: pass `tauri.release.conf.json` (updater bundles; was an
       ISSUES entry), and a generated `tauri.msi.conf.json` so the MSI gets a
       numeric version (`0.1.0-alpha.1` → `0.1.0.1`).
-- [ ] Local MSI/NSIS build with the prerelease version (current step)
-- [ ] Commit, push, tag `v0.1.0-alpha.1`, watch the run
-- [ ] Check the release's assets: installers, `latest.json`, `.sig` files,
-      `SHA256SUMS(.minisig)`, the container image
+- [x] Local MSI/NSIS build with the prerelease version: both built
+      (`LibreBooks_0.1.0-alpha.1_x64_en-US.msi`, `…_x64-setup.exe`).
+- [x] Pushed, tagged `v0.1.0-alpha.1` (12:41 PM PST, 20:41Z). Run
+      42105661610 **failed**, with two bugs:
+  - The draft job read the new draft's id back from the release list right
+    after creating it and got an empty answer (the list lags), so Windows
+    built and signed both installers and then logged "No releaseId or tagName
+    provided, skipping all uploads".
+  - Linux: `invalid version "0.1.0-alpha.1": contains invalid character` —
+    RPM versions can't contain `-`.
+  - The server binaries and the container image built fine; the draft
+    (id 435708590) kept the four server archives. Nothing was published.
+- [x] Fix `4e45caa`: the id comes from the create call; a prerelease's
+      Linux desktop build is `--bundles appimage,deb`.
+- [x] Re-ran by hand for the same tag (run 42109872107, 1:08 PM PST, 21:08Z):
+      every job passed. Published as a prerelease at 1:33 PM PST (21:33Z):
+      https://github.com/cinderblock/LibreBooks/releases/tag/v0.1.0-alpha.1
+- [x] Checked: Windows NSIS + MSI, Linux AppImage + deb, each with a `.sig`;
+      `latest.json` (all six platforms); the four server archives;
+      `SHA256SUMS.minisig` verifies against `minisign.pub` (trusted comment
+      `librebooks v0.1.0-alpha.1`); image `ghcr.io/cinderblock/librebooks`
+      tagged `v0.1.0-alpha.1` and `prerelease`.
+- [ ] Not tried: installing from these installers on a real machine.
 
 Notes:
 
