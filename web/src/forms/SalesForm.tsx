@@ -6,6 +6,7 @@
 
 import { Alert, Button, Checkbox, Collapse, Group, Select, Table, Text, TextInput, Textarea } from '@mantine/core';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCompanyId } from '~/api/context';
 import { useAccountIndex, useCompanyInfo, useEntityIndex, useIndex, useItemIndex, useItems, useLoadOrder, useNextNumber, useOpenOrders, usePaymentMethods, useSalesReps, useSalesTaxCodes, useTerms, useTxnPreview, useTxns } from '~/api/hooks';
 import { describeError } from '~/api/errors';
 import { notifications } from '@mantine/notifications';
@@ -74,7 +75,8 @@ const NON_POSTING_NOTE: Partial<Record<SalesType, string>> = {
   Estimate: 'An estimate is a quote. It posts nothing; the invoice made from it does.',
   SalesOrder: 'A sales order is a promise to sell. It posts nothing; the invoice made from it does.',
 };
-const TAX_ITEM_KEY = 'librebooks.sales.taxItem';
+/** The sales tax item last chosen, remembered per company. */
+const TAX_ITEM_KEY = (co: string) => `librebooks.${co}.sales.taxItem`;
 
 /** Address ↔ the textarea people edit (one line per row; the structured fields stay). */
 function addressText(a: Address): string {
@@ -90,6 +92,7 @@ function parseAddress(text: string, prev: Address): Address {
 }
 
 export function SalesForm({ type, saved, initial }: { type: SalesType; saved: Txn | null; initial: Txn | null }) {
+  const co = useCompanyId();
   const { data: info } = useCompanyInfo();
   const prefs = info?.preferences;
   const entities = useEntityIndex();
@@ -112,7 +115,7 @@ export function SalesForm({ type, saved, initial }: { type: SalesType; saved: Tx
   const taxItems = useMemo(() => itemList.filter((i) => (i.item_type === 'SalesTax' || i.item_type === 'SalesTaxGroup') && i.is_active), [itemList]);
   const defaults = useMemo<SalesDefaults>(
     () => ({
-      taxItemId: prefs?.sales_tax_enabled === false ? null : (localStorage.getItem(TAX_ITEM_KEY) ?? taxItems[0]?.id ?? null),
+      taxItemId: prefs?.sales_tax_enabled === false ? null : (localStorage.getItem(TAX_ITEM_KEY(co)) ?? taxItems[0]?.id ?? null),
       taxCodeId: codeList.find((c) => c.is_taxable && c.name === 'Tax')?.id ?? codeList.find((c) => c.is_taxable)?.id ?? null,
       depositTo: prefs?.use_undeposited_funds === false ? (prefs.default_deposit_account ?? null) : null,
     }),
@@ -571,7 +574,7 @@ export function SalesForm({ type, saved, initial }: { type: SalesType; saved: Tx
               value={draft.sales_tax_item_id}
               onChange={(id) => {
                 update({ sales_tax_item_id: id });
-                if (id) localStorage.setItem(TAX_ITEM_KEY, id);
+                if (id) localStorage.setItem(TAX_ITEM_KEY(co), id);
               }}
               clearable
               aria-label="Sales tax item"

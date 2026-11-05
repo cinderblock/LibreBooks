@@ -99,7 +99,8 @@ const FORM_TITLE: Record<PurchaseType, string> = {
   PurchaseOrder: 'Create Purchase Orders',
 };
 
-const lastAccountKey = (t: PurchaseType) => `librebooks.purchase.${t}.account`;
+/** The account a check or charge last used, remembered per company. */
+const lastAccountKey = (co: string, t: PurchaseType) => `librebooks.${co}.purchase.${t}.account`;
 
 function purchaseSpec(type: PurchaseType, defaultAccount: () => string | null): TxnFormSpec<PurchaseDraft> {
   return {
@@ -146,7 +147,7 @@ export function PurchaseForm({ type, saved, initial }: { type: PurchaseType; sav
   const [drawing, setDrawing] = useState<{ order: Txn; progress: OrderProgress; target: TxnType } | null>(null);
 
   const defaultAccount = useCallback(() => {
-    const remembered = localStorage.getItem(lastAccountKey(type));
+    const remembered = localStorage.getItem(lastAccountKey(co, type));
     if (remembered) return remembered;
     if (type === 'Check') return info?.preferences.default_check_account ?? null;
     return null;
@@ -174,7 +175,7 @@ export function PurchaseForm({ type, saved, initial }: { type: PurchaseType; sav
 
   // Remember the account a saved check/charge used, as the default next time.
   useEffect(() => {
-    if (cash && draft.account_id && form.saved) localStorage.setItem(lastAccountKey(t), draft.account_id);
+    if (cash && draft.account_id && form.saved) localStorage.setItem(lastAccountKey(co, t), draft.account_id);
   }, [form.saved?.edit_seq]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const account = draft.account_id ? accounts.get(draft.account_id) : undefined;

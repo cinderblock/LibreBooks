@@ -26,7 +26,8 @@ import { FormActionBar, ShortcutButton } from './common';
 import { billRows, buildBillPayments, cashFor, filterRows, open as openOf, payBillsTotals, selectAll, selectRow, setRowAmount, setRowCredit, setRowDiscount, suggestedDiscount, validatePayBills, type BillRow } from './billPayments';
 import classes from './forms.module.css';
 
-const LAST_ACCOUNT_KEY = 'librebooks.payBills.account';
+/** The account last used to pay bills, remembered per company. */
+const LAST_ACCOUNT_KEY = (co: string) => `librebooks.${co}.payBills.account`;
 
 export function PayBills() {
   const api = useApi();
@@ -45,7 +46,7 @@ export function PayBills() {
   const [showAll, setShowAll] = useState(false);
   const [dueBy, setDueBy] = useState<string | null>(addDays(todayIso(), 7));
   const [date, setDate] = useState(todayIso());
-  const [accountId, setAccountId] = useState<string | null>(() => localStorage.getItem(LAST_ACCOUNT_KEY) ?? info?.preferences.default_check_account ?? null);
+  const [accountId, setAccountId] = useState<string | null>(() => localStorage.getItem(LAST_ACCOUNT_KEY(co)) ?? info?.preferences.default_check_account ?? null);
   const [method, setMethod] = useState<'print' | 'assign'>('assign');
   const [number, setNumber] = useState('');
   const [discountAccount, setDiscountAccount] = useState<string | null>(null);
@@ -99,7 +100,7 @@ export function PayBills() {
     const saved: Txn[] = [];
     try {
       for (const t of txns) saved.push((await api.createTxn(co, t)).txn);
-      localStorage.setItem(LAST_ACCOUNT_KEY, account.id);
+      localStorage.setItem(LAST_ACCOUNT_KEY(co), account.id);
       invalidateTxnDerived(qc, co);
       setDone(saved);
       setRows((r) => selectAll(r, false));

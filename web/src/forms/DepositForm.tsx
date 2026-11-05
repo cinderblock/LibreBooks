@@ -4,6 +4,7 @@
 
 import { Button, Checkbox, Group, Modal, Stack, Table, Text, TextInput } from '@mantine/core';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCompanyId } from '~/api/context';
 import { useAccounts, useCompanyInfo, useEntityIndex, usePaymentMethods, useUndeposited } from '~/api/hooks';
 import type { SaveOutcome, Txn, TxnSummary } from '~/api/types';
 import { DateField } from '~/inputs/DateField';
@@ -36,7 +37,8 @@ import {
 import { FormBadges, TxnFormActions, useTxnForm } from './useTxnForm';
 import classes from './forms.module.css';
 
-const LAST_ACCOUNT_KEY = 'librebooks.deposit.account';
+/** The account last deposited to, remembered per company. */
+const LAST_ACCOUNT_KEY = (co: string) => `librebooks.${co}.deposit.account`;
 
 function spec(defaultAccount: () => string | null): TxnFormSpec<DepositDraft> {
   return {
@@ -57,12 +59,13 @@ function spec(defaultAccount: () => string | null): TxnFormSpec<DepositDraft> {
 }
 
 export function DepositForm({ saved, initial }: { saved: Txn | null; initial: Txn | null }) {
+  const co = useCompanyId();
   const { data: info } = useCompanyInfo();
   const { data: accountList = [] } = useAccounts();
   const entities = useEntityIndex();
   const { data: methods = [] } = usePaymentMethods();
   const firstField = useRef<HTMLInputElement>(null);
-  const defaultAccount = () => localStorage.getItem(LAST_ACCOUNT_KEY) ?? info?.preferences.default_deposit_account ?? null;
+  const defaultAccount = () => localStorage.getItem(LAST_ACCOUNT_KEY(co)) ?? info?.preferences.default_deposit_account ?? null;
   const form = useTxnForm({ spec: useMemo(() => spec(defaultAccount), [info]), saved, initial, onSavedNew: () => firstField.current?.focus() }); // eslint-disable-line react-hooks/exhaustive-deps
   const { draft, update, errors, mobile, enterBehavior } = form;
   const uf = useMemo(() => accountList.find((a) => a.role === 'UndepositedFunds'), [accountList]);
@@ -189,7 +192,7 @@ export function DepositForm({ saved, initial }: { saved: Txn | null; initial: Tx
           value={draft.account_id}
           onChange={(id) => {
             update({ account_id: id });
-            if (id) localStorage.setItem(LAST_ACCOUNT_KEY, id);
+            if (id) localStorage.setItem(LAST_ACCOUNT_KEY(co), id);
           }}
           error={errors.header.account}
           inputRef={firstField}

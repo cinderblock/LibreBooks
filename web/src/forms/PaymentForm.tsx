@@ -6,6 +6,7 @@
 
 import { Button, Card, Checkbox, Group, Popover, Select, Stack, Table, Text, TextInput } from '@mantine/core';
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCompanyId } from '~/api/context';
 import { useAccountIndex, useCompanyInfo, useEntityIndex, useNextNumber, useOpenItems, usePaymentMethods, useTxns } from '~/api/hooks';
 import type { SaveOutcome, Txn, TxnSummary } from '~/api/types';
 import { DateField } from '~/inputs/DateField';
@@ -48,7 +49,8 @@ import classes from './forms.module.css';
 
 export const PAYMENT_FORM_SLUG: Record<PaymentType, string> = { ReceivePayment: 'receive-payment', BillPaymentCheck: 'pay-bills', BillPaymentCreditCard: 'pay-bills' };
 const NOUN: Record<PaymentType, string> = { ReceivePayment: 'payment', BillPaymentCheck: 'bill payment', BillPaymentCreditCard: 'bill payment' };
-const LAST_ACCOUNT_KEY = 'librebooks.payment.account';
+/** The account last paid bills from, remembered per company. */
+const LAST_ACCOUNT_KEY = (co: string) => `librebooks.${co}.payment.account`;
 
 function spec(type: PaymentType, defaultAccount: () => string | null): TxnFormSpec<PaymentDraft> {
   return {
@@ -69,6 +71,7 @@ function spec(type: PaymentType, defaultAccount: () => string | null): TxnFormSp
 }
 
 export function PaymentForm({ type, saved, initial }: { type: PaymentType; saved: Txn | null; initial: Txn | null }) {
+  const co = useCompanyId();
   const { data: info } = useCompanyInfo();
   const prefs = info?.preferences;
   const entities = useEntityIndex();
@@ -76,7 +79,7 @@ export function PaymentForm({ type, saved, initial }: { type: PaymentType; saved
   const { data: methods = [] } = usePaymentMethods();
   const firstField = useRef<HTMLInputElement>(null);
   const kind = paymentKind(type);
-  const defaultAccount = () => (kind === 'receivable' ? (prefs?.use_undeposited_funds === false ? (prefs.default_deposit_account ?? null) : null) : localStorage.getItem(LAST_ACCOUNT_KEY));
+  const defaultAccount = () => (kind === 'receivable' ? (prefs?.use_undeposited_funds === false ? (prefs.default_deposit_account ?? null) : null) : localStorage.getItem(LAST_ACCOUNT_KEY(co)));
   const form = useTxnForm({ spec: useMemo(() => spec(type, defaultAccount), [type, prefs]), saved, initial, onSavedNew: () => firstField.current?.focus() }); // eslint-disable-line react-hooks/exhaustive-deps
   const { draft, update, errors, mobile } = form;
   const autoPref = prefs?.auto_apply_payments ?? true;
@@ -153,7 +156,7 @@ export function PaymentForm({ type, saved, initial }: { type: PaymentType; saved
             onChange={(id) => {
               const acct = id ? accounts.get(id) : undefined;
               update((d) => ({ ...d, account_id: id, txn_type: acct?.account_type === 'CreditCard' ? 'BillPaymentCreditCard' : 'BillPaymentCheck', numberIsAuto: d.edit_seq === 0 }));
-              if (id) localStorage.setItem(LAST_ACCOUNT_KEY, id);
+              if (id) localStorage.setItem(LAST_ACCOUNT_KEY(co), id);
             }}
             error={errors.header.account}
             allowAddNew={false}
