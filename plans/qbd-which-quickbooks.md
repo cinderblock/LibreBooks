@@ -64,8 +64,8 @@ installed it may start 2021. So:
        there lists `24 QuickBooks Enterprise Solutions: Accountant Edition 14.0`
        and `31 QuickBooks Pro 2021` with their `qbw32.exe` paths. (Over SSH
        neither shows running: a different Windows session.) Desktop app staged
-       as `app\LibreBooks.new.exe` (67E3F55D…); a watcher swaps it in when the
-       running app exits, keeping `LibreBooks.prev.exe`.
+       as `app\LibreBooks.new.exe` (67E3F55D…), swapped in 2026-11-04 after the
+       user quit the app (previous kept as `LibreBooks.prev.exe`).
 9. [ ] **Current:** live with the user: choose 14.0 for the old company, drop or
        browse its `.QBW`, Save, close 2021, "Open in …14.0", sync. Choose 2021 for
        TWILL.
