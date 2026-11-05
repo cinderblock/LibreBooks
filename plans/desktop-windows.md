@@ -43,8 +43,14 @@ sends every popup to the system browser.
        (desktop and browser: in a browser it's a new tab), plus Shift/Ctrl/middle
        click on a company. Fixture mode is carried in the URL (it is per tab).
        The page title already named the company.
-4. [ ] **Current:** Tests (e2e for the picker action and per-company memories; desktop unit
-       tests for the URL rules), README, deploy to cad-3.
+4. [x] Tests: e2e for the picker's and the user menu's new window (63 e2e and
+       272 unit tests pass), desktop unit tests for the URL and label rules,
+       clippy. README. Committed `d3f2804`.
+5. [x] Built and deployed to cad-3 `app\LibreBooks.exe` 2026-11-05 12:23 AM PST
+       (9F72CEFE…; previous kept as `LibreBooks.prev.exe`).
+6. [ ] **Current:** the user tries two windows on cad-3 (TWILL and the old
+       company side by side). Not yet seen in a real desktop session: only the
+       browser path is tested end to end.
 
 ## Findings / gotchas
 
