@@ -7,8 +7,8 @@
 /// `plans/desktop.md`, Findings.
 #[test]
 fn object_prototype_is_not_frozen() {
-    let conf: serde_json::Value = serde_json::from_str(include_str!("../tauri.conf.json"))
-        .expect("tauri.conf.json parses");
+    let conf: serde_json::Value =
+        serde_json::from_str(include_str!("../tauri.conf.json")).expect("tauri.conf.json parses");
     let freeze = conf
         .pointer("/app/security/freezePrototype")
         .and_then(serde_json::Value::as_bool)

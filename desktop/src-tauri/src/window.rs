@@ -274,14 +274,13 @@ fn self_test(
   const bare = await fetch(lb.apiBase + '/session');
   document.title = 'selftest: backend=' + lb.backend + ' session=' + r.status + ' without-token=' + bare.status + ' body=' + (await r.text()).slice(0, 200);
 })().catch((e) => { document.title = 'selftest: error ' + e; });";
-    builder
-        .on_page_load(|w, payload| {
-            if payload.event() == tauri::webview::PageLoadEvent::Finished
-                && payload.url().scheme() == "http"
-            {
-                let _ = w.eval(PROBE);
-            }
-        })
+    builder.on_page_load(|w, payload| {
+        if payload.event() == tauri::webview::PageLoadEvent::Finished
+            && payload.url().scheme() == "http"
+        {
+            let _ = w.eval(PROBE);
+        }
+    })
 }
 
 /// Make sure the webview passes QuickBooks' shortcuts (Ctrl+R register, Ctrl+F
@@ -387,7 +386,10 @@ mod webview2 {
             let mut source = PWSTR::null();
             args.Source(&raw mut source).ok()?;
             let source = take_pwstr(source);
-            let origin = url::Url::parse(&source).ok()?.origin().ascii_serialization();
+            let origin = url::Url::parse(&source)
+                .ok()?
+                .origin()
+                .ascii_serialization();
             if !trusted.contains(&origin) {
                 return None;
             }

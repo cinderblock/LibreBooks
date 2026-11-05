@@ -136,8 +136,8 @@ pub fn quickbooks_here() -> Vec<crate::which::QuickBooksInstall> {
 pub fn open_in_quickbooks(choice: Option<u32>, company_file: &str) -> Result<String, QbdError> {
     let installs = lb_qbsdk::installs::installed();
     let running = lb_qbsdk::installs::running(&installs);
-    let install = crate::which::to_open(choice, &installs, &running, company_file)
-        .map_err(session_error)?;
+    let install =
+        crate::which::to_open(choice, &installs, &running, company_file).map_err(session_error)?;
     let file = company_file.trim();
     if !Path::new(file).is_file() {
         return Err(session_error(format!("{file} doesn't exist")));
@@ -180,8 +180,8 @@ impl SdkSession {
     pub fn open(config: &SdkConfig) -> Result<SdkSession, QbdError> {
         let installs = lb_qbsdk::installs::installed();
         let running = lb_qbsdk::installs::running(&installs);
-        let want = crate::which::check(config.quickbooks, &installs, &running)
-            .map_err(session_error)?;
+        let want =
+            crate::which::check(config.quickbooks, &installs, &running).map_err(session_error)?;
         let session = SdkSession::connect(config)?;
         if let Err(e) = session.is_version(want, &installs) {
             session.close();
@@ -191,7 +191,11 @@ impl SdkSession {
     }
 
     /// Ask QuickBooks which it is, and refuse anything but `want`.
-    fn is_version(&self, want: Option<u32>, installs: &[lb_qbsdk::Install]) -> Result<(), QbdError> {
+    fn is_version(
+        &self,
+        want: Option<u32>,
+        installs: &[lb_qbsdk::Install],
+    ) -> Result<(), QbdError> {
         let Some(want) = want else { return Ok(()) };
         let answer = self.ask_blocking(crate::qbxml::request::host(1).xml)?;
         match crate::which::host_major(&answer) {
@@ -205,7 +209,10 @@ impl SdkSession {
                 };
                 Err(session_error(format!(
                     "connected to {}, but this company syncs from {}; disconnected before reading anything",
-                    got.map_or_else(|| "a QuickBooks that didn't say its version".to_owned(), name),
+                    got.map_or_else(
+                        || "a QuickBooks that didn't say its version".to_owned(),
+                        name
+                    ),
                     name(want)
                 )))
             }

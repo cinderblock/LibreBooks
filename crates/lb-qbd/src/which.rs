@@ -40,10 +40,10 @@ pub fn describe(installs: &[Install], running: &[Running]) -> Vec<QuickBooksInst
 }
 
 fn product(installs: &[Install], major: u32) -> String {
-    installs
-        .iter()
-        .find(|i| i.major == major)
-        .map_or_else(|| format!("QuickBooks version {major}"), |i| i.product.clone())
+    installs.iter().find(|i| i.major == major).map_or_else(
+        || format!("QuickBooks version {major}"),
+        |i| i.product.clone(),
+    )
 }
 
 /// The version a company syncs from: its choice, or the only one installed.
@@ -167,7 +167,10 @@ mod tests {
 
     fn two() -> Vec<Install> {
         vec![
-            install(24, "QuickBooks Enterprise Solutions: Accountant Edition 14.0"),
+            install(
+                24,
+                "QuickBooks Enterprise Solutions: Accountant Edition 14.0",
+            ),
             install(31, "QuickBooks Pro 2021"),
         ]
     }
@@ -196,7 +199,12 @@ mod tests {
     #[test]
     fn nothing_running_refuses_rather_than_letting_the_sdk_start_one() {
         let e = check(Some(24), &two(), &[]).unwrap_err();
-        assert!(e.contains("Open the company file in QuickBooks Enterprise Solutions: Accountant Edition 14.0"), "{e}");
+        assert!(
+            e.contains(
+                "Open the company file in QuickBooks Enterprise Solutions: Accountant Edition 14.0"
+            ),
+            "{e}"
+        );
     }
 
     #[test]

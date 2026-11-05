@@ -74,7 +74,11 @@ pub fn installed() -> Vec<Install> {
         }
         close(root);
     }
-    out.sort_by(|a, b| a.major.cmp(&b.major).then_with(|| a.product.cmp(&b.product)));
+    out.sort_by(|a, b| {
+        a.major
+            .cmp(&b.major)
+            .then_with(|| a.product.cmp(&b.product))
+    });
     out
 }
 
@@ -220,7 +224,9 @@ fn string(key: HKEY, sub: &str, value: &str) -> Option<String> {
             Some(&raw mut bytes),
         )
     };
-    (r == ERROR_SUCCESS).then(|| wide_to_string(&buf)).filter(|s| !s.is_empty())
+    (r == ERROR_SUCCESS)
+        .then(|| wide_to_string(&buf))
+        .filter(|s| !s.is_empty())
 }
 
 #[cfg(test)]
