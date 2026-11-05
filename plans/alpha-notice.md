@@ -53,6 +53,10 @@ to be accepted (or the change is not made).
 - [x] e2e: `storageState` seed in `playwright.config.ts`; `desktop.spec.ts` "the alpha notice"
 - [x] README + plans/api.md
 - [x] Checks pass: lb-auth, lb-server, clippy, web `bun run check` (282), e2e (64/64)
+- [x] Deployed to cad-3 2026-11-05 2:42 AM PST (10:42Z): `app\LibreBooks.exe`
+      (FFD6D314…) and `bin\librebooks.exe` (763CF33C…), both previous kept as
+      `*.prev.exe`. The CLI went too: the auth DB migration (2) would leave an
+      older CLI refusing a newer auth database. Not yet opened by anyone.
 
 ## Where things are
 
@@ -74,5 +78,11 @@ to be accepted (or the change is not made).
 - Global shortcuts are already suppressed while any `aria-modal` is open
   (`KeyboardProvider.modalOpen`), so a second Alt+A can't double-save under
   the notice.
+- Desktop build: `CARGO_TARGET_DIR` must be **absolute**
+  (`$PWD/target/desktop`). A relative one is taken from `desktop/src-tauri`,
+  so the build lands in `desktop/src-tauri/target/desktop` and the old exe in
+  `target/desktop` looks current (same hash as the last deploy: caught that way).
+- Over SSH, `powershell -Command -` with a multi-line script silently did
+  nothing; `scp` the script and run it with `-File`.
 - Playwright's `storageState` seeds the fixture acceptance; one
   `test.use({ storageState: { cookies: [], origins: [] } })` opts out.
