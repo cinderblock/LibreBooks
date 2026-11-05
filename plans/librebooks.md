@@ -146,6 +146,17 @@ user):
     `?` overlay); the desktop app captures the real ones.
 14. **Repo layout**: Cargo workspace under `crates/`, the SPA under `web/`, the
     Tauri app under `desktop/`. Bun workspace for JS. Crates are prefixed `lb-`.
+15. **Payroll: both import and calculation** (user, 2026-11-05: "why not
+    both?"). In this order: first, record pay runs, either entered by hand or
+    imported from a payroll provider (Gusto, ADP and the like: their journal
+    or CSV export, or API), as paychecks and liability checks with payroll
+    items, so the books and payroll reports are right whoever runs payroll.
+    Second, a calculation engine (withholding tables, employer taxes,
+    liabilities, 940/941/W-2/W-3) as its own track on top of the same records.
+    Tax tables change every year (federal, every state, some localities), so
+    the engine needs a yearly-update story and must say which tables it used.
+    Not "calculation instead of import": a company on a payroll service still
+    needs import.
 
 ## Architecture
 
@@ -288,11 +299,49 @@ Phases are ordered; each ends usable. **Current step is marked ▶.**
 - Phase 7 — Feeds
   - OFX/QFX/QBO/CSV import, Bank Feeds queue, rules, matching, SimpleFIN,
     OFX Direct Connect, Plaid/Teller (BYO keys), Amazon, Stripe/PayPal.
-- Phase 8 — Parity tail
-  - Inventory (average cost, assemblies, adjustments), sales tax, payroll records
-    (not calculation, initially), 1099s, budgets, multi-currency, statements,
-    printing checks/forms, email, memorised transactions, recurring, IIF
-    import/export, multi-user record locking UX.
+- Phase 8 — Parity tail. Gap audit against the code 2026-11-04; what other
+  projects ship is in `plans/landscape.md`. Done already: order fulfilment,
+  memorized transactions (entered by the server's housekeeping), inventory
+  costing, the Sales Tax Liability and 1099 Summary reports.
+  - **8a: what retiring QBD for TWILL needs** (its books: 616 invoices, 6,163
+    checks, ~370 vendors, 2 employees, 22 credit memos; no bills, sales tax or
+    classes):
+    1. A **document pipeline**: form templates, render to PDF, print, email
+       (SMTP or a provider). `is_to_be_printed` / `is_to_be_emailed` exist on
+       `Txn` and nothing reads them. Everything below in 8a renders through it.
+    2. Invoice, sales receipt, credit memo and estimate PDFs; print and email,
+       singly and as a batch of the "to be" queue.
+    3. Check printing: voucher and standard layouts, alignment, number
+       assignment, the to-be-printed queue (Pay Bills already leaves checks in it).
+    4. Customer statements (Statement Charges exist; generating statements doesn't).
+    5. 1099s: the 1099 Detail report, account-to-box mapping, 1099-NEC and 1096
+       print. Wanted before January filing.
+    6. Payroll, step one (decision 15): import or enter pay runs; forms for
+       paychecks and liability checks (the types and posting rules exist; the
+       Pay Employees menu entry is a placeholder); payroll items
+       (`PayrollItemWage` is not imported yet).
+  - **8b: QBD features planned, not built**: forms for Pay Sales Tax, Adjust
+    Inventory, Build Assemblies and Weekly Timesheet (all four are types in
+    lb-core already); budgets and budget-vs-actual; multi-currency (only a
+    currency on accounts and a home currency today); IIF import/export; finance
+    charges; a price level list (only a per-customer percent today); editors for
+    sales reps and customer/vendor/job types (routes exist); Add/Edit Multiple
+    List Entries; rename and delete a company (no API); multi-user record locking
+    UX (saves are conflict-checked, but nobody sees who else is editing);
+    `ARRefundCreditCard` (needs a type); a sales order's link to its estimate
+    (`plans/orders.md` question 1).
+  - **8c: reports QBD has that we don't** (46 in the catalog today):
+    Reconciliation and Discrepancy, Open Sales Orders / Open Purchase Orders,
+    Inventory Stock Status and Valuation Detail, Sales by Rep, 1099 Detail,
+    budget reports, time and payroll reports, Unbilled Costs by Job, Estimates
+    by Job.
+  - **8d: beyond QBD, worth adding** (from `plans/landscape.md`): payroll
+    calculation (decision 15, step two); migration in from QuickBooks Online's
+    export zip, GnuCash, Xero (and IIF, above); company-file encryption at rest
+    with a recovery key (backups are already encrypted); a read-only accountant
+    role and share link; receipt OCR into a bill or charge from a phone photo;
+    payment links on invoices (Stripe/PayPal); an agent-facing API with an MCP
+    server; fixed-asset depreciation schedules; a loan manager.
 - Phase 9 — Native QBW (research done 2026-10-20: `plans/qbw-research.md`)
   - `.QBW` is an SAP SQL Anywhere 17 page store with a keyless per-sector
     obfuscation; the barrier is Intuit's undocumented schema, not crypto.
@@ -408,6 +457,10 @@ Phases are ordered; each ends usable. **Current step is marked ▶.**
       received marks and the SalesOrder entity (`3f79af9`); the web UI reads
       the fulfilment route (`54b1e19`). Left: a sales order's link back to
       its estimate (`plans/orders.md`, question 1).
+      2026-11-04: gap audit against the code; Phase 8 split into 8a (TWILL's
+      cut-over: document pipeline, invoices, checks, statements, 1099s, payroll
+      records), 8b, 8c and 8d. Landscape survey in `plans/landscape.md`.
+      Recommended next after the cad-3 desktop check: 8a.1, the document pipeline.
 - [x] Phase 9: native QBW research (`plans/qbw-research.md`); five questions for
       the user there (legal review, upstream vs independent, a `.QBM` experiment,
       gap-closer priority).
